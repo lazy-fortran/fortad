@@ -61,6 +61,22 @@ module fortad
 
 contains
 
+    !! Every optional character argument follows one convention: absent, or
+    !! present and blank, both mean "use the default". A caller assembling
+    !! arguments from a command line or a configuration file then passes them
+    !! straight through, instead of branching over which ones it happens to
+    !! have - which is how `--module` came to be silently ignored in forward
+    !! mode.
+
+    logical function given(text) result(yes)
+        !! Whether an optional character argument was actually supplied.
+        character(len=*), intent(in), optional :: text
+
+        yes = .false.
+        if (.not. present(text)) return
+        yes = len_trim(text) > 0
+    end function given
+
     function fad_version() result(v)
         !! The fortad version string.
         character(len=:), allocatable :: v
@@ -119,9 +135,9 @@ contains
         do i = 1, size(independents)
             spec%independents(i) = trim(independents(i))
         end do
-        if (present(name)) spec%name = name
-        if (present(suffix)) spec%suffix = suffix
-        if (present(n_directions)) then
+        if (given(name)) spec%name = name
+        if (given(suffix)) spec%suffix = suffix
+        if (given(n_directions)) then
             spec%vector = .true.
             spec%ndir_name = n_directions
         end if
@@ -145,7 +161,7 @@ contains
         call eliminate_dead_arrays(tangent)
 
         res%ok = .true.
-        if (present(module_name)) then
+        if (given(module_name)) then
             res%code = emit_module(tangent, module_name, "fortad "//FORTAD_VERSION)
         else
             res%code = emit_proc(tangent)
@@ -200,9 +216,9 @@ contains
         do i = 1, size(independents)
             spec%independents(i) = trim(independents(i))
         end do
-        if (present(dependent)) spec%dependent = dependent
-        if (present(name)) spec%name = name
-        if (present(suffix)) spec%suffix = suffix
+        if (given(dependent)) spec%dependent = dependent
+        if (given(name)) spec%name = name
+        if (given(suffix)) spec%suffix = suffix
         if (present(with_primal)) spec%with_primal = with_primal
 
         call differentiate_reverse(primal, spec, adjoint, rstat)
@@ -223,7 +239,7 @@ contains
         call eliminate_dead_arrays(adjoint)
 
         res%ok = .true.
-        if (present(module_name)) then
+        if (given(module_name)) then
             res%code = emit_module(adjoint, module_name, "fortad "//FORTAD_VERSION)
         else
             res%code = emit_proc(adjoint)
@@ -337,7 +353,7 @@ contains
         end if
 
         res%ok = .true.
-        if (present(module_name)) then
+        if (given(module_name)) then
             res%code = emit_module(taylor, module_name, "fortad "//FORTAD_VERSION)
         else
             res%code = emit_proc(taylor)

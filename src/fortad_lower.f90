@@ -11,7 +11,7 @@ module fortad_lower
                         assignment_node, binary_op_node, identifier_node, &
                         literal_node, call_or_subscript_node, declaration_node, &
                         do_loop_node, if_node, parameter_declaration_node, &
-                        subroutine_call_node, use_statement_node, &
+                        subroutine_call_node, use_statement_node, comment_node, &
                         INPUT_MODE_STANDARD
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
                         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
@@ -220,6 +220,13 @@ contains
         if (.not. allocated(arena%entries(idx)%node)) return
 
         select type (n => arena%entries(idx)%node)
+        type is (comment_node)
+            ! A comment carries no computation. It is deliberately not copied
+            ! into the derivative either: a sentence about the primal is not a
+            ! sentence about its derivative, and reproducing it would put a
+            ! wrong explanation next to generated code.
+            return
+
         type is (use_statement_node)
             ! The derivative names the same kinds and calls the same helpers as
             ! the primal, so it needs the same imports. They are reproduced as
