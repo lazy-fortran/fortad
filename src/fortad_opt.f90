@@ -54,6 +54,23 @@ module fortad_opt
     !! this loses the shortcut and substitution declines rather than guessing.
     integer, parameter :: MAX_SPAN = 4096
 
+    !! A hash set of names, so membership is a bucket walk rather than a scan
+    !! of every name the body writes.
+    integer, parameter :: SET_BUCKETS = 1024
+    integer, parameter :: SET_CAPACITY = 8192
+
+    type :: name_set_t
+        character(len=64) :: names(SET_CAPACITY) = ""
+        integer :: next(SET_CAPACITY) = 0
+        integer :: head(SET_BUCKETS) = 0
+        integer :: n = 0
+    end type name_set_t
+
+    !! Loop invariance per arena node, for the loop last asked about.
+    logical, allocatable :: invariant_of(:)
+    type(name_set_t) :: written_set, current_set
+    integer :: inv_known = 0, inv_first = -1, inv_last = -1
+
 
 
     type :: span_t
@@ -80,6 +97,9 @@ contains
         type(fad_proc_t), intent(inout) :: p
         integer :: pass
 
+        ! The flags are indexed by arena node, and a different procedure means
+        ! different nodes at the same indices.
+        call invalidate_invariance()
         call propagate_loop_zeros(p)
         ! Coalescing before renaming, so that a scatter built as a chain of
         ! accumulations onto an array element becomes a chain onto a scalar.
@@ -1019,46 +1039,214 @@ contains
     ! Pass 4: loop-invariant code motion
     ! ------------------------------------------------------------------
 
+    subroutine set_clear(set)
+        !! Empty a name set.
+        type(name_set_t), intent(inout) :: set
+
+        set%n = 0
+        set%head = 0
+    end subroutine set_clear
+
+    integer function set_hash(name) result(h)
+        !! A cheap string hash, folded into the bucket count.
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        h = 0
+        do i = 1, len_trim(name)
+            h = mod(h*31 + iachar(name(i:i)), SET_BUCKETS)
+        end do
+        h = h + 1
+    end function set_hash
+
+    subroutine set_add(set, name)
+        !! Add a name if it is not already there.
+        type(name_set_t), intent(inout) :: set
+        character(len=*), intent(in) :: name
+        integer :: b
+
+        if (len_trim(name) == 0) return
+        if (set_has(set, name)) return
+        if (set%n >= SET_CAPACITY) return
+        b = set_hash(name)
+        set%n = set%n + 1
+        set%names(set%n) = name
+        set%next(set%n) = set%head(b)
+        set%head(b) = set%n
+    end subroutine set_add
+
+    logical function set_has(set, name) result(yes)
+        !! Membership, in one bucket walk rather than a scan of every name.
+        type(name_set_t), intent(in) :: set
+        character(len=*), intent(in) :: name
+        integer :: k
+
+        yes = .false.
+        k = set%head(set_hash(name))
+        do while (k /= 0)
+            if (trim(set%names(k)) == trim(name)) then
+                yes = .true.
+                return
+            end if
+            k = set%next(k)
+        end do
+    end function set_has
+
+    logical function text_touches(set, text) result(yes)
+        !! Whether any identifier in a node's text is in the set.
+        !!
+        !! Every identifier, not just the leading one. A node's text can embed
+        !! a subscript - a tape restore arrives as `u_tape(i)` - and taking only
+        !! the part before the parenthesis calls that invariant when it depends
+        !! on the loop variable. That is what made an earlier version of this
+        !! emit wrong derivatives; three forward-mode oracles caught it.
+        type(name_set_t), intent(in) :: set
+        character(len=*), intent(in) :: text
+        integer :: i, start
+
+        yes = .false.
+        start = 0
+        do i = 1, len_trim(text) + 1
+            if (i <= len_trim(text)) then
+                if (is_identifier_char(text(i:i))) then
+                    if (start == 0) start = i
+                    cycle
+                end if
+            end if
+            if (start > 0) then
+                if (set_has(set, text(start:i - 1))) then
+                    yes = .true.
+                    return
+                end if
+                start = 0
+            end if
+        end do
+    end function text_touches
+
+    logical function is_identifier_char(c) result(yes)
+        character, intent(in) :: c
+
+        yes = (c >= "a" .and. c <= "z") .or. (c >= "A" .and. c <= "Z") .or. &
+              (c >= "0" .and. c <= "9") .or. c == "_"
+    end function is_identifier_char
+
     logical function loop_invariant(p, first, last, idx) result(yes)
         !! Whether an expression has the same value in every iteration.
         !!
-        !! Asked statement by statement, which is O(body) a question, and
-        !! `hoist_subexpressions` asks once per node of every statement. On
-        !! fortfem's degree-eleven Bezier that is half the generation time.
+        !! Answered from a flag held per arena node, computed bottom-up. The
+        !! arena appends, so a node's children always have lower indices and one
+        !! forward pass settles everything.
         !!
-        !! Three attempts to precompute it are recorded because each failed
-        !! differently and the next attempt should not repeat them:
-        !!
-        !! - Inverting the question - collect the names the body writes, ask
-        !!   the expression whether it reads any - measured 3.5x slower. The
-        !!   body writes as many names as it has statements, so the inner loop
-        !!   moved rather than disappearing.
-        !! - A flag per arena node, rebuilt per loop, measured 15x slower.
-        !!   Hoisting creates nodes, so the cache was invalid on every hoist.
-        !! - A flag per arena node with a hash set for membership and an
-        !!   extend-rather-than-rebuild cache produced wrong derivatives: three
-        !!   forward-mode oracles failed. Extending is not sound as written,
-        !!   and the reason was not found before the attempt was withdrawn.
-        !!
-        !! The shape is right and the invalidation is what is hard: the answer
-        !! depends on the loop body, and every pass that asks the question also
-        !! rewrites the body.
+        !! The flags survive hoisting. A hoisted statement goes outside the
+        !! body, so what the body writes is unchanged, and only nodes created
+        !! since the last question need answering. Rebuilding per loop instead
+        !! measured fifteen times slower, because hoisting creates nodes and so
+        !! invalidated the cache on every hoist.
         type(fad_proc_t), intent(in) :: p
         integer, intent(in) :: first, last, idx
-        integer :: j
 
         yes = .false.
         if (idx <= 0 .or. idx > p%n_exprs) return
-        if (allocated(p%stmts(first)%target)) then
-            if (mentions(p, idx, trim(p%stmts(first)%target))) return
+        ! Refreshed by whoever changes the body, not here: rebuilding the
+        ! written set costs a pass over the body, and this is asked once per
+        ! node of every statement.
+        if (inv_first /= first .or. inv_last /= last .or. idx > inv_known) then
+            call ensure_invariance(p, first, last)
         end if
-        do j = first + 1, last - 1
-            if (p%stmts(j)%kind /= FAD_ASSIGN) return
-            if (.not. allocated(p%stmts(j)%target)) return
-            if (mentions(p, idx, base_of(p%stmts(j)%target))) return
-        end do
-        yes = .true.
+        if (idx > inv_known) return
+        yes = invariant_of(idx)
     end function loop_invariant
+
+    subroutine ensure_invariance(p, first, last)
+        !! Flag arena nodes as invariant in this loop, extending where possible.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        integer :: j, k, from
+        logical :: same
+
+        call set_clear(current_set)
+        if (allocated(p%stmts(first)%target)) &
+            call set_add(current_set, trim(p%stmts(first)%target))
+        do j = first + 1, last - 1
+            if (p%stmts(j)%kind /= FAD_ASSIGN) exit
+            if (.not. allocated(p%stmts(j)%target)) exit
+            call set_add(current_set, base_of(p%stmts(j)%target))
+        end do
+
+        same = .false.
+        if (inv_known > 0 .and. current_set%n == written_set%n) then
+            same = .true.
+            do k = 1, current_set%n
+                if (.not. set_has(written_set, trim(current_set%names(k)))) then
+                    same = .false.
+                    exit
+                end if
+            end do
+        end if
+
+        from = 1
+        if (same) then
+            if (inv_known >= p%n_exprs) return
+            from = inv_known + 1
+        else
+            written_set = current_set
+        end if
+
+        if (.not. allocated(invariant_of)) &
+            allocate (invariant_of(max(16, p%n_exprs)))
+        if (size(invariant_of) < p%n_exprs) then
+            block
+                logical, allocatable :: grown(:)
+                allocate (grown(2*p%n_exprs))
+                grown(1:size(invariant_of)) = invariant_of
+                call move_alloc(grown, invariant_of)
+            end block
+        end if
+
+        do k = from, p%n_exprs
+            invariant_of(k) = node_invariant(p, k)
+        end do
+        inv_known = p%n_exprs
+        inv_first = first
+        inv_last = last
+    end subroutine ensure_invariance
+
+    subroutine invalidate_invariance()
+        !! Called by a pass that has changed a loop body.
+        inv_known = 0
+        inv_first = -1
+        inv_last = -1
+    end subroutine invalidate_invariance
+
+    logical function node_invariant(p, idx) result(yes)
+        !! One node, given its children's answers.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer :: i, child
+
+        yes = .true.
+        if (allocated(p%exprs(idx)%text)) then
+            if (text_touches(written_set, p%exprs(idx)%text)) then
+                yes = .false.
+                return
+            end if
+        end if
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            child = p%exprs(idx)%args(i)
+            ! Children have lower indices than their parent and the sweep runs
+            ! upwards, so every child has an answer by now - including ones
+            ! created in this same extension. Skipping those because they sat
+            ! above the previous high-water mark ignored their dependence and
+            ! called the parent invariant when it was not.
+            if (child < 1 .or. child >= idx) cycle
+            if (.not. invariant_of(child)) then
+                yes = .false.
+                return
+            end if
+        end do
+    end function node_invariant
+
 
 
     logical function plain_body(p, first, last) result(yes)
@@ -2263,11 +2451,13 @@ contains
                     before = p%add_decl(d)
 
                     call replace_node(p, first, last, node, trim(label))
+                    call invalidate_invariance()
 
                     s%kind = FAD_ASSIGN
                     s%target = trim(label)
                     s%value = node
                     call insert_before(p, first, s)
+                    call invalidate_invariance()
                     first = first + 1
                     last = last + 1
                     ! Deliberately not advancing: a statement can contain more

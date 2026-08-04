@@ -466,22 +466,42 @@ caller's `intent(in)` argument.
   trails, and not pursued further because that is where the evidence ran out
   and the value is elsewhere.
 
-- **`hoist_subexpressions` is still quadratic on a large loop body.** Two of
+- **Generation cost is no longer a defect, and here is what it took.**
+  fortfem's degree-eleven Bezier edge area took 20.5s to differentiate. It
+  takes 3.2s. Two passes were 18 of those 20 seconds, which timing every pass
+  showed in one command after several rounds of bisecting by hand.
+
+  `substitute_temps` scanned from each definition to the end of the procedure
+  looking for reads. The span table already knows where a name is last
+  mentioned, so the walk stops there.
+
+  `hoist_subexpressions` asked whether an expression was loop-invariant once
+  per node of every statement, and each question walked the body. It reads a
+  flag now, held per arena node and computed bottom-up. Three things had to be
+  right at once, and each was found by getting it wrong:
+
+  - **Membership must be O(1).** Scanning the written names per node is what
+    made the first two attempts slower rather than faster - a body writes as
+    many names as it has statements. It is a hash set.
+  - **Every identifier in a node's text counts, not the leading one.** A tape
+    restore arrives as `u_tape(i)`; taking the part before the parenthesis
+    calls it invariant when it depends on the loop variable.
+  - **A child created during the same extension still counts.** Skipping
+    children above the previous high-water mark ignored their dependence and
+    called the parent invariant. Three forward-mode oracles caught it.
+
+  And the refresh has to be driven by the passes that change the body, not by
+  the question: rebuilding the written set costs a pass over the body, and the
+  question is asked millions of times.
+
+- **`hoist_subexpressions` was quadratic on a large loop body.** Two of
   the three passes that were have been fixed: `share_in_body` counts uses once
   per round instead of per candidate, and `escapes` answers from a precomputed
   span of where each name is mentioned instead of scanning the procedure.
   fortfem's quintic Lagrange weights went from 11.0s to 0.40s and its quartic
   Bezier from 3.2s to 0.37s.
 
-  Its degree-eleven Bezier is still 20s, and `hoist_subexpressions` is about
-  half of that: `loop_invariant` asks the body statement by statement whether
-  an expression mentions its target, once per candidate node. Inverting it -
-  collecting the names the body writes and asking the expression whether it
-  reads any - is the obvious shape and measured three and a half times *slower*,
-  because a body writes as many names as it has statements and the inner loop
-  moves rather than disappearing. What it needs is a membership test that is
-  not a linear scan, which means giving the pass a real set rather than an
-  array of names.
+  Fixed, above.
 
 A competitor winning a benchmark is a defect with an owner, not a limitation to
 document. Currently open:
