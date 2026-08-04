@@ -2632,19 +2632,33 @@ contains
                     if (allocated(d%dims)) deallocate (d%dims)
                     before = p%add_decl(d)
 
+                    ! Neither of these disturbs what the loop writes, which is
+                    ! what the invariance cache is keyed on: the subexpression
+                    ! is replaced by `fad_cN`, itself invariant because it is
+                    ! computed before the loop, and the statement computing it
+                    ! goes outside the body. Existing answers stay valid and
+                    ! the new nodes are picked up by the incremental sweep.
+                    !
+                    ! Invalidating here instead re-swept the whole arena once
+                    ! per hoist, which no kernel was large enough to notice
+                    ! until inlining started producing them: fortnum's Newton
+                    ! solve did not finish in two minutes.
                     call replace_node(p, first, last, node, trim(label))
-                    call invalidate_invariance()
 
                     s%kind = FAD_ASSIGN
                     s%target = trim(label)
                     s%value = node
                     call insert_before(p, first, s)
-                    call invalidate_invariance()
                     first = first + 1
                     last = last + 1
-                    ! Deliberately not advancing: a statement can contain more
-                    ! than one invariant subexpression, and after factoring it
-                    ! usually does - the coefficient and the scatter's scale.
+                    ! Staying on the same statement, which the insertion just
+                    ! moved down by one: a statement can hold more than one
+                    ! invariant subexpression, and after factoring it usually
+                    ! does - the coefficient and the scatter's scale. Leaving
+                    ! `j` alone stepped back onto the previous statement
+                    ! instead, so a body with several invariants hoisted the
+                    ! same one forever.
+                    j = j + 1
                 end block
             end do
             i = last + 1
