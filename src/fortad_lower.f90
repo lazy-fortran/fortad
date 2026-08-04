@@ -123,7 +123,7 @@ contains
         type(compiler_frontend_result_t) :: res
         integer, parameter :: MAX_PROCS = 64
         integer, parameter :: MAX_ROUNDS = 8
-        type(fad_proc_t) :: others(MAX_PROCS), one_proc
+        type(fad_proc_t) :: others(MAX_PROCS), one_proc, empty
         type(inline_status_t) :: ist
         type(lower_status_t) :: one
         integer :: round, added
@@ -192,6 +192,10 @@ contains
                 if (i == chosen) cycle
                 if (n_others >= MAX_PROCS) exit
                 if (.not. allocated(res%arena%entries(i)%node)) cycle
+                ! A fresh one each time: lowering adds to whatever the
+                ! procedure already holds, so reusing one buffer gave the
+                ! second callee the first one's body as well.
+                one_proc = empty
                 select type (n => res%arena%entries(i)%node)
                 type is (function_def_node)
                     if (.not. needed(proc, others, n_others, n%name)) cycle
