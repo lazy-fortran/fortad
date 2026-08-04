@@ -23,6 +23,7 @@ module fortad_sparse
     private
 
     public :: sparsity_t, colour_columns, seed_matrix, recover_entries
+    public :: star_colour_columns, recover_symmetric
 
     type :: sparsity_t
         !! Structural nonzeros of an `n_rows` by `n_cols` Jacobian, by column.
@@ -129,6 +130,192 @@ contains
             end do
         end do
     end subroutine build_row_index
+
+    subroutine star_colour_columns(pattern, colour, n_colours, stat)
+        !! Star colouring of a **symmetric** pattern.
+        !!
+        !! For a Jacobian, two columns conflict when they share a row. For a
+        !! symmetric matrix that test throws away what symmetry gives you:
+        !! `H(i,j)` and `H(j,i)` are the same number, so an entry only has to be
+        !! recovered from one of its two directions. Exploiting that is star
+        !! colouring - a proper colouring of the adjacency graph in which no
+        !! path on four vertices uses only two colours.
+        !!
+        !! The gain is not marginal. An arrowhead Hessian, one dense row and
+        !! column, needs `n` colours by the Jacobian test because the dense
+        !! column conflicts with every other. Its graph is a star, which has no
+        !! four-vertex path at all, so star colouring needs **two**.
+        !!
+        !! Greedy, largest-first, same as the asymmetric case. The extra work is
+        !! the two-coloured-path test, which is why this is not simply the other
+        !! routine with a different comment.
+        type(sparsity_t), intent(in) :: pattern
+        integer, allocatable, intent(out) :: colour(:)
+        integer, intent(out) :: n_colours
+        !! 0 on success, 1 for a malformed pattern, 2 when it is not symmetric.
+        integer, intent(out), optional :: stat
+        integer, allocatable :: order(:), row_start(:), row_cols(:)
+        integer :: k, c, col
+
+        if (present(stat)) stat = 0
+        n_colours = 0
+        if (.not. valid(pattern)) then
+            if (present(stat)) stat = 1
+            allocate (colour(0))
+            return
+        end if
+        if (pattern%n_rows /= pattern%n_cols) then
+            if (present(stat)) stat = 2
+            allocate (colour(0))
+            return
+        end if
+
+        call build_row_index(pattern, row_start, row_cols)
+        if (.not. symmetric(pattern, row_start, row_cols)) then
+            if (present(stat)) stat = 2
+            allocate (colour(0))
+            return
+        end if
+
+        allocate (colour(pattern%n_cols))
+        colour = 0
+        call order_by_degree(pattern, order)
+
+        do k = 1, pattern%n_cols
+            col = order(k)
+            c = 1
+            do while (c <= pattern%n_cols)
+                if (star_allows(pattern, row_start, row_cols, colour, col, c)) exit
+                c = c + 1
+            end do
+            colour(col) = c
+            n_colours = max(n_colours, c)
+        end do
+    end subroutine star_colour_columns
+
+    logical function star_allows(pattern, row_start, row_cols, colour, v, c) &
+        result(ok)
+        !! Whether colour `c` may be given to column `v`.
+        !!
+        !! Two conditions. The colouring must stay proper - no neighbour of `v`
+        !! already has `c`. And no path `v - w - x - y` may end up using only
+        !! two colours, which happens when `c(x) = c` and `c(y) = c(w)`.
+        type(sparsity_t), intent(in) :: pattern
+        integer, intent(in) :: row_start(:), row_cols(:), colour(:), v, c
+        integer :: iw, w, ix, x, iy, y
+
+        ok = .false.
+        do iw = row_start(v), row_start(v + 1) - 1
+            w = row_cols(iw)
+            if (w == v) cycle
+            if (colour(w) == c) return
+        end do
+
+        do iw = row_start(v), row_start(v + 1) - 1
+            w = row_cols(iw)
+            if (w == v .or. colour(w) == 0) cycle
+            do ix = row_start(w), row_start(w + 1) - 1
+                x = row_cols(ix)
+                if (x == v .or. x == w) cycle
+                if (colour(x) /= c) cycle
+                do iy = row_start(x), row_start(x + 1) - 1
+                    y = row_cols(iy)
+                    if (y == w .or. y == x) cycle
+                    if (colour(y) == colour(w)) return
+                end do
+            end do
+        end do
+        ok = .true.
+    end function star_allows
+
+    logical function symmetric(pattern, row_start, row_cols) result(ok)
+        !! Whether the pattern is structurally symmetric.
+        !!
+        !! Star colouring is only valid on one, and a caller who passes an
+        !! asymmetric pattern has made a mistake worth reporting rather than
+        !! silently producing entries that cannot be recovered.
+        type(sparsity_t), intent(in) :: pattern
+        integer, intent(in) :: row_start(:), row_cols(:)
+        integer :: j, k, i
+
+        ok = .false.
+        do j = 1, pattern%n_cols
+            do k = pattern%col_start(j), pattern%col_start(j + 1) - 1
+                i = pattern%rows(k)
+                if (.not. in_row(row_start, row_cols, j, i)) return
+            end do
+        end do
+        ok = .true.
+    end function symmetric
+
+    logical function in_row(row_start, row_cols, row, col) result(yes)
+        !! Whether (row, col) is structurally nonzero.
+        integer, intent(in) :: row_start(:), row_cols(:), row, col
+        integer :: k
+
+        yes = .false.
+        do k = row_start(row), row_start(row + 1) - 1
+            if (row_cols(k) == col) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function in_row
+
+    subroutine recover_symmetric(pattern, colour, compressed, values, stat)
+        !! Recover a symmetric matrix from a star-coloured compression.
+        !!
+        !! Entry `(i,j)` is read from whichever of its two directions is
+        !! unambiguous: from row `i` if `j` is the only column of its colour
+        !! with a nonzero there, otherwise from row `j`. A star colouring
+        !! guarantees at least one of the two works, which is the property that
+        !! distinguishes it from a merely proper colouring.
+        type(sparsity_t), intent(in) :: pattern
+        integer, intent(in) :: colour(:)
+        real(dp), intent(in) :: compressed(:, :)
+        real(dp), allocatable, intent(out) :: values(:)
+        !! 0 on success; 1 when an entry was ambiguous from both directions,
+        !! which means the colouring was not a star colouring.
+        integer, intent(out), optional :: stat
+        integer, allocatable :: row_start(:), row_cols(:)
+        integer :: j, k, i
+
+        if (present(stat)) stat = 0
+        allocate (values(size(pattern%rows)))
+        call build_row_index(pattern, row_start, row_cols)
+
+        do j = 1, pattern%n_cols
+            do k = pattern%col_start(j), pattern%col_start(j + 1) - 1
+                i = pattern%rows(k)
+                if (alone_in_row(pattern, row_start, row_cols, colour, i, j)) then
+                    values(k) = compressed(colour(j), i)
+                else if (alone_in_row(pattern, row_start, row_cols, colour, j, i)) then
+                    values(k) = compressed(colour(i), j)
+                else
+                    values(k) = 0.0_dp
+                    if (present(stat)) stat = 1
+                end if
+            end do
+        end do
+    end subroutine recover_symmetric
+
+    logical function alone_in_row(pattern, row_start, row_cols, colour, row, col) &
+        result(yes)
+        !! Whether `col` is the only column of its colour nonzero in `row`.
+        type(sparsity_t), intent(in) :: pattern
+        integer, intent(in) :: row_start(:), row_cols(:), colour(:), row, col
+        integer :: k, other
+
+        yes = .true.
+        do k = row_start(row), row_start(row + 1) - 1
+            other = row_cols(k)
+            if (other == col) cycle
+            if (colour(other) == colour(col)) then
+                yes = .false.
+                return
+            end if
+        end do
+    end function alone_in_row
 
     subroutine seed_matrix(pattern, colour, n_colours, seeds)
         !! The tangent seeds: `seeds(c, j) = 1` when column `j` has colour `c`.
