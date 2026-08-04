@@ -22,6 +22,7 @@ module fortad_opt
     !! conservative - it gives up on code it could handle - but it needs no
     !! dataflow lattice, and a wrong answer here is a wrong derivative rather
     !! than a crash.
+    use fortad_dce, only: eliminate_dead_stores
     use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_expr_t, expr_var, &
                          expr_const, expr_binop, FAD_CONST, FAD_VAR, &
                          FAD_BINOP, FAD_UNOP, FAD_CALL, FAD_INDEX, &
@@ -89,6 +90,7 @@ contains
         best = original
         call run_passes(best, mask)
         best_cost = loop_cost(best)
+
 
         do k = 1, n_loops
             try = mask
@@ -201,6 +203,12 @@ contains
         call hoist_invariants(p)
         call hoist_subexpressions(p)
         call rotate_carried(p)
+        ! Substitution and factoring leave their inputs behind. Clearing them
+        ! here is not cosmetic: the cost model counts operations in loop
+        ! bodies, and a collapsed body that still carries the statements it
+        ! replaced scores exactly what it replaced. That is what made every
+        ! bold trial tie with its conservative twin.
+        call eliminate_dead_stores(p)
 
         if (allocated(bold_mask)) deallocate (bold_mask)
     end subroutine run_passes
