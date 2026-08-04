@@ -82,6 +82,10 @@ contains
         integer, intent(in) :: n_others
         type(inline_status_t), intent(out) :: status
         integer, parameter :: MAX_ROUNDS = 8
+        !! Total splices before giving up. A self-recursive procedure has no
+        !! finite inlining, and a deep chain can grow faster than it is worth
+        !! following; either way, stopping with a message beats spinning.
+        integer, parameter :: MAX_SPLICES = 256
         integer :: round, n_inlined, tag
 
         status%ok = .true.
@@ -92,10 +96,11 @@ contains
             call inline_round(target, others, n_others, tag, n_inlined, status)
             if (.not. status%ok) return
             if (n_inlined == 0) return
+            if (tag > MAX_SPLICES) exit
         end do
         status%ok = .false.
-        status%message = "a call chain in this file did not settle after "// &
-                         "eight rounds of inlining; it is probably recursive"
+        status%message = "a call chain in this file did not settle; it is "// &
+                         "probably recursive, which has no finite inlining"
     end subroutine inline_calls
 
     subroutine inline_round(target, others, n_others, tag, n_inlined, status)
@@ -109,6 +114,22 @@ contains
 
         i = 1
         do while (i <= target%n_stmts)
+            if (tag > 256) then
+                status%ok = .false.
+                status%message = "a call chain in this file did not settle; "// &
+                                 "it is probably recursive"
+                return
+            end if
+            if (target%stmts(i)%kind == FAD_CALL_STMT) then
+                callee = named_callee(target%stmts(i)%target, others, n_others)
+                if (callee > 0) then
+                    tag = tag + 1
+                    call inline_sub(target, others(callee), i, tag, status)
+                    if (.not. status%ok) return
+                    n_inlined = n_inlined + 1
+                    cycle
+                end if
+            end if
             if (target%stmts(i)%value > 0) then
                 callee = callee_in(target, target%stmts(i)%value, others, n_others)
                 if (callee > 0) then
@@ -122,6 +143,107 @@ contains
             i = i + 1
         end do
     end subroutine inline_round
+
+    integer function named_callee(name, others, n_others) result(which)
+        !! Which of `others` this call statement names, if any.
+        character(len=*), intent(in) :: name
+        type(fad_proc_t), intent(in) :: others(:)
+        integer, intent(in) :: n_others
+        integer :: k
+
+        which = 0
+        if (call_rule_has(name)) return
+        do k = 1, n_others
+            if (.not. allocated(others(k)%name)) cycle
+            if (same_name(others(k)%name, name)) then
+                which = k
+                return
+            end if
+        end do
+    end function named_callee
+
+    subroutine inline_sub(target, callee, at, tag, status)
+        !! Splice a subroutine call's body in place of the call.
+        !!
+        !! Each dummy is bound to the actual's *name*, not to an expression,
+        !! so a dummy the callee writes to writes to the caller's variable -
+        !! which is what passing it meant. That only works when the actual is
+        !! a plain variable; anything else is refused rather than guessed at.
+        type(fad_proc_t), intent(inout) :: target
+        type(fad_proc_t), intent(in) :: callee
+        integer, intent(in) :: at, tag
+        type(inline_status_t), intent(inout) :: status
+        type(binding_t) :: binds(MAX_BINDINGS)
+        character(len=32) :: suffix
+        integer :: n_binds, i, n_actual, a
+
+        n_actual = 0
+        if (allocated(target%stmts(at)%call_args)) &
+            n_actual = size(target%stmts(at)%call_args)
+        n_binds = 0
+        if (allocated(callee%params)) then
+            if (n_actual /= size(callee%params)) then
+                status%ok = .false.
+                status%message = "call to "//trim(callee%name)// &
+                                 " does not match its argument list"
+                return
+            end if
+            do i = 1, size(callee%params)
+                a = target%stmts(at)%call_args(i)
+                if (a <= 0 .or. a > target%n_exprs) then
+                    status%ok = .false.
+                    status%message = "call to "//trim(callee%name)// &
+                                     " has an argument fortad cannot follow"
+                    return
+                end if
+                if (target%exprs(a)%kind /= FAD_VAR) then
+                    status%ok = .false.
+                    status%message = "inlining "//trim(callee%name)// &
+                        " needs plain variables as arguments, because it may "// &
+                        "write to them"
+                    return
+                end if
+                n_binds = n_binds + 1
+                binds(n_binds)%name = trim(callee%params(i))
+                binds(n_binds)%expr = 0
+                binds(n_binds)%renamed = trim(target%exprs(a)%text)
+            end do
+        end if
+
+        write (suffix, '(a,i0,a)') "_", tag, "_"
+        do i = 1, callee%n_decls
+            if (bound(binds, n_binds, callee%decls(i)%name)) cycle
+            if (n_binds >= MAX_BINDINGS) then
+                status%ok = .false.
+                status%message = trim(callee%name)//" has more names than "// &
+                                 "inlining can rename"
+                return
+            end if
+            n_binds = n_binds + 1
+            binds(n_binds)%name = trim(callee%decls(i)%name)
+            binds(n_binds)%expr = 0
+            binds(n_binds)%renamed = trim(callee%name)//trim(suffix)// &
+                                     trim(callee%decls(i)%name)
+        end do
+
+        call declare_locals(target, callee, binds, n_binds)
+        call splice_body(target, callee, binds, n_binds, at, status)
+        if (.not. status%ok) return
+        ! The body now stands where the call did.
+        call drop_stmt(target, at + callee%n_stmts)
+    end subroutine inline_sub
+
+    subroutine drop_stmt(p, at)
+        !! Remove one statement.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: at
+        integer :: i
+
+        do i = at, p%n_stmts - 1
+            p%stmts(i) = p%stmts(i + 1)
+        end do
+        p%n_stmts = p%n_stmts - 1
+    end subroutine drop_stmt
 
     recursive integer function callee_in(p, idx, others, n_others) result(which)
         !! The first call in this expression to one of `others`.
