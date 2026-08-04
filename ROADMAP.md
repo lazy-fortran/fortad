@@ -321,10 +321,55 @@ Structured rules that emit statements are built: `fad_add_call_rule` takes
 Fortran statement templates, and the linear-solve case is tested against a real
 solver. That closes the dossier's largest predicted lever.
 
-Remaining, in rough order of expected value: the transformation that rewrites a
-kernel into Taylor-arithmetic calls (the arithmetic itself is done), star
-colouring for sparse Hessians, static sparsity-pattern propagation, and
-reverse-mode rules applied automatically where fortnum already declares an
+### The machine-independent optimiser
+
+Measuring against Tapenade on the Enzyme suite showed that the emitted code, not
+the differentiation, was the gap. `fortad_opt` now runs eight passes that a
+Fortran compiler is not permitted to run, because reassociating floating-point
+arithmetic changes rounding and the caller's build will not have `-ffast-math`.
+An AD tool may: the forms agree in exact arithmetic.
+
+| pass | what it does |
+| --- | --- |
+| `propagate_copies` | `a = b` makes later reads of `a` read `b` |
+| `substitute_temps` | inline a definition into its use |
+| `propagate_loop_zeros` | the first accumulation onto a cleared adjoint is an assignment |
+| `coalesce_element_updates` | repeated `z_b(i)` updates become one load and one store |
+| `factor_self_update` | `x = x*c1 + x*c2` becomes `x = x*(c1 + c2)` |
+| `regroup_products` | reassociate so invariant factors group together |
+| `hoist_invariants` | lift a wholly invariant statement out of the loop |
+| `hoist_subexpressions` | name the invariant coefficient, compute it once |
+
+Two of these are worth spelling out because they look wrong in isolation.
+
+`substitute_temps` inlines a definition read *more than once* when it is a
+single arithmetic operation. That duplicates work. It is right because it is
+what exposes the coefficient of a self-update to `factor_self_update`, after
+which `hoist_subexpressions` lifts it out of the loop and both copies vanish.
+Judged one pass at a time it is a pessimisation.
+
+`propagate_loop_zeros` deletes the clear at the end of a reverse-sweep body.
+Dead-store elimination cannot: the read it appears to protect is the
+accumulation earlier in the body, which belongs to the *next* iteration, and
+that pass does not model iterations.
+
+Every pass reasons only within a straight-line run of assignments; a definition
+whose reads are not all inside that window is left alone. The passes run on both
+the forward and the reverse pipeline.
+
+### Contracts
+
+`fad_vjp(..., with_primal=.false.)` returns the gradient without the primal
+value. This is not a convenience: Tapenade's reverse routine never assigns the
+primal output, Enzyme's always does because its seed rides on a duplicated
+output, and comparing across that difference credits Tapenade with a forward
+loop it does not run. With the primal dropped, dead-loop elimination removes the
+entire forward sweep whenever no adjoint coefficient needs a primal value.
+
+Remaining, in rough order of expected value: collapsing a loop body that is
+wholly linear in its carried variable into a single scaling (this is the rk4
+gap), star colouring for sparse Hessians, static sparsity-pattern propagation,
+and reverse-mode rules applied automatically where fortnum already declares an
 `analytical` candidate.
 Branches inside loops and recurrences inside nests are still refused by name.
 
@@ -339,6 +384,14 @@ document. Currently open:
   the input of, where Enzyme appears to store more. fortad has no cost model
   for that choice and always prefers recomputation, which is right for the
   bandwidth-bound cases it was chosen for and wrong here. Dossier section 4.3.
+
+- **rk4 with the primal is 10% behind Enzyme.** 21.07 ns/input against 19.11,
+  on a primal costing 13.82. The reverse sweeps are 7.25 and 5.29. The whole
+  rk4 step is linear in `state`, so the adjoint collapses in principle to one
+  scaling and one scatter, but the linearity is spread across four stage
+  variables that are each accumulated onto, and `substitute_temps` handles only
+  a single reaching definition. Collapsing a wholly linear loop body is the fix
+  and is general. Gradient-only rk4 already leads Tapenade, 7.43 against 8.78.
 
 - **The CSE pass is written but disabled.** `fortad_cse` produces wrong
   Hessians through the `fad_hvp` composition path, silently - a plausible but
