@@ -20,7 +20,8 @@ program test_sparse_oracle
     !! would pass every correctness check and deliver no speedup at all.
     use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
-                             recover_entries
+                             recover_entries, star_colour_columns, &
+                             recover_symmetric
     implicit none
 
     integer :: failures
@@ -32,6 +33,9 @@ program test_sparse_oracle
     call test_diagonal_is_one_colour(failures)
     call test_dense_column_forces_many(failures)
     call test_symmetric_hessian(failures)
+    call test_star_beats_column_on_arrowhead(failures)
+    call test_star_on_tridiagonal(failures)
+    call test_star_refuses_asymmetric(failures)
     call test_malformed_pattern_is_refused(failures)
 
     if (failures == 0) then
@@ -202,6 +206,213 @@ contains
         call check_pattern("symmetric_hessian", pattern, dense, failures, &
                            expect_max=3)
     end subroutine test_symmetric_hessian
+
+    subroutine test_star_beats_column_on_arrowhead(failures)
+        !! The case that justifies star colouring existing.
+        !!
+        !! A symmetric arrowhead - one dense row and column - needs n colours
+        !! by the Jacobian test, because the dense column shares a row with
+        !! every other. Its adjacency graph is a star, which contains no
+        !! four-vertex path, so star colouring needs two. The test asserts the
+        !! improvement, not merely that both are valid.
+        integer, intent(inout) :: failures
+        type(sparsity_t) :: pattern
+        real(dp), allocatable :: dense(:, :)
+        integer, parameter :: n = 10
+        integer :: n_plain, n_star
+        integer, allocatable :: c_plain(:), c_star(:)
+        integer :: stat
+
+        call build_symmetric_arrowhead(n, pattern, dense)
+
+        call colour_columns(pattern, c_plain, n_plain, stat)
+        call star_colour_columns(pattern, c_star, n_star, stat)
+        if (stat /= 0) then
+            print *, "FAIL star_arrowhead: star colouring refused the pattern"
+            failures = failures + 1
+            return
+        end if
+
+        if (n_star >= n_plain) then
+            print *, "FAIL star_arrowhead: star used", n_star, &
+                "colours, column colouring used", n_plain, &
+                "- symmetry bought nothing"
+            failures = failures + 1
+            return
+        end if
+        if (n_star /= 2) then
+            print *, "FAIL star_arrowhead: expected 2 colours, got", n_star
+            failures = failures + 1
+            return
+        end if
+
+        call check_symmetric_recovery("star_arrowhead", pattern, dense, c_star, &
+                                      n_star, failures, n_plain)
+    end subroutine test_star_beats_column_on_arrowhead
+
+    subroutine test_star_on_tridiagonal(failures)
+        !! A symmetric tridiagonal, where the graph is a path. A path does
+        !! contain four-vertex subpaths, so star colouring cannot get below
+        !! three here - and must still recover exactly.
+        integer, intent(inout) :: failures
+        type(sparsity_t) :: pattern
+        real(dp), allocatable :: dense(:, :)
+        integer, allocatable :: c_star(:)
+        integer :: n_star, stat
+        integer, parameter :: n = 9
+
+        call build_symmetric_banded(n, pattern, dense)
+        call star_colour_columns(pattern, c_star, n_star, stat)
+        if (stat /= 0) then
+            print *, "FAIL star_tridiagonal: refused a symmetric pattern"
+            failures = failures + 1
+            return
+        end if
+        call check_symmetric_recovery("star_tridiagonal", pattern, dense, &
+                                      c_star, n_star, failures)
+    end subroutine test_star_on_tridiagonal
+
+    subroutine test_star_refuses_asymmetric(failures)
+        !! Star colouring is only valid on a symmetric pattern. Given an
+        !! asymmetric one it must say so, not produce entries that cannot be
+        !! recovered.
+        integer, intent(inout) :: failures
+        type(sparsity_t) :: pattern
+        integer, allocatable :: colour(:)
+        integer :: n_colours, stat, k
+
+        pattern%n_rows = 3
+        pattern%n_cols = 3
+        allocate (pattern%col_start(4), pattern%rows(3))
+        ! Column 1 has a nonzero in row 2, but column 2 has none in row 1.
+        pattern%col_start = [1, 2, 3, 4]
+        pattern%rows = [2, 2, 3]
+
+        call star_colour_columns(pattern, colour, n_colours, stat)
+        if (stat == 0) then
+            print *, "FAIL star_asymmetric: accepted an asymmetric pattern"
+            failures = failures + 1
+        else
+            print *, "pass star_refuses_asymmetric"
+        end if
+    end subroutine test_star_refuses_asymmetric
+
+    subroutine build_symmetric_arrowhead(n, pattern, dense)
+        !! Symmetric arrowhead: first row and column dense, plus the diagonal.
+        integer, intent(in) :: n
+        type(sparsity_t), intent(out) :: pattern
+        real(dp), allocatable, intent(out) :: dense(:, :)
+        integer :: i, j, k, nnz
+
+        nnz = n + 2*(n - 1)
+        pattern%n_rows = n
+        pattern%n_cols = n
+        allocate (pattern%col_start(n + 1), pattern%rows(nnz))
+        allocate (dense(n, n))
+        dense = 0.0_dp
+        k = 0
+        do j = 1, n
+            pattern%col_start(j) = k + 1
+            if (j == 1) then
+                do i = 1, n
+                    k = k + 1
+                    pattern%rows(k) = i
+                    dense(i, 1) = 1.0_dp + 0.1_dp*i
+                    dense(1, i) = dense(i, 1)
+                end do
+            else
+                k = k + 1
+                pattern%rows(k) = 1
+                k = k + 1
+                pattern%rows(k) = j
+                dense(j, j) = 2.0_dp + 0.3_dp*j
+            end if
+        end do
+        pattern%col_start(n + 1) = k + 1
+    end subroutine build_symmetric_arrowhead
+
+    subroutine build_symmetric_banded(n, pattern, dense)
+        !! Symmetric tridiagonal.
+        integer, intent(in) :: n
+        type(sparsity_t), intent(out) :: pattern
+        real(dp), allocatable, intent(out) :: dense(:, :)
+        integer :: i, j, k, nnz
+
+        nnz = 0
+        do j = 1, n
+            do i = max(1, j - 1), min(n, j + 1)
+                nnz = nnz + 1
+            end do
+        end do
+        pattern%n_rows = n
+        pattern%n_cols = n
+        allocate (pattern%col_start(n + 1), pattern%rows(nnz))
+        allocate (dense(n, n))
+        dense = 0.0_dp
+        k = 0
+        do j = 1, n
+            pattern%col_start(j) = k + 1
+            do i = max(1, j - 1), min(n, j + 1)
+                k = k + 1
+                pattern%rows(k) = i
+                dense(i, j) = 1.0_dp + 0.5_dp*(i + j) - 0.25_dp*abs(i - j)
+            end do
+        end do
+        pattern%col_start(n + 1) = k + 1
+    end subroutine build_symmetric_banded
+
+    subroutine check_symmetric_recovery(label, pattern, dense, colour, n_colours, &
+                                        failures, compare_to)
+        !! Compress with the given colouring and recover exactly.
+        character(len=*), intent(in) :: label
+        type(sparsity_t), intent(in) :: pattern
+        real(dp), intent(in) :: dense(:, :)
+        integer, intent(in) :: colour(:), n_colours
+        integer, intent(inout) :: failures
+        integer, intent(in), optional :: compare_to
+        real(dp), allocatable :: seeds(:, :), compressed(:, :), values(:)
+        integer :: i, j, k, c, stat
+        logical :: bad
+
+        bad = .false.
+        call seed_matrix(pattern, colour, n_colours, seeds)
+        allocate (compressed(n_colours, pattern%n_rows))
+        compressed = 0.0_dp
+        do i = 1, pattern%n_rows
+            do c = 1, n_colours
+                do j = 1, pattern%n_cols
+                    compressed(c, i) = compressed(c, i) + dense(i, j)*seeds(c, j)
+                end do
+            end do
+        end do
+
+        call recover_symmetric(pattern, colour, compressed, values, stat)
+        if (stat /= 0) then
+            print *, "FAIL ", label, ": an entry was ambiguous from both sides"
+            failures = failures + 1
+            return
+        end if
+
+        do j = 1, pattern%n_cols
+            do k = pattern%col_start(j), pattern%col_start(j + 1) - 1
+                if (abs(values(k) - dense(pattern%rows(k), j)) > 1.0e-14_dp) then
+                    print *, "FAIL ", label, ": entry (", pattern%rows(k), ",", &
+                        j, ") recovered as", values(k), "not", &
+                        dense(pattern%rows(k), j)
+                    bad = .true.
+                end if
+            end do
+        end do
+
+        if (bad) then
+            failures = failures + 1
+        else if (present(compare_to)) then
+            print *, "pass ", label, " (", n_colours, "colours vs", compare_to, &
+                "without symmetry)"
+        else
+            print *, "pass ", label, " (", n_colours, "colours)"
+        end if
+    end subroutine check_symmetric_recovery
 
     subroutine test_malformed_pattern_is_refused(failures)
         !! A pattern whose indices do not line up must be reported, not used.

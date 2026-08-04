@@ -189,10 +189,29 @@ needs "no two columns of a colour share a row", which knows nothing about
 symmetry, so a symmetric tridiagonal Hessian takes three colours exactly as a
 tridiagonal Jacobian does.
 
-It is not *optimal* for a symmetric matrix. Star colouring exploits symmetry to
-use strictly fewer colours, and is the right next step here; it is not
-implemented, and the current cost is pinned by a test so that a later star
-colouring can be shown to beat it rather than merely claimed to.
+For a symmetric matrix, use `star_colour_columns` and `recover_symmetric`
+instead. `H(i,j)` and `H(j,i)` are the same number, so an entry only has to be
+recoverable from one of its two directions, and exploiting that needs strictly
+fewer colours:
+
+```fortran
+call star_colour_columns(pattern, colour, n_colours)
+call seed_matrix(pattern, colour, n_colours, seeds)
+call f_hvp_v(n_colours, n, x, seeds, ..., compressed)
+call recover_symmetric(pattern, colour, compressed, values)
+```
+
+The gain is not marginal. An arrowhead Hessian — one dense row and column —
+needs `n` colours by the asymmetric test, because the dense column shares a row
+with every other. Its adjacency graph is a star, which contains no four-vertex
+path, so star colouring needs **two**. Measured in the test suite: 2 against 10
+at `n = 10`.
+
+A symmetric tridiagonal still takes three either way; its graph is a path, and a
+path does contain four-vertex subpaths. Star colouring never does worse.
+
+An asymmetric pattern passed to `star_colour_columns` is refused, because the
+result would not be recoverable.
 
 ## Adjoints of long time integrations
 

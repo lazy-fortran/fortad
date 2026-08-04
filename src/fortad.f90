@@ -22,7 +22,8 @@ module fortad
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
                                fad_clear_rules
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
-                             recover_entries
+                             recover_entries, star_colour_columns, &
+                             recover_symmetric
     use fortad_revolve, only: revolve_t, revolve_action_t, revolve_schedule, &
                               REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
     use fortad_taylor, only: tay_const, tay_var, tay_add, tay_sub, tay_scale, &
@@ -34,6 +35,7 @@ module fortad
     public :: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, fad_result_t, &
               fad_version, fad_add_rule, fad_add_call_rule, fad_clear_rules
     public :: sparsity_t, colour_columns, seed_matrix, recover_entries
+    public :: star_colour_columns, recover_symmetric
     public :: revolve_t, revolve_action_t, revolve_schedule
     public :: REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
     public :: tay_const, tay_var, tay_add, tay_sub, tay_scale, tay_mul, tay_div
