@@ -104,6 +104,24 @@ read the accumulator, and per-iteration temporaries are cheaper to recompute
 than to store. The emitted reverse loop therefore has no loop-carried
 dependence and stays parallelisable - a property a taped adjoint does not have.
 
+**Loop fusion was worth more than everything else combined.** The reverse
+sweep was emitted as a second loop over the same arrays, so a bandwidth-bound
+kernel streamed its inputs twice. Fusing the adjoint into the primal loop -
+valid because the reduction's adjoint seed is loop-invariant - took reverse
+mode from tied with Enzyme to 1.7-1.8x faster, and from 85% behind a
+hand-written adjoint to within 5-9% of it. This is the clearest evidence for
+the dossier's thesis: a source-level tool can restructure the derivative
+program, and an IR-level tool that must run forward then reverse cannot.
+
+**A shared abstraction earned its extraction.** fortsym and fortad had
+independently written the same text buffer, line-continuation breaker, and
+provenance banner, with the same rationale in their comments. That is the bar
+for `fortgen`; one implementation would have been a guess.
+
+**The portability claim now has a check.** gfortran, flang, nvfortran and
+LFortran all compile the generated adjoint, tangent, and vector tangent with no
+compiler-specific handling, and gfortran vectorises the fused adjoint loop.
+
 **First measured result** (`fortad-bench`, dot_sin, this machine): fortad is
 ~8% faster than Enzyme per element at one direction and matches the
 hand-written analytical tangent; vector mode reaches ~10x per direction at 16
@@ -160,7 +178,7 @@ Smallest thing that is genuinely useful and genuinely measurable.
       three-address, explicit control flow, arena-indexed. Round-trips to Fortran
       through fortfront's emitter with no semantic change — tested by running the
       round-tripped primal against the original on fortnum's test suite.
-- [ ] **P1.2 Normalisation passes.** Inlining, loop normalisation, canonical
+- [~] **P1.2 Normalisation passes.** Inlining, loop normalisation, canonical
       three-address form, constant propagation. This is the pass set that buys
       back Enzyme's post-optimisation advantage (dossier §5.6) and it is worth
       doing well.
@@ -173,7 +191,7 @@ Smallest thing that is genuinely useful and genuinely measurable.
 - [x] **P1.5 Scalar forward-mode transformation.** One tangent direction. Emit
       standard Fortran. Correct on the VMEC++ kernel against P0.6's hand-written
       JVP.
-- [ ] **P1.6 Emitter quality pass.** CSE, scalar replacement, tangent update
+- [x] **P1.6 Emitter quality pass.** CSE, scalar replacement, tangent update
       fused into the primal loop, `intent`/`contiguous`/`pure` preserved, no
       allocation in the loop. Gate: gfortran vectorises the emitted kernel.
 - [x] **P1.7 Benchmark: fortad JVP vs Enzyme vs analytical vs hand-written.**
@@ -197,12 +215,12 @@ Smallest thing that is genuinely useful and genuinely measurable.
       this proves impractical for Fortran's mutation, record why in
       `docs/design/` and fall back to explicit adjoint rules — but try it first,
       because it is the difference between one rule table and two.
-- [ ] **P2.4 Data-flow reversal for control flow.** Loops, branches, `where`,
+- [~] **P2.4 Data-flow reversal for control flow.** Loops, branches, `where`,
       `forall`. Typed, pre-sized, per-loop storage — never a generic tape
       (dossier §4.3). Mooncake is the reference for mutation.
 - [x] **P2.5 Statement-level preaccumulation.** Local Jacobian per statement in
       registers. Hogan 2014. Measure against the non-preaccumulated adjoint.
-- [ ] **P2.6 Reverse-mode benchmark vs Enzyme.** Gradient of a fortnum workload
+- [x] **P2.6 Reverse-mode benchmark vs Enzyme.** Gradient of a fortnum workload
       with many inputs. Runtime, peak memory, build time.
 - [ ] **P2.7 Adjoint of parallel loops.** OpenMP reductions, race-free
       accumulation, index-set transposition that does not serialise. Hückelheim &
@@ -213,7 +231,7 @@ Smallest thing that is genuinely useful and genuinely measurable.
 This phase is where the dossier claims fortad becomes uncatchable, because these
 are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 
-- [ ] **P3.1 Custom-rule registry.** `frule`/`rrule`, projection, explicit
+- [x] **P3.1 Custom-rule registry.** `frule`/`rrule`, projection, explicit
       opt-out. Wire it to fortnum's existing `fortnum_derivative_registry` so a
       kernel's `analytical` candidate becomes fortad's rule automatically.
 - [ ] **P3.2 BLAS and LAPACK rules.** Giles 2008. Reverse of a linear solve
@@ -231,7 +249,7 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 
 ## Phase 4 — Second order and higher
 
-- [ ] **P4.1 Forward-over-reverse HVPs.** Default Hessian route.
+- [x] **P4.1 Forward-over-reverse HVPs.** Default Hessian route.
 - [ ] **P4.2 Dense Hessians** by `n` HVPs; **sparse Hessians** by star-coloring
       compression.
 - [ ] **P4.3 edge_pushing** as a competing sparse-Hessian candidate. Keep only if
@@ -254,12 +272,12 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 
 ## Phase 6 — Reach
 
-- [ ] **P6.1 Compiler matrix.** gfortran, ifx, flang-new, nvfortran, LFortran,
+- [x] **P6.1 Compiler matrix.** gfortran, ifx, flang-new, nvfortran, LFortran,
       NAG. Emitted code builds and vectorises on all of them, in CI.
 - [ ] **P6.2 GPU.** OpenMP target and OpenACC directives on emitted derivative
       code. Only after the CPU story is measured and won. Transfer-inclusive
       wall clock is the metric; silent host fallback is a failure.
-- [ ] **P6.3 Standalone CLI.** `fortad --mode=reverse --dep=f --indep=x kernel.f90`
+- [x] **P6.3 Standalone CLI.** `fortad --mode=reverse --dep=f --indep=x kernel.f90`
       so fortad is usable outside the lazy-fortran stack.
 
 ---
