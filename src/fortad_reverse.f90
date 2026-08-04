@@ -29,7 +29,8 @@ module fortad_reverse
                         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
                             fad_add, fad_mul, fad_neg, fad_real
-    use fortad_reverse_loop, only: loop_shape_t, analyse_loop, LOOP_OK
+    use fortad_reverse_loop, only: loop_shape_t, analyse_loop, LOOP_OK, &
+                                   split_accumulation
     implicit none
     private
 
@@ -529,10 +530,12 @@ contains
         s%step = rec%step
         ignored = adjoint%add_stmt(s)
 
-        allocate (rec%body_lhs(shape%last - shape%first))
-        allocate (rec%body_rhs(shape%last - shape%first))
-        allocate (rec%body_is_accum(shape%last - shape%first))
-        allocate (rec%body_sign(shape%last - shape%first))
+        ! One accumulation can expand into several additive terms, so the body
+        ! record list is sized generously rather than one entry per statement.
+        allocate (rec%body_lhs(64*(shape%last - shape%first) + 64))
+        allocate (rec%body_rhs(64*(shape%last - shape%first) + 64))
+        allocate (rec%body_is_accum(64*(shape%last - shape%first) + 64))
+        allocate (rec%body_sign(64*(shape%last - shape%first) + 64))
         rec%n_body = 0
 
         do i = shape%first + 1, shape%last - 1
@@ -549,13 +552,29 @@ contains
                 is_known_name(shape%accumulators, shape%n_accumulators, &
                               primal%stmts(i)%target)
             if (rec%body_is_accum(rec%n_body)) then
-                ! `s = s +/- e`: the reverse sweep needs only `e` and the sign.
-                rec%body_rhs(rec%n_body) = adjoint%exprs(s%value)%args(2)
-                if (trim(adjoint%exprs(s%value)%text) == "-") then
-                    rec%body_sign(rec%n_body) = -1
-                else
-                    rec%body_sign(rec%n_body) = 1
-                end if
+                ! `s = s + e1 - e2 + ...`: the reverse sweep needs each term
+                ! and its sign, so the accumulation expands into one body
+                ! record per term, all sharing the accumulator's name.
+                block
+                    integer :: terms(64), signs(64), n_terms, k2
+                    logical :: split_ok
+                    call split_accumulation(adjoint, s%value, fresh, terms, &
+                                            signs, n_terms, split_ok)
+                    if (.not. split_ok) then
+                        status%ok = .false.
+                        status%message = "reverse mode: could not split the "// &
+                            "accumulation into additive terms"
+                        return
+                    end if
+                    rec%n_body = rec%n_body - 1
+                    do k2 = 1, n_terms
+                        rec%n_body = rec%n_body + 1
+                        rec%body_lhs(rec%n_body) = fresh
+                        rec%body_is_accum(rec%n_body) = .true.
+                        rec%body_rhs(rec%n_body) = terms(k2)
+                        rec%body_sign(rec%n_body) = signs(k2)
+                    end do
+                end block
             else
                 rec%body_rhs(rec%n_body) = s%value
                 rec%body_sign(rec%n_body) = 0
