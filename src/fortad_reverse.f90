@@ -59,6 +59,10 @@ module fortad_reverse
         character(len=:), allocatable :: var
         integer :: lo = 0, hi = 0, step = 0
         character(len=64), allocatable :: accum_names(:)
+        !! Statement indices in the generated procedure of this loop's `do`
+        !! and `end do`, so the adjoint body can be spliced into the same loop.
+        integer :: do_stmt = 0
+        integer :: end_do_stmt = 0
         character(len=64), allocatable :: body_lhs(:)
         integer, allocatable :: body_rhs(:)
         logical, allocatable :: body_is_accum(:)
@@ -528,7 +532,7 @@ contains
         s%lo = rec%lo
         s%hi = rec%hi
         s%step = rec%step
-        ignored = adjoint%add_stmt(s)
+        rec%do_stmt = adjoint%add_stmt(s)
 
         ! One accumulation can expand into several additive terms, so the body
         ! record list is sized generously rather than one entry per statement.
@@ -583,7 +587,7 @@ contains
 
         s%kind = FAD_END_DO
         s%value = 0
-        ignored = adjoint%add_stmt(s)
+        rec%end_do_stmt = adjoint%add_stmt(s)
     end subroutine emit_loop_forward
 
     subroutine build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
@@ -681,7 +685,151 @@ contains
                                    active, n_tmp, status)
             if (.not. status%ok) return
         end do
+
+        ! Fusing the adjoint of a reduction back into its own primal loop turns
+        ! two passes over the input arrays into one. The seed is loop-invariant
+        ! and the adjoint work is per-element, so the fused loop computes the
+        ! same values in the same order and stays parallelisable. Memory
+        ! bandwidth, not arithmetic, is what bounds these kernels, so halving
+        ! the traffic is the single largest win available here.
+        if (n_loops == 1 .and. can_fuse(primal, loops(1), dependent)) then
+            call fuse_loop(adjoint, loops(1), suffix)
+        end if
     end subroutine build_reverse_sweep
+
+    logical function can_fuse(primal, rec, dependent) result(yes)
+        !! Fusion is safe when the loop's accumulator adjoint is already final
+        !! when the forward loop runs.
+        !!
+        !! That holds when nothing after the loop feeds the accumulator except
+        !! plain copies establishing the dependent: the accumulator's adjoint is
+        !! then exactly the incoming seed, known before the loop starts.
+        type(fad_proc_t), intent(in) :: primal
+        type(loop_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: dependent
+        integer :: i
+        logical :: seen_loop
+
+        yes = .false.
+        seen_loop = .false.
+        do i = 1, primal%n_stmts
+            if (i == rec%shape%last) then
+                seen_loop = .true.
+                cycle
+            end if
+            if (.not. seen_loop) cycle
+            ! After the loop, only a bare copy of an accumulator is allowed.
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) return
+            if (primal%stmts(i)%target /= dependent) return
+            if (primal%stmts(i)%value <= 0) return
+            if (primal%exprs(primal%stmts(i)%value)%kind /= FAD_VAR) return
+        end do
+        yes = seen_loop
+    end function can_fuse
+
+    subroutine fuse_loop(adjoint, rec, suffix)
+        !! Move the adjoint loop's body into the primal loop and drop the
+        !! now-empty second loop.
+        !!
+        !! The adjoint setup - zeroing every adjoint and seeding the dependent's
+        !! - was emitted after the primal loop, because the reverse sweep is
+        !! built after the forward one. Fusing moves the loop bodies together,
+        !! so that setup has to move **before** the loop: the fused body reads
+        !! the seed on its first iteration. Anything else in the tail, such as
+        !! publishing the accumulator's final value, still belongs after.
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(loop_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: suffix
+        type(fad_stmt_t), allocatable :: fused(:)
+        integer :: i, rev_do, rev_end, n_new
+
+        rev_do = 0
+        do i = rec%end_do_stmt + 1, adjoint%n_stmts
+            if (adjoint%stmts(i)%kind == FAD_DO) then
+                rev_do = i
+                exit
+            end if
+        end do
+        if (rev_do == 0) return
+
+        rev_end = 0
+        do i = rev_do + 1, adjoint%n_stmts
+            if (adjoint%stmts(i)%kind == FAD_END_DO) then
+                rev_end = i
+                exit
+            end if
+        end do
+        if (rev_end == 0) return
+        if (rec%do_stmt <= 0 .or. rec%end_do_stmt <= rec%do_stmt) return
+
+        allocate (fused(adjoint%n_stmts))
+        n_new = 0
+
+        ! Everything before the primal loop, unchanged.
+        do i = 1, rec%do_stmt - 1
+            n_new = n_new + 1
+            fused(n_new) = adjoint%stmts(i)
+        end do
+
+        ! Adjoint setup, hoisted above the loop.
+        do i = rec%end_do_stmt + 1, rev_do - 1
+            if (.not. is_adjoint_setup(adjoint%stmts(i), suffix)) cycle
+            n_new = n_new + 1
+            fused(n_new) = adjoint%stmts(i)
+        end do
+
+        ! The loop header, both bodies, and one `end do`.
+        n_new = n_new + 1
+        fused(n_new) = adjoint%stmts(rec%do_stmt)
+        do i = rec%do_stmt + 1, rec%end_do_stmt - 1
+            n_new = n_new + 1
+            fused(n_new) = adjoint%stmts(i)
+        end do
+        do i = rev_do + 1, rev_end - 1
+            n_new = n_new + 1
+            fused(n_new) = adjoint%stmts(i)
+        end do
+        n_new = n_new + 1
+        fused(n_new) = adjoint%stmts(rec%end_do_stmt)
+
+        ! The rest of the tail, in order, minus what was hoisted or dropped.
+        do i = rec%end_do_stmt + 1, adjoint%n_stmts
+            if (i >= rev_do .and. i <= rev_end) cycle
+            if (is_adjoint_setup(adjoint%stmts(i), suffix)) cycle
+            n_new = n_new + 1
+            fused(n_new) = adjoint%stmts(i)
+        end do
+
+        adjoint%stmts(1:n_new) = fused(1:n_new)
+        adjoint%n_stmts = n_new
+    end subroutine fuse_loop
+
+    logical function is_adjoint_setup(s, suffix) result(yes)
+        !! True for an assignment whose target is an adjoint variable, which is
+        !! how the zeroing and seeding statements are recognised.
+        type(fad_stmt_t), intent(in) :: s
+        character(len=*), intent(in) :: suffix
+        integer :: cut
+
+        yes = .false.
+        if (s%kind /= FAD_ASSIGN) return
+        if (.not. allocated(s%target)) return
+        cut = index(s%target, "(")
+        if (cut > 0) then
+            yes = ends_with(s%target(1:cut - 1), suffix)
+        else
+            yes = ends_with(s%target, suffix)
+        end if
+    end function is_adjoint_setup
+
+    logical function ends_with(text, tail) result(yes)
+        !! Suffix test.
+        character(len=*), intent(in) :: text, tail
+
+        yes = .false.
+        if (len(text) < len(tail)) return
+        yes = text(len(text) - len(tail) + 1:) == tail
+    end function ends_with
 
     subroutine emit_loop_reverse(primal, adjoint, ssa, rec, suffix, active, &
                                  n_tmp, status)
