@@ -41,7 +41,7 @@ module fortad_reverse_loop
     integer, parameter, public :: LOOP_NOT_A_LOOP = 1
     integer, parameter, public :: LOOP_UNSUPPORTED = 2
 
-    public :: loop_shape_t, analyse_loop
+    public :: loop_shape_t, analyse_loop, split_accumulation
 
     type :: loop_shape_t
         !! What `analyse_loop` found.
@@ -160,31 +160,88 @@ contains
     end subroutine analyse_loop
 
     logical function is_linear_accumulation(p, stmt, target) result(yes)
-        !! True for `v = v + e` or `v = v - e` where `e` does not read `v`.
+        !! True when the statement adds a sum of terms to `target`, in any
+        !! association: `v = v + e`, `v = v - e`, `v = v + e1 + e2 - e3`.
         !!
         !! That is the shape whose adjoint leaves the accumulator's own adjoint
         !! untouched, which is what removes the loop-carried dependence from the
-        !! reverse sweep.
+        !! reverse sweep. Requiring the literal two-operand form would reject
+        !! most real reduction bodies, which chain several terms.
         type(fad_proc_t), intent(in) :: p
         integer, intent(in) :: stmt
         character(len=*), intent(in) :: target
-        integer :: root, left, right
+        integer :: terms(64), signs(64), n
 
-        yes = .false.
-        root = p%stmts(stmt)%value
-        if (root <= 0 .or. root > p%n_exprs) return
-        if (p%exprs(root)%kind /= FAD_BINOP) return
-        if (trim(p%exprs(root)%text) /= "+" .and. &
-            trim(p%exprs(root)%text) /= "-") return
-
-        left = p%exprs(root)%args(1)
-        right = p%exprs(root)%args(2)
-        if (left <= 0 .or. left > p%n_exprs) return
-        if (p%exprs(left)%kind /= FAD_VAR) return
-        if (p%exprs(left)%text /= target) return
-        if (reads_name(p, right, target)) return
-        yes = .true.
+        call split_accumulation(p, p%stmts(stmt)%value, target, terms, signs, n, yes)
     end function is_linear_accumulation
+
+    subroutine split_accumulation(p, root, target, terms, signs, n, ok)
+        !! Walk the `+`/`-` spine of an accumulation.
+        !!
+        !! Returns the terms added to `target` with their signs, and whether the
+        !! statement really is a linear accumulation: `target` must appear
+        !! exactly once, as a bare variable, with a positive sign, and nowhere
+        !! inside any term.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: root
+        character(len=*), intent(in) :: target
+        integer, intent(out) :: terms(:), signs(:), n
+        logical, intent(out) :: ok
+        integer :: n_found, i
+
+        n = 0
+        n_found = 0
+        ok = .false.
+        if (root <= 0 .or. root > p%n_exprs) return
+        call walk_spine(p, root, target, 1, terms, signs, n, n_found)
+        if (n_found /= 1) return
+        if (n == 0) return
+        do i = 1, n
+            if (reads_name(p, terms(i), target)) return
+        end do
+        ok = .true.
+    end subroutine split_accumulation
+
+    recursive subroutine walk_spine(p, idx, target, sign, terms, signs, n, n_found)
+        !! Collect additive terms, tracking the sign each inherits.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx, sign
+        character(len=*), intent(in) :: target
+        integer, intent(inout) :: terms(:), signs(:), n, n_found
+
+        if (idx <= 0 .or. idx > p%n_exprs) return
+
+        if (p%exprs(idx)%kind == FAD_BINOP) then
+            select case (trim(p%exprs(idx)%text))
+            case ("+")
+                call walk_spine(p, p%exprs(idx)%args(1), target, sign, terms, &
+                                signs, n, n_found)
+                call walk_spine(p, p%exprs(idx)%args(2), target, sign, terms, &
+                                signs, n, n_found)
+                return
+            case ("-")
+                call walk_spine(p, p%exprs(idx)%args(1), target, sign, terms, &
+                                signs, n, n_found)
+                call walk_spine(p, p%exprs(idx)%args(2), target, -sign, terms, &
+                                signs, n, n_found)
+                return
+            end select
+        end if
+
+        if (p%exprs(idx)%kind == FAD_VAR) then
+            if (p%exprs(idx)%text == target) then
+                ! The accumulator itself must enter with a positive sign;
+                ! `v = -v + e` is not an accumulation.
+                if (sign > 0) n_found = n_found + 1
+                return
+            end if
+        end if
+
+        if (n >= size(terms)) return
+        n = n + 1
+        terms(n) = idx
+        signs(n) = sign
+    end subroutine walk_spine
 
     recursive logical function reads_name(p, idx, name) result(yes)
         !! True when the expression reads `name`.

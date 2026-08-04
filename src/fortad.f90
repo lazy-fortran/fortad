@@ -18,7 +18,7 @@ module fortad
                               forward_status_t
     use fortad_reverse, only: differentiate_reverse, reverse_spec_t, &
                               reverse_status_t
-    use fortad_emit, only: emit_proc
+    use fortad_emit, only: emit_proc, emit_module
     implicit none
     private
 
@@ -45,7 +45,8 @@ contains
         v = FORTAD_VERSION
     end function fad_version
 
-    function fad_jvp(source, independents, name, suffix, n_directions) result(res)
+    function fad_jvp(source, independents, name, suffix, n_directions, &
+                     module_name) result(res)
         !! Forward mode. Returns a subroutine computing the primal and its
         !! Jacobian-vector product in one sweep.
         !!
@@ -64,6 +65,10 @@ contains
         !! directions through a single primal sweep, with the direction axis
         !! leading every tangent array so it is the contiguous one.
         character(len=*), intent(in), optional :: n_directions
+        !! Wrap the result in a module of this name. Strongly recommended: the
+        !! consumer then gets a compiler-checked interface instead of an
+        !! external declaration nobody verifies.
+        character(len=*), intent(in), optional :: module_name
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal, tangent
         type(lower_status_t) :: lstat
@@ -101,10 +106,15 @@ contains
         end if
 
         res%ok = .true.
-        res%code = emit_proc(tangent)
+        if (present(module_name)) then
+            res%code = emit_module(tangent, module_name, "fortad "//FORTAD_VERSION)
+        else
+            res%code = emit_proc(tangent)
+        end if
     end function fad_jvp
 
-    function fad_vjp(source, independents, dependent, name, suffix) result(res)
+    function fad_vjp(source, independents, dependent, name, suffix, &
+                     module_name) result(res)
         !! Reverse mode. Returns a subroutine computing the primal and the
         !! vector-Jacobian product: one sweep yields the gradient with respect
         !! to every independent at once, which is the cheap-gradient principle.
@@ -120,6 +130,8 @@ contains
         character(len=*), intent(in), optional :: name
         !! Suffix for adjoint variables. Defaults to `_b`.
         character(len=*), intent(in), optional :: suffix
+        !! Wrap the result in a module of this name.
+        character(len=*), intent(in), optional :: module_name
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal, adjoint
         type(lower_status_t) :: lstat
@@ -154,7 +166,11 @@ contains
         end if
 
         res%ok = .true.
-        res%code = emit_proc(adjoint)
+        if (present(module_name)) then
+            res%code = emit_module(adjoint, module_name, "fortad "//FORTAD_VERSION)
+        else
+            res%code = emit_proc(adjoint)
+        end if
     end function fad_vjp
 
     function fad_roundtrip(source) result(res)

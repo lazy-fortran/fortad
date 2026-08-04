@@ -57,6 +57,20 @@ program test_reverse_loop_oracle
                "    end do"//nl// &
                "end subroutine k"//nl, failures)
 
+    call check("revloop_multi_term", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    integer :: i"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        s = s + a(i)*sin(b(i)) + log(1.0d0 + b(i)*b(i)) &"//nl// &
+               "            - exp(-a(i)*a(i))"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
     call check_refusal("revloop_refuses_recurrence", &
                        "subroutine k(n, a, b, s)"//nl// &
                        "    integer, intent(in) :: n"//nl// &
