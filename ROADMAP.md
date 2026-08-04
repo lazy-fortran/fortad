@@ -58,6 +58,60 @@ split it into smaller checkboxes before writing code.
 
 ---
 
+## What the implementation has established so far
+
+Findings from building Phase 0 and Phase 1, recorded here because they change
+the plan rather than merely reporting on it.
+
+**fortfront is the right front end, and it needed no changes.** Its arena AST
+already carries everything a differentiation pass needs: typed nodes with
+integer-index children, `intent`, `is_contiguous`, `is_array` with dimension
+expressions, name resolution, and a call graph. `compile_frontend_from_string`
+with `INPUT_MODE_STANDARD` parses ordinary Fortran directly. Dummy arguments
+arrive as `parameter_declaration_node`, not `identifier_node` - the one
+non-obvious detail. **P0.5 is therefore settled: fortad lowers to its own IR
+rather than differentiating the AST**, because the transformations it needs
+(SSA renaming, expression-level zero propagation, statement reordering) are not
+AST edits.
+
+**Emitting text beats building AST nodes.** The emitter writes Fortran into a
+growable buffer through recursive subroutines. The obvious alternative - a
+recursive function returning `character(len=:), allocatable` - silently
+corrupted its own output under gfortran and cost real debugging time.
+
+**Two Fortran-specific traps produced silently wrong derivative code**, and
+both are worth a linting rule:
+- Nesting an arena-mutating call inside another call that also takes the arena.
+  Fortran does not order argument evaluation and the arena reallocates
+  underneath the outer call. Every mutating call now gets its own temporary.
+- Reading `arena%exprs(i)%args(j)` as an actual argument to a call that also
+  takes `arena`. Same cause, found by segfault. Nodes are snapshotted first.
+
+**Zero-aware rule builders replace a separate activity pass at expression
+level.** A tangent index of 0 means a structural zero, and propagating it
+through the builders is why the emitted code has no `+ 0.0` terms and no dead
+tangent statements. A declaration-level fixed-point activity analysis is still
+needed and is implemented; the expression-level part came free.
+
+**Reverse mode needs no second rule table.** Partials come from seeding the
+forward rule with one for the argument of interest and zero for the rest. Modes
+cannot drift apart, and a new intrinsic needs one rule rather than two. This
+was the highest-leverage architectural decision in the dossier and it held up
+in practice.
+
+**Reduction loops need no tape.** The adjoint of a linear accumulation does not
+read the accumulator, and per-iteration temporaries are cheaper to recompute
+than to store. The emitted reverse loop therefore has no loop-carried
+dependence and stays parallelisable - a property a taped adjoint does not have.
+
+**First measured result** (`fortad-bench`, dot_sin, this machine): fortad is
+~8% faster than Enzyme per element at one direction and matches the
+hand-written analytical tangent; vector mode reaches ~10x per direction at 16
+directions while any one-call-per-direction engine stays flat. Build time is
+currently a wash on a case this small, and the claim that fortad's build story
+is categorically better is **not yet supported by measurement** - it rests on
+needing no matching LLVM and no plugin, which this benchmark does not capture.
+
 ## Phase 0 — Establish the ground truth before building anything
 
 The purpose of this phase is to find out early whether the thesis is wrong. Every
@@ -74,13 +128,13 @@ item is cheap and every item can kill or redirect the project.
       specification), Hascoët et al. 2005 (TBR), Giering & Kaminski 1998 (adjoint
       recipes), Moses & Churavy 2020 (Enzyme). Write a one-page note per paper
       into `docs/notes/`. This is a deliverable, not preparation.
-- [ ] **P0.4 fortfront coverage measurement.** Parse every file in fortnum's
+- [x] **P0.4 fortfront coverage measurement.** Parse every file in fortnum's
       `src/` through fortfront. Report: files parsed, files failed, constructs
       unsupported, and whether the resolved-type and binding queries return
       usable information for a representative kernel. **This decides whether
       fortfront or LFortran ASR is the front end**, and no IR work starts before
       it.
-- [ ] **P0.5 fortfront transformation-API gap analysis.** Enumerate exactly what
+- [x] **P0.5 fortfront transformation-API gap analysis.** Enumerate exactly what
       is missing to build and splice nodes (see dossier §8.2). Decide: extend
       `transformation_api.f90` upstream, or build a fortad IR lowered from the
       AST. Write the decision and its reasoning into `docs/design/ir.md`.
@@ -102,7 +156,7 @@ item is cheap and every item can kill or redirect the project.
 
 Smallest thing that is genuinely useful and genuinely measurable.
 
-- [ ] **P1.1 fortad IR.** Whatever P0.5 decided. Typed, name-resolved,
+- [x] **P1.1 fortad IR.** Whatever P0.5 decided. Typed, name-resolved,
       three-address, explicit control flow, arena-indexed. Round-trips to Fortran
       through fortfront's emitter with no semantic change — tested by running the
       round-tripped primal against the original on fortnum's test suite.
@@ -110,22 +164,22 @@ Smallest thing that is genuinely useful and genuinely measurable.
       three-address form, constant propagation. This is the pass set that buys
       back Enzyme's post-optimisation advantage (dossier §5.6) and it is worth
       doing well.
-- [ ] **P1.3 Activity analysis.** Forward "varied" ∧ backward "useful". Report
+- [x] **P1.3 Activity analysis.** Forward "varied" ∧ backward "useful". Report
       the fraction of statements eliminated on the VMEC++ kernel.
-- [ ] **P1.4 JVP rule table.** Operators, intrinsics, `real(dp)` arithmetic. The
+- [x] **P1.4 JVP rule table.** Operators, intrinsics, `real(dp)` arithmetic. The
       table is declarative and separate from the transformation, in the shape of
       ChainRules' `frule` (dossier §6.1). Rules for array expressions, not only
       scalars.
-- [ ] **P1.5 Scalar forward-mode transformation.** One tangent direction. Emit
+- [x] **P1.5 Scalar forward-mode transformation.** One tangent direction. Emit
       standard Fortran. Correct on the VMEC++ kernel against P0.6's hand-written
       JVP.
 - [ ] **P1.6 Emitter quality pass.** CSE, scalar replacement, tangent update
       fused into the primal loop, `intent`/`contiguous`/`pure` preserved, no
       allocation in the loop. Gate: gfortran vectorises the emitted kernel.
-- [ ] **P1.7 Benchmark: fortad JVP vs Enzyme vs analytical vs hand-written.**
+- [x] **P1.7 Benchmark: fortad JVP vs Enzyme vs analytical vs hand-written.**
       Runtime, peak memory, build time, generated-code size. Publish into
       `differentiable-fortran`. **This is the first result that means anything.**
-- [ ] **P1.8 Vector forward mode.** Contiguous trailing tangent dimension, chunk
+- [x] **P1.8 Vector forward mode.** Contiguous trailing tangent dimension, chunk
       width tuned to SIMD width. Measure the scaling in direction count against
       Enzyme's `BatchDuplicated` and against `k` separate scalar JVPs. Dossier
       §5.4 predicts this is the largest forward-mode win; verify or retract.
@@ -138,7 +192,7 @@ Smallest thing that is genuinely useful and genuinely measurable.
 - [ ] **P2.1 TBR analysis.** Hascoët et al. 2005. Report bytes stored with and
       without it on each Phase 1 kernel.
 - [ ] **P2.2 Linearity analysis.** Report additional bytes saved.
-- [ ] **P2.3 Transposition of the linear part.** Derive VJP from the JVP rules by
+- [x] **P2.3 Transposition of the linear part.** Derive VJP from the JVP rules by
       transposition (dossier §6.1) rather than writing a second rule table. If
       this proves impractical for Fortran's mutation, record why in
       `docs/design/` and fall back to explicit adjoint rules — but try it first,
@@ -146,7 +200,7 @@ Smallest thing that is genuinely useful and genuinely measurable.
 - [ ] **P2.4 Data-flow reversal for control flow.** Loops, branches, `where`,
       `forall`. Typed, pre-sized, per-loop storage — never a generic tape
       (dossier §4.3). Mooncake is the reference for mutation.
-- [ ] **P2.5 Statement-level preaccumulation.** Local Jacobian per statement in
+- [x] **P2.5 Statement-level preaccumulation.** Local Jacobian per statement in
       registers. Hogan 2014. Measure against the non-preaccumulated adjoint.
 - [ ] **P2.6 Reverse-mode benchmark vs Enzyme.** Gradient of a fortnum workload
       with many inputs. Runtime, peak memory, build time.
