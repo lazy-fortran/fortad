@@ -130,6 +130,10 @@ contains
 
         call fold_zero_accumulations(tangent)
         call eliminate_dead_stores(tangent)
+        ! The same passes pay off in forward mode: a tangent loop carries
+        ! invariant coefficients just as an adjoint one does.
+        call optimise(tangent)
+        call eliminate_dead_stores(tangent)
         call eliminate_dead_arrays(tangent)
 
         res%ok = .true.

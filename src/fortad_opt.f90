@@ -52,6 +52,8 @@ contains
             call substitute_temps(p)
             call factor_self_update(p)
         end do
+        call propagate_loop_zeros(p)
+        call coalesce_element_updates(p)
         call regroup_products(p)
         call hoist_invariants(p)
         call hoist_subexpressions(p)
@@ -772,6 +774,396 @@ contains
         end do
         yes = .true.
     end function plain_body
+
+    subroutine propagate_loop_zeros(p)
+        !! Turn the first accumulation onto a per-iteration adjoint into a
+        !! plain assignment.
+        !!
+        !! A reverse sweep gives each intermediate its own adjoint, clears it at
+        !! the end of the iteration, and accumulates onto it. The clear makes
+        !! the variable provably zero at the top of every iteration, so the
+        !! first `v = v + e` is just `v = e` - and once nothing reads the old
+        !! value, the clear itself is dead and dead-store elimination removes
+        !! it. On a four-stage Runge-Kutta that is four adds and four stores an
+        !! iteration.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, first, last, j
+
+        i = 1
+        do while (i <= p%n_stmts)
+            if (p%stmts(i)%kind /= FAD_DO) then
+                i = i + 1
+                cycle
+            end if
+            call loop_extent(p, i, first, last)
+            if (last == 0 .or. .not. plain_body(p, first, last)) then
+                i = i + 1
+                cycle
+            end if
+            j = first + 1
+            do while (j <= last - 1)
+                block
+                    integer :: drop
+                    call zero_start(p, first, last, j, drop)
+                    if (drop > 0) then
+                        call remove_stmt(p, drop)
+                        call loop_extent(p, first, first, last)
+                    end if
+                end block
+                j = j + 1
+            end do
+            i = last + 1
+        end do
+    end subroutine propagate_loop_zeros
+
+    subroutine zero_start(p, first, last, idx, drop)
+        !! Rewrite `v = v + e` at `idx` when `v` is zero at every iteration.
+        !!
+        !! `drop` returns the index of a clear that the rewrite made dead, or
+        !! zero. Dead-store elimination will not find it on its own: the read it
+        !! is protecting is the accumulation earlier in the body, which belongs
+        !! to the *next* iteration, and that pass does not model iterations.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: first, last, idx
+        integer, intent(out) :: drop
+        character(len=:), allocatable :: name
+        integer :: k, v, last_write
+
+        drop = 0
+
+        if (p%stmts(idx)%kind /= FAD_ASSIGN) return
+        if (.not. allocated(p%stmts(idx)%target)) return
+        if (index(p%stmts(idx)%target, "(") > 0) return
+        name = trim(p%stmts(idx)%target)
+        if (is_dummy(p, name)) return
+        if (.not. accumulates_onto(p, idx, name)) return
+
+        ! It must be the first thing in the body to touch the name at all.
+        do k = first + 1, idx - 1
+            if (assigns_to(p, k, name)) return
+            if (p%stmts(k)%value > 0) then
+                if (mentions(p, p%stmts(k)%value, name)) return
+            end if
+        end do
+
+        ! The body must end by clearing it, which is what makes it zero on the
+        ! next iteration, and it must be zero before the first iteration too.
+        last_write = 0
+        do k = idx + 1, last - 1
+            if (assigns_to(p, k, name)) last_write = k
+        end do
+        if (last_write == 0) return
+        if (.not. assigns_zero(p, last_write)) return
+        if (.not. zero_before_loop(p, first, name)) return
+
+        v = p%stmts(idx)%value
+        p%stmts(idx)%value = p%exprs(v)%args(2)
+
+        ! The clear is now dead if nothing between it and the end of the body
+        ! reads the name, and nothing after the loop does either.
+        do k = last_write + 1, last - 1
+            if (p%stmts(k)%value > 0) then
+                if (mentions(p, p%stmts(k)%value, name)) return
+            end if
+            if (allocated(p%stmts(k)%target)) then
+                if (name_in_text(p%stmts(k)%target, name) .and. &
+                    base_of(p%stmts(k)%target) /= name) return
+            end if
+        end do
+        do k = last + 1, p%n_stmts
+            if (p%stmts(k)%value > 0) then
+                if (mentions(p, p%stmts(k)%value, name)) return
+            end if
+            if (allocated(p%stmts(k)%target)) then
+                if (name_in_text(p%stmts(k)%target, name)) return
+            end if
+        end do
+        drop = last_write
+    end subroutine zero_start
+
+    subroutine remove_stmt(p, at)
+        !! Delete one statement.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: at
+        integer :: i
+
+        do i = at, p%n_stmts - 1
+            p%stmts(i) = p%stmts(i + 1)
+        end do
+        p%n_stmts = p%n_stmts - 1
+    end subroutine remove_stmt
+
+    logical function assigns_zero(p, idx) result(yes)
+        !! Whether a statement assigns a literal zero.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer :: v
+
+        yes = .false.
+        v = p%stmts(idx)%value
+        if (v <= 0 .or. v > p%n_exprs) return
+        if (p%exprs(v)%kind /= FAD_CONST) return
+        if (.not. allocated(p%exprs(v)%text)) return
+        yes = is_zero_text(p%exprs(v)%text)
+    end function assigns_zero
+
+    logical function is_zero_text(text) result(yes)
+        !! Whether a literal is zero, in any of the spellings fortad emits.
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: s
+        integer :: e
+
+        s = trim(adjustl(text))
+        e = scan(s, "dDeE")
+        if (e > 1) s = s(1:e - 1)
+        yes = .false.
+        if (len(s) == 0) return
+        yes = verify(s, "0.+-") == 0 .and. verify(s, "0") /= 0 .or. s == "0"
+        if (.not. yes) yes = verify(s, "0.") == 0
+    end function is_zero_text
+
+    logical function zero_before_loop(p, first, name) result(yes)
+        !! Whether the last assignment to `name` before the loop is zero.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first
+        character(len=*), intent(in) :: name
+        integer :: k, last_write
+
+        last_write = 0
+        do k = 1, first - 1
+            if (assigns_to(p, k, name)) last_write = k
+        end do
+        yes = .false.
+        if (last_write == 0) return
+        yes = assigns_zero(p, last_write)
+    end function zero_before_loop
+
+    subroutine coalesce_element_updates(p)
+        !! Accumulate repeated updates of one array element in a scalar.
+        !!
+        !! A reverse sweep scatters into `z_b(i)` once per use of `z(i)` in the
+        !! primal, and each of those is a load and a store of the same address.
+        !! The compiler will not merge them: `z_b` is a dummy array and every
+        !! store may alias. Naming the element and writing it back once turns
+        !! `k` load-store pairs into one.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, first, last
+        integer :: n_named
+
+        n_named = 0
+        i = 1
+        do while (i <= p%n_stmts)
+            if (p%stmts(i)%kind /= FAD_DO) then
+                i = i + 1
+                cycle
+            end if
+            call loop_extent(p, i, first, last)
+            if (last == 0 .or. .not. plain_body(p, first, last)) then
+                i = i + 1
+                cycle
+            end if
+            call coalesce_in_body(p, first, last, n_named)
+            call loop_extent(p, first, first, last)
+            i = last + 1
+        end do
+    end subroutine coalesce_element_updates
+
+    subroutine coalesce_in_body(p, first, last, n_named)
+        !! Coalesce one element target per call, repeating until none is left.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(inout) :: first, last, n_named
+        character(len=:), allocatable :: target_text, base
+        integer :: j, k, n_hits, hit_first, hit_last
+        character(len=32) :: label
+        logical :: again
+
+        again = .true.
+        do while (again)
+            again = .false.
+            do j = first + 1, last - 1
+                if (p%stmts(j)%kind /= FAD_ASSIGN) cycle
+                if (.not. allocated(p%stmts(j)%target)) cycle
+                if (index(p%stmts(j)%target, "(") == 0) cycle
+                target_text = trim(p%stmts(j)%target)
+                base = base_of(target_text)
+                if (index(target_text, "fad_e") == 1) cycle
+
+                ! Count identical targets, and require every one of them to be
+                ! an accumulation onto itself: anything else and the element's
+                ! value at that point is not simply the running sum.
+                n_hits = 0
+                hit_first = 0
+                hit_last = 0
+                do k = first + 1, last - 1
+                    if (.not. allocated(p%stmts(k)%target)) cycle
+                    if (trim(p%stmts(k)%target) /= target_text) cycle
+                    if (.not. accumulates_onto(p, k, target_text)) then
+                        n_hits = 0
+                        exit
+                    end if
+                    n_hits = n_hits + 1
+                    if (hit_first == 0) hit_first = k
+                    hit_last = k
+                end do
+                if (n_hits < 2) cycle
+
+                ! No other element of the same array may be touched, and the
+                ! element must not be read outside its own accumulations.
+                if (other_use(p, first, last, base, target_text)) cycle
+
+                n_named = n_named + 1
+                write (label, '(a,i0)') "fad_e", n_named
+                call rewrite_element(p, first, last, target_text, trim(label), &
+                                     hit_first, hit_last, base)
+                again = .true.
+                exit
+            end do
+            if (again) call loop_extent(p, first, first, last)
+        end do
+    end subroutine coalesce_in_body
+
+    logical function accumulates_onto(p, idx, target_text) result(yes)
+        !! Whether a statement is `t = t + something`.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: target_text
+        integer :: v
+
+        yes = .false.
+        v = p%stmts(idx)%value
+        if (v <= 0 .or. v > p%n_exprs) return
+        if (p%exprs(v)%kind /= FAD_BINOP) return
+        if (trim(p%exprs(v)%text) /= "+") return
+        if (.not. allocated(p%exprs(v)%args)) return
+        yes = is_named(p, p%exprs(v)%args(1), target_text) .and. &
+              .not. mentions(p, p%exprs(v)%args(2), target_text)
+    end function accumulates_onto
+
+    logical function is_named(p, idx, text) result(yes)
+        !! Whether an expression is exactly the given variable or element.
+        !!
+        !! An array element is an `FAD_INDEX` node whose text is only the array
+        !! name, so it is compared by what it renders to. That is the same
+        !! string the assignment target carries, which is what makes the two
+        !! sides of `z_b(i) = z_b(i) + ...` recognisable as the same place.
+        use fortad_emit, only: emit_expr
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: text
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (.not. allocated(p%exprs(idx)%text)) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_VAR)
+            yes = trim(p%exprs(idx)%text) == text
+        case (FAD_INDEX)
+            yes = emit_expr(p, idx) == text
+        end select
+    end function is_named
+
+    logical function other_use(p, first, last, base, target_text) result(yes)
+        !! Whether the array is touched other than through this one element.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        character(len=*), intent(in) :: base, target_text
+        integer :: k
+
+        yes = .true.
+        do k = first + 1, last - 1
+            if (allocated(p%stmts(k)%target)) then
+                if (name_in_text(p%stmts(k)%target, base) .and. &
+                    trim(p%stmts(k)%target) /= target_text) return
+            end if
+            if (p%stmts(k)%value <= 0) cycle
+            if (.not. mentions(p, p%stmts(k)%value, base)) cycle
+            ! The only permitted read is the left operand of its own
+            ! accumulation, which `accumulates_onto` already vouched for.
+            if (.not. allocated(p%stmts(k)%target)) return
+            if (trim(p%stmts(k)%target) /= target_text) return
+            if (mentions(p, p%exprs(p%stmts(k)%value)%args(2), base)) return
+        end do
+        yes = .false.
+    end function other_use
+
+    subroutine rewrite_element(p, first, last, target_text, label, &
+                               hit_first, hit_last, base)
+        !! Replace the element by a scalar, loaded once and stored once.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: first, last, hit_first, hit_last
+        character(len=*), intent(in) :: target_text, label, base
+        type(fad_stmt_t) :: s
+        type(fad_decl_t) :: d
+        integer :: k, di, ignored, repl
+
+        di = p%decl_index(base)
+        if (di == 0) return
+        d = p%decls(di)
+        d%name = label
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        d%is_array = .false.
+        d%is_contiguous = .false.
+        if (allocated(d%dims)) deallocate (d%dims)
+        ignored = p%add_decl(d)
+
+        repl = p%add_expr(expr_var(label))
+        do k = hit_first, hit_last
+            if (.not. allocated(p%stmts(k)%target)) cycle
+            if (trim(p%stmts(k)%target) /= target_text) cycle
+            p%stmts(k)%target = label
+            p%stmts(k)%value = swap_named(p, p%stmts(k)%value, target_text, repl)
+        end do
+
+        ! Store after the last accumulation, then load before the first, so the
+        ! second insertion does not shift the index of the first.
+        s%kind = FAD_ASSIGN
+        s%target = target_text
+        s%value = repl
+        call insert_before(p, hit_last + 1, s)
+
+        s%kind = FAD_ASSIGN
+        s%target = label
+        s%value = p%add_expr(expr_var(target_text))
+        call insert_before(p, hit_first, s)
+    end subroutine rewrite_element
+
+    recursive integer function swap_named(p, idx, text, repl) result(out)
+        !! Rebuild an expression with reads of a named entity replaced.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx, repl
+        character(len=*), intent(in) :: text
+        integer, allocatable :: new_args(:)
+        type(fad_expr_t) :: e
+        character(len=:), allocatable :: text_here
+        integer :: i, kind_here
+        logical :: changed
+
+        out = idx
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (is_named(p, idx, text)) then
+            out = repl
+            return
+        end if
+        if (.not. allocated(p%exprs(idx)%args)) return
+        kind_here = p%exprs(idx)%kind
+        text_here = p%exprs(idx)%text
+        new_args = p%exprs(idx)%args
+        changed = .false.
+        do i = 1, size(new_args)
+            block
+                integer :: sub
+                sub = swap_named(p, new_args(i), text, repl)
+                if (sub /= new_args(i)) changed = .true.
+                new_args(i) = sub
+            end block
+        end do
+        if (.not. changed) return
+        e%kind = kind_here
+        e%text = text_here
+        e%args = new_args
+        out = p%add_expr(e)
+    end function swap_named
 
     subroutine regroup_products(p)
         !! Reassociate each product so its loop-invariant factors sit together.
