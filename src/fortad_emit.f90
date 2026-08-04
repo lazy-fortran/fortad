@@ -17,7 +17,7 @@ module fortad_emit
                         FAD_INTENT_IN, FAD_INTENT_OUT, &
                         FAD_INTENT_INOUT
     use fortgen_buffer, only: buffer_t
-    use fortgen_layout, only: put_wrapped, indent_of
+    use fortgen_layout, only: put_wrapped, indent_of, DEFAULT_LINE_LIMIT
     use fortgen_banner, only: put_banner
     implicit none
     private
@@ -63,7 +63,7 @@ contains
         call b%line("")
         call b%line("contains")
         call b%line("")
-        call b%put(indent_block(emit_proc(p)))
+        call b%put(indent_block(emit_proc(p, nested=4)))
         call b%line("")
         call b%line("end module "//module_name)
         text = b%str()
@@ -89,14 +89,21 @@ contains
         end do
     end function indent_block
 
-    function emit_proc(p) result(text)
+    function emit_proc(p, nested) result(text)
         !! Emit a complete procedure as Fortran source text.
         type(fad_proc_t), intent(in) :: p
+        !! Columns the caller will add in front of every line. Wrapping has to
+        !! know: a module wrapper indents the whole procedure by four, and a
+        !! line wrapped to exactly the limit then sits four columns past it.
+        integer, intent(in), optional :: nested
         character(len=:), allocatable :: text
         type(buffer_t) :: b
-        integer :: i, indent
+        integer :: i, indent, limit
 
-        call write_header(b, p)
+        limit = DEFAULT_LINE_LIMIT
+        if (present(nested)) limit = limit - nested
+
+        call write_header(b, p, limit)
         do i = 1, p%n_uses
             call b%line(indent_of(1)//trim(p%uses(i)))
         end do
@@ -115,7 +122,7 @@ contains
             block
                 type(buffer_t) :: line
                 call write_stmt(line, p, p%stmts(i))
-                call put_wrapped(b, indent_of(indent), line%str())
+                call put_wrapped(b, indent_of(indent), line%str(), limit)
             end block
             select case (p%stmts(i)%kind)
             case (FAD_DO, FAD_IF, FAD_ELSE)
@@ -131,35 +138,40 @@ contains
         text = b%str()
     end function emit_proc
 
-    subroutine write_header(b, p)
+    subroutine write_header(b, p, limit)
         !! The `function`/`subroutine` statement with its dummy argument list.
         type(buffer_t), intent(inout) :: b
         type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: limit
+        character(len=:), allocatable :: line
         integer :: i
 
         ! Code fortad writes itself does only arithmetic on its arguments -
         ! no I/O, no saved state - so saying `pure` lets the consumer's
         ! compiler hoist, vectorise, and parallelise calls to it. A procedure
         ! that calls something fortad cannot see gets no such claim.
-        if (p%is_pure) then
-            call b%put("pure ")
-        end if
+        ! The dummy list is wrapped like any other statement. A procedure with
+        ! thirteen arguments produced a 333-character line; free-form Fortran
+        ! stops at 132, and gfortran accepting it quietly does not make it
+        ! portable.
+        line = ""
+        if (p%is_pure) line = "pure "
         if (p%is_function) then
-            call b%put("function "//p%name//"(")
+            line = line//"function "//p%name//"("
         else
-            call b%put("subroutine "//p%name//"(")
+            line = line//"subroutine "//p%name//"("
         end if
         if (allocated(p%params)) then
             do i = 1, size(p%params)
-                if (i > 1) call b%put(", ")
-                call b%put(trim(p%params(i)))
+                if (i > 1) line = line//", "
+                line = line//trim(p%params(i))
             end do
         end if
-        call b%put(")")
+        line = line//")"
         if (p%is_function .and. allocated(p%result_name)) then
-            call b%put(" result("//p%result_name//")")
+            line = line//" result("//p%result_name//")"
         end if
-        call b%put(new_line('a'))
+        call put_wrapped(b, "", line, limit)
     end subroutine write_header
 
     function emit_decl_line(d) result(line)

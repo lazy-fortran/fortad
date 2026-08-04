@@ -444,6 +444,12 @@ document. Currently open:
   `z_b = 0`, so the fix is either to carry `(*)` through and zero it by
   element, or to refuse the declaration and say why.
 
+- **A wrapped continuation can still overrun the 88-column target by a few
+  columns.** The limit is respected for the line being wrapped, but the
+  continuation's own indent is not subtracted, so a body expression inside a
+  module lands at 89 to 91. Well inside the standard's 132; a style defect, not
+  a portability one.
+
 - **The CSE pass is written but disabled.** `fortad_cse` produces wrong
   Hessians through the `fad_hvp` composition path, silently - a plausible but
   non-symmetric result. It also did not pay for itself when it worked, because
