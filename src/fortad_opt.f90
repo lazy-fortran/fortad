@@ -79,6 +79,7 @@ contains
         ! With the body in single assignment and its copies propagated, the
         ! affine analysis has the clearest view of it.
         call collapse_affine_loops(p)
+        call reciprocate_divisions(p)
         call regroup_products(p)
         call hoist_invariants(p)
         call hoist_subexpressions(p)
@@ -1606,6 +1607,94 @@ contains
         e%args = new_args
         out = p%add_expr(e)
     end function swap_named
+
+    subroutine reciprocate_divisions(p)
+        !! Turn division by a loop-invariant into multiplication by its
+        !! reciprocal, so the divide happens once instead of per iteration.
+        !!
+        !! A divide costs several times a multiply and the reciprocal is the
+        !! same value every iteration, but no Fortran compiler will make this
+        !! substitution without `-ffast-math`: `x/d` and `x*(1/d)` differ in the
+        !! last bit. An AD tool may, on the same grounds as the reassociations
+        !! around it - the derivative is an approximation of a limit either way.
+        !!
+        !! Only invariant divisors qualify. Dividing by something that changes
+        !! per iteration would trade one divide for a divide and a multiply.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, first, last, j
+
+        i = 1
+        do while (i <= p%n_stmts)
+            if (p%stmts(i)%kind /= FAD_DO) then
+                i = i + 1
+                cycle
+            end if
+            call loop_extent(p, i, first, last)
+            if (last == 0 .or. .not. plain_body(p, first, last)) then
+                i = i + 1
+                cycle
+            end if
+            do j = first + 1, last - 1
+                if (p%stmts(j)%value <= 0) cycle
+                p%stmts(j)%value = reciprocate(p, first, last, p%stmts(j)%value)
+            end do
+            i = last + 1
+        end do
+    end subroutine reciprocate_divisions
+
+    recursive integer function reciprocate(p, first, last, idx) result(out)
+        !! Rebuild an expression with invariant divisions turned into products.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: first, last, idx
+        integer, allocatable :: new_args(:)
+        type(fad_expr_t) :: e
+        character(len=:), allocatable :: text_here
+        integer :: i, kind_here, one, recip
+        logical :: changed
+
+        out = idx
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (.not. allocated(p%exprs(idx)%args)) return
+
+        kind_here = p%exprs(idx)%kind
+        text_here = p%exprs(idx)%text
+        new_args = p%exprs(idx)%args
+        changed = .false.
+        do i = 1, size(new_args)
+            block
+                integer :: sub
+                sub = reciprocate(p, first, last, new_args(i))
+                if (sub /= new_args(i)) changed = .true.
+                new_args(i) = sub
+            end block
+        end do
+
+        if (kind_here == FAD_BINOP) then
+            if (trim(text_here) == "/") then
+                if (loop_invariant(p, first, last, new_args(2))) then
+                    one = p%add_expr(expr_const("1.0"//suffix_of(p)))
+                    recip = p%add_expr(expr_binop("/", one, new_args(2)))
+                    out = p%add_expr(expr_binop("*", new_args(1), recip))
+                    return
+                end if
+            end if
+        end if
+
+        if (.not. changed) return
+        e%kind = kind_here
+        e%text = text_here
+        e%args = new_args
+        out = p%add_expr(e)
+    end function reciprocate
+
+    function suffix_of(p) result(text)
+        !! The kind suffix for literals fortad emits into this procedure.
+        type(fad_proc_t), intent(in) :: p
+        character(len=:), allocatable :: text
+
+        text = "d0"
+        if (allocated(p%real_suffix)) text = p%real_suffix
+    end function suffix_of
 
     subroutine regroup_products(p)
         !! Reassociate each product so its loop-invariant factors sit together.
