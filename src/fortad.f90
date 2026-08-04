@@ -21,11 +21,14 @@ module fortad
     use fortad_emit, only: emit_proc, emit_module
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
                                fad_clear_rules
+    use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
+                             recover_entries
     implicit none
     private
 
     public :: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, fad_result_t, &
               fad_version, fad_add_rule, fad_add_call_rule, fad_clear_rules
+    public :: sparsity_t, colour_columns, seed_matrix, recover_entries
 
     character(len=*), parameter :: FORTAD_VERSION = "0.1.0"
 
