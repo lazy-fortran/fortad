@@ -71,6 +71,28 @@ module fortad_reverse
         integer :: n_body = 0
     end type loop_record_t
 
+    integer, parameter :: ORDER_STMT = 1
+    integer, parameter :: ORDER_LOOP = 2
+    integer, parameter :: ORDER_BRANCH = 3
+
+    type :: branch_record_t
+        !! What the reverse sweep needs to invert one if/else construct.
+        !!
+        !! The condition is re-evaluated rather than recorded. Its operands are
+        !! SSA values from before the branch, so they are still live and still
+        !! hold exactly what they held when the forward sweep tested them; a
+        !! stored flag would cost memory to learn the same thing.
+        integer :: cond = 0
+        character(len=64), allocatable :: then_lhs(:), else_lhs(:)
+        integer, allocatable :: then_rhs(:), else_rhs(:)
+        integer :: n_then = 0, n_else = 0
+        !! Merge variables and the arm-local values feeding them.
+        character(len=64), allocatable :: merge_name(:)
+        character(len=64), allocatable :: merge_from_then(:)
+        character(len=64), allocatable :: merge_from_else(:)
+        integer :: n_merge = 0
+    end type branch_record_t
+
     type :: ssa_map_t
         !! Current SSA name of each declared variable, and the version counter.
         character(len=64), allocatable :: base(:)
@@ -93,7 +115,9 @@ contains
         character(len=64), allocatable :: lhs_names(:)
         integer, allocatable :: rhs_exprs(:)
         type(loop_record_t), allocatable :: loops(:)
-        integer :: n_rec, n_loops
+        type(branch_record_t), allocatable :: branches(:)
+        integer, allocatable :: order_kind(:), order_index(:)
+        integer :: n_rec, n_loops, n_branches, n_order
 
         status%ok = .true.
         suffix = "_b"
@@ -122,11 +146,13 @@ contains
 
         call build_signature(primal, adjoint, spec, dependent, suffix, active)
         call build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
-                                 n_rec, loops, n_loops, status)
+                                 n_rec, loops, n_loops, branches, n_branches, &
+                                 order_kind, order_index, n_order, status)
         if (.not. status%ok) return
         call build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
-                                 n_rec, loops, n_loops, spec, dependent, suffix, &
-                                 active, status)
+                                 n_rec, loops, n_loops, branches, n_branches, &
+                                 order_kind, order_index, n_order, &
+                                 spec, dependent, suffix, active, status)
     end subroutine differentiate_reverse
 
     subroutine choose_dependent(primal, spec, dependent, status)
@@ -201,10 +227,9 @@ contains
             case (FAD_END_DO)
                 continue
             case (FAD_IF, FAD_ELSE, FAD_END_IF)
-                status%ok = .false.
-                status%message = "reverse mode: branches need control-flow "// &
-                    "reversal, which is the next milestone"
-                return
+                ! Branches are handled by re-evaluating the condition in the
+                ! reverse sweep; see emit_branch_forward.
+                continue
             end select
         end do
     end subroutine check_supported
@@ -387,7 +412,8 @@ contains
     end subroutine build_signature
 
     subroutine build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
-                                   n_rec, loops, n_loops, status)
+                                   n_rec, loops, n_loops, branches, n_branches, &
+                                   order_kind, order_index, n_order, status)
         !! Emit the primal, renaming straight-line assignments into static
         !! single assignment and emitting reduction loops verbatim.
         !!
@@ -403,19 +429,32 @@ contains
         integer, intent(out) :: n_rec
         type(loop_record_t), allocatable, intent(out) :: loops(:)
         integer, intent(out) :: n_loops
+        type(branch_record_t), allocatable, intent(out) :: branches(:)
+        integer, intent(out) :: n_branches
+        !! Blocks in forward program order, so the reverse sweep can walk them
+        !! backwards. Reversing all straight-line statements and only then the
+        !! loops and branches is wrong whenever a construct sits between two
+        !! assignments, which it usually does.
+        integer, allocatable, intent(out) :: order_kind(:), order_index(:)
+        integer, intent(out) :: n_order
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
         type(fad_decl_t) :: d
         character(len=:), allocatable :: fresh, current
         type(loop_shape_t) :: shape
-        integer :: i, k, di, ignored
+        integer :: i, k, di, ignored, after
 
         call ssa_init(primal, ssa)
         allocate (lhs_names(max(1, primal%n_stmts)))
         allocate (rhs_exprs(max(1, primal%n_stmts)))
         allocate (loops(max(1, primal%n_stmts)))
+        allocate (branches(max(1, primal%n_stmts)))
+        allocate (order_kind(max(1, primal%n_stmts)))
+        allocate (order_index(max(1, primal%n_stmts)))
         n_rec = 0
         n_loops = 0
+        n_branches = 0
+        n_order = 0
 
         i = 1
         do while (i <= primal%n_stmts)
@@ -441,6 +480,9 @@ contains
                 n_rec = n_rec + 1
                 lhs_names(n_rec) = fresh
                 rhs_exprs(n_rec) = s%value
+                n_order = n_order + 1
+                order_kind(n_order) = ORDER_STMT
+                order_index(n_order) = n_rec
                 i = i + 1
 
             case (FAD_DO)
@@ -454,13 +496,246 @@ contains
                 call emit_loop_forward(primal, adjoint, ssa, shape, &
                                        loops(n_loops), status)
                 if (.not. status%ok) return
+                n_order = n_order + 1
+                order_kind(n_order) = ORDER_LOOP
+                order_index(n_order) = n_loops
                 i = shape%last + 1
+
+            case (FAD_IF)
+                n_branches = n_branches + 1
+                call emit_branch_forward(primal, adjoint, ssa, i, &
+                                         branches(n_branches), after, status)
+                if (.not. status%ok) return
+                n_order = n_order + 1
+                order_kind(n_order) = ORDER_BRANCH
+                order_index(n_order) = n_branches
+                i = after
 
             case default
                 i = i + 1
             end select
         end do
     end subroutine build_forward_sweep
+
+    subroutine emit_branch_forward(primal, adjoint, ssa, first, rec, after, status)
+        !! Emit one if/else, renaming each arm independently and merging.
+        !!
+        !! Each arm is straight-line, so SSA works inside it. The arms disagree
+        !! about the current version of anything they both assign, so the join
+        !! needs an explicit merge variable, written at the end of whichever arm
+        !! ran. That is a phi node made concrete, which is the only honest way
+        !! to do it in a language with no phi.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(inout) :: ssa
+        integer, intent(in) :: first
+        type(branch_record_t), intent(out) :: rec
+        integer, intent(out) :: after
+        type(reverse_status_t), intent(inout) :: status
+        type(fad_stmt_t) :: s
+        type(fad_decl_t) :: d
+        type(ssa_map_t) :: before, after_then
+        character(len=:), allocatable :: fresh, merged, from_then, from_else
+        integer :: i, di, ignored, else_at, end_at, depth
+
+        after = first + 1
+
+        ! Find the matching else and end if.
+        depth = 0
+        else_at = 0
+        end_at = 0
+        do i = first, primal%n_stmts
+            select case (primal%stmts(i)%kind)
+            case (FAD_IF)
+                depth = depth + 1
+            case (FAD_ELSE)
+                if (depth == 1) else_at = i
+            case (FAD_END_IF)
+                depth = depth - 1
+                if (depth == 0) then
+                    end_at = i
+                    exit
+                end if
+            case (FAD_DO)
+                if (depth >= 1) then
+                    status%ok = .false.
+                    status%message = "reverse mode: a loop inside a branch is "// &
+                        "not supported yet"
+                    return
+                end if
+            end select
+        end do
+        if (end_at == 0) then
+            status%ok = .false.
+            status%message = "unterminated if construct"
+            return
+        end if
+        after = end_at + 1
+
+        ! The condition is evaluated with the SSA state before the branch.
+        rec%cond = copy_renamed(primal, adjoint, primal%stmts(first)%value, ssa)
+        before = ssa
+
+        allocate (rec%then_lhs(end_at - first), rec%then_rhs(end_at - first))
+        allocate (rec%else_lhs(end_at - first), rec%else_rhs(end_at - first))
+        allocate (rec%merge_name(end_at - first))
+        allocate (rec%merge_from_then(end_at - first))
+        allocate (rec%merge_from_else(end_at - first))
+        rec%n_then = 0
+        rec%n_else = 0
+        rec%n_merge = 0
+
+        s%kind = FAD_IF
+        s%value = rec%cond
+        ignored = adjoint%add_stmt(s)
+
+        call emit_arm(primal, adjoint, ssa, first + 1, &
+                      merge(else_at, end_at, else_at > 0) - 1, &
+                      rec%then_lhs, rec%then_rhs, rec%n_then, status)
+        if (.not. status%ok) return
+        after_then = ssa
+
+        s%kind = FAD_ELSE
+        s%value = 0
+        ignored = adjoint%add_stmt(s)
+
+        ssa = before
+        if (else_at > 0) then
+            call emit_arm(primal, adjoint, ssa, else_at + 1, end_at - 1, &
+                          rec%else_lhs, rec%else_rhs, rec%n_else, status)
+            if (.not. status%ok) return
+        end if
+
+        ! Merge: every variable either arm assigned gets one post-branch name.
+        do i = 1, primal%n_decls
+            call ssa_lookup(after_then, primal%decls(i)%name, from_then)
+            call ssa_lookup(ssa, primal%decls(i)%name, from_else)
+            if (from_then == from_else) cycle
+            rec%n_merge = rec%n_merge + 1
+            ! The merge name must not collide with a version either arm used.
+            ! The else arm's counter alone is not enough: the then arm may have
+            ! gone further, and its names are already in the emitted code.
+            call ssa_set(ssa, primal%decls(i)%name, from_else)
+            call ssa_advance_to(ssa, primal%decls(i)%name, &
+                                ssa_version(after_then, primal%decls(i)%name))
+            call ssa_fresh(ssa, primal%decls(i)%name, merged)
+            d = primal%decls(i)
+            d%name = merged
+            d%intent = FAD_INTENT_NONE
+            d%is_result = .false.
+            ignored = adjoint%add_decl(d)
+            rec%merge_name(rec%n_merge) = merged
+            rec%merge_from_then(rec%n_merge) = from_then
+            rec%merge_from_else(rec%n_merge) = from_else
+            ! Written in the else arm here; the then arm's copy is spliced in
+            ! below, before the `else`.
+            s%kind = FAD_ASSIGN
+            s%target = merged
+            s%value = adjoint%add_expr(expr_var(from_else))
+            ignored = adjoint%add_stmt(s)
+        end do
+
+        s%kind = FAD_END_IF
+        s%value = 0
+        ignored = adjoint%add_stmt(s)
+
+        call splice_then_merges(adjoint, rec)
+    end subroutine emit_branch_forward
+
+    subroutine emit_arm(primal, adjoint, ssa, lo, hi, arm_lhs, arm_rhs, n, status)
+        !! Emit one arm's statements in SSA form, recording them.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(inout) :: ssa
+        integer, intent(in) :: lo, hi
+        character(len=64), intent(inout) :: arm_lhs(:)
+        integer, intent(inout) :: arm_rhs(:)
+        integer, intent(inout) :: n
+        type(reverse_status_t), intent(inout) :: status
+        type(fad_stmt_t) :: s
+        type(fad_decl_t) :: d
+        character(len=:), allocatable :: fresh
+        integer :: i, di, ignored
+
+        do i = lo, hi
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) then
+                status%ok = .false.
+                status%message = "reverse mode: only assignments are supported "// &
+                    "inside a branch arm"
+                return
+            end if
+            di = primal%decl_index(primal%stmts(i)%target)
+            if (di == 0) then
+                status%ok = .false.
+                status%message = "assignment to undeclared '"// &
+                                 primal%stmts(i)%target//"'"
+                return
+            end if
+            s%kind = FAD_ASSIGN
+            s%value = copy_renamed(primal, adjoint, primal%stmts(i)%value, ssa)
+            call ssa_fresh(ssa, primal%stmts(i)%target, fresh)
+            s%target = fresh
+            d = primal%decls(di)
+            d%name = fresh
+            d%intent = FAD_INTENT_NONE
+            d%is_result = .false.
+            ignored = adjoint%add_decl(d)
+            ignored = adjoint%add_stmt(s)
+            n = n + 1
+            arm_lhs(n) = fresh
+            arm_rhs(n) = s%value
+        end do
+    end subroutine emit_arm
+
+    subroutine splice_then_merges(adjoint, rec)
+        !! Put the then-arm's merge writes at the end of the then arm.
+        !!
+        !! They are built after the else arm, because the merge names are only
+        !! known once both arms have been renamed, so they have to be moved back
+        !! into place rather than emitted where they belong.
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(branch_record_t), intent(in) :: rec
+        type(fad_stmt_t), allocatable :: rebuilt(:)
+        type(fad_stmt_t) :: s
+        integer :: i, k, else_at, n_new
+
+        if (rec%n_merge == 0) return
+
+        else_at = 0
+        do i = adjoint%n_stmts, 1, -1
+            if (adjoint%stmts(i)%kind == FAD_ELSE) then
+                else_at = i
+                exit
+            end if
+        end do
+        if (else_at == 0) return
+
+        allocate (rebuilt(adjoint%n_stmts + rec%n_merge))
+        n_new = 0
+        do i = 1, else_at - 1
+            n_new = n_new + 1
+            rebuilt(n_new) = adjoint%stmts(i)
+        end do
+        do k = 1, rec%n_merge
+            s%kind = FAD_ASSIGN
+            s%target = trim(rec%merge_name(k))
+            s%value = adjoint%add_expr(expr_var(trim(rec%merge_from_then(k))))
+            n_new = n_new + 1
+            rebuilt(n_new) = s
+        end do
+        do i = else_at, adjoint%n_stmts
+            n_new = n_new + 1
+            rebuilt(n_new) = adjoint%stmts(i)
+        end do
+
+        if (.not. allocated(adjoint%stmts)) return
+        if (size(adjoint%stmts) < n_new) then
+            deallocate (adjoint%stmts)
+            allocate (adjoint%stmts(n_new + 32))
+        end if
+        adjoint%stmts(1:n_new) = rebuilt(1:n_new)
+        adjoint%n_stmts = n_new
+    end subroutine splice_then_merges
 
     subroutine emit_loop_forward(primal, adjoint, ssa, shape, rec, status)
         !! Emit one reduction loop, and record what the reverse sweep needs.
@@ -591,8 +866,9 @@ contains
     end subroutine emit_loop_forward
 
     subroutine build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
-                                   n_rec, loops, n_loops, spec, dependent, &
-                                   suffix, active, status)
+                                   n_rec, loops, n_loops, branches, n_branches, &
+                                   order_kind, order_index, n_order, &
+                                   spec, dependent, suffix, active, status)
         !! Walk backwards, accumulating adjoints.
         !!
         !! Straight-line statements are inverted directly against their SSA
@@ -606,6 +882,9 @@ contains
         integer, intent(in) :: rhs_exprs(:), n_rec
         type(loop_record_t), intent(in) :: loops(:)
         integer, intent(in) :: n_loops
+        type(branch_record_t), intent(in) :: branches(:)
+        integer, intent(in) :: n_branches
+        integer, intent(in) :: order_kind(:), order_index(:), n_order
         type(reverse_spec_t), intent(in) :: spec
         character(len=*), intent(in) :: dependent, suffix
         logical, intent(in) :: active(:)
@@ -651,6 +930,10 @@ contains
                 ignored = adjoint%add_stmt(s)
             end do
         end do
+        do k = 1, n_branches
+            call zero_branch_adjoints(primal, adjoint, ssa, branches(k), suffix, &
+                                      active, zero)
+        end do
         do i = 1, size(spec%independents)
             di = primal%decl_index(trim(spec%independents(i)))
             if (di == 0) cycle
@@ -672,17 +955,24 @@ contains
 
         n_tmp = 0
 
-        do i = n_rec, 1, -1
-            if (.not. adjoint_is_live(primal, ssa, lhs_names(i), active)) cycle
-            seed_expr = adjoint%add_expr(expr_var(trim(lhs_names(i))//suffix))
-            call accumulate(primal, adjoint, rhs_exprs(i), seed_expr, ssa, &
-                            suffix, active, n_tmp, status)
-            if (.not. status%ok) return
-        end do
-
-        do k = n_loops, 1, -1
-            call emit_loop_reverse(primal, adjoint, ssa, loops(k), suffix, &
-                                   active, n_tmp, status)
+        ! Exact reverse of forward program order.
+        do k = n_order, 1, -1
+            select case (order_kind(k))
+            case (ORDER_STMT)
+                i = order_index(k)
+                if (.not. adjoint_is_live(primal, ssa, lhs_names(i), active)) cycle
+                seed_expr = adjoint%add_expr(expr_var(trim(lhs_names(i))//suffix))
+                call accumulate(primal, adjoint, rhs_exprs(i), seed_expr, ssa, &
+                                suffix, active, n_tmp, status)
+            case (ORDER_BRANCH)
+                call emit_branch_reverse(primal, adjoint, ssa, &
+                                         branches(order_index(k)), suffix, &
+                                         active, n_tmp, status)
+            case (ORDER_LOOP)
+                call emit_loop_reverse(primal, adjoint, ssa, &
+                                       loops(order_index(k)), suffix, &
+                                       active, n_tmp, status)
+            end select
             if (.not. status%ok) return
         end do
 
@@ -696,6 +986,114 @@ contains
             call fuse_loop(adjoint, loops(1), suffix)
         end if
     end subroutine build_reverse_sweep
+
+    subroutine zero_branch_adjoints(primal, adjoint, ssa, rec, suffix, active, &
+                                    zero)
+        !! Declare and zero every adjoint a branch introduces.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(in) :: ssa
+        type(branch_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: active(:)
+        integer, intent(in) :: zero
+        type(fad_stmt_t) :: s
+        integer :: i, ignored
+
+        do i = 1, rec%n_then
+            if (.not. adjoint_is_live(primal, ssa, rec%then_lhs(i), active)) cycle
+            call declare_adjoint(primal, adjoint, ssa, trim(rec%then_lhs(i)), suffix)
+            s%kind = FAD_ASSIGN
+            s%target = trim(rec%then_lhs(i))//suffix
+            s%value = zero
+            ignored = adjoint%add_stmt(s)
+        end do
+        do i = 1, rec%n_else
+            if (.not. adjoint_is_live(primal, ssa, rec%else_lhs(i), active)) cycle
+            call declare_adjoint(primal, adjoint, ssa, trim(rec%else_lhs(i)), suffix)
+            s%kind = FAD_ASSIGN
+            s%target = trim(rec%else_lhs(i))//suffix
+            s%value = zero
+            ignored = adjoint%add_stmt(s)
+        end do
+        do i = 1, rec%n_merge
+            if (.not. adjoint_is_live(primal, ssa, rec%merge_name(i), active)) cycle
+            call declare_adjoint(primal, adjoint, ssa, trim(rec%merge_name(i)), &
+                                 suffix)
+            s%kind = FAD_ASSIGN
+            s%target = trim(rec%merge_name(i))//suffix
+            s%value = zero
+            ignored = adjoint%add_stmt(s)
+        end do
+    end subroutine zero_branch_adjoints
+
+    subroutine emit_branch_reverse(primal, adjoint, ssa, rec, suffix, active, &
+                                   n_tmp, status)
+        !! The adjoint of one if/else.
+        !!
+        !! The condition is re-evaluated, not recorded: its operands are SSA
+        !! values from before the branch, so they still hold what the forward
+        !! sweep tested. The reverse sweep then takes the same arm, pushes the
+        !! merge adjoint into that arm's final value, and unwinds the arm.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(in) :: ssa
+        type(branch_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: active(:)
+        integer, intent(inout) :: n_tmp
+        type(reverse_status_t), intent(inout) :: status
+        type(fad_stmt_t) :: s
+        integer :: i, ignored, seed_expr, lhs
+
+        s%kind = FAD_IF
+        s%value = rec%cond
+        ignored = adjoint%add_stmt(s)
+
+        do i = 1, rec%n_merge
+            if (.not. adjoint_is_live(primal, ssa, rec%merge_from_then(i), &
+                                      active)) cycle
+            s%kind = FAD_ASSIGN
+            s%target = trim(rec%merge_from_then(i))//suffix
+            lhs = adjoint%add_expr(expr_var(trim(rec%merge_from_then(i))//suffix))
+            seed_expr = adjoint%add_expr(expr_var(trim(rec%merge_name(i))//suffix))
+            s%value = fad_add(adjoint, lhs, seed_expr)
+            ignored = adjoint%add_stmt(s)
+        end do
+        do i = rec%n_then, 1, -1
+            if (.not. adjoint_is_live(primal, ssa, rec%then_lhs(i), active)) cycle
+            seed_expr = adjoint%add_expr(expr_var(trim(rec%then_lhs(i))//suffix))
+            call accumulate(primal, adjoint, rec%then_rhs(i), seed_expr, ssa, &
+                            suffix, active, n_tmp, status)
+            if (.not. status%ok) return
+        end do
+
+        s%kind = FAD_ELSE
+        s%value = 0
+        ignored = adjoint%add_stmt(s)
+
+        do i = 1, rec%n_merge
+            if (.not. adjoint_is_live(primal, ssa, rec%merge_from_else(i), &
+                                      active)) cycle
+            s%kind = FAD_ASSIGN
+            s%target = trim(rec%merge_from_else(i))//suffix
+            lhs = adjoint%add_expr(expr_var(trim(rec%merge_from_else(i))//suffix))
+            seed_expr = adjoint%add_expr(expr_var(trim(rec%merge_name(i))//suffix))
+            s%value = fad_add(adjoint, lhs, seed_expr)
+            ignored = adjoint%add_stmt(s)
+        end do
+        do i = rec%n_else, 1, -1
+            if (.not. adjoint_is_live(primal, ssa, rec%else_lhs(i), active)) cycle
+            seed_expr = adjoint%add_expr(expr_var(trim(rec%else_lhs(i))//suffix))
+            call accumulate(primal, adjoint, rec%else_rhs(i), seed_expr, ssa, &
+                            suffix, active, n_tmp, status)
+            if (.not. status%ok) return
+        end do
+
+        s%kind = FAD_END_IF
+        s%value = 0
+        ignored = adjoint%add_stmt(s)
+    end subroutine emit_branch_reverse
 
     logical function can_fuse(primal, rec, dependent) result(yes)
         !! Fusion is safe when the loop's accumulator adjoint is already final
@@ -1263,6 +1661,36 @@ contains
             end if
         end do
     end function is_known_name
+
+    integer function ssa_version(ssa, name) result(v)
+        !! Current version counter of `name`.
+        type(ssa_map_t), intent(in) :: ssa
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        v = 0
+        do i = 1, ssa%n
+            if (trim(ssa%base(i)) == name) then
+                v = ssa%version(i)
+                return
+            end if
+        end do
+    end function ssa_version
+
+    subroutine ssa_advance_to(ssa, name, floor_version)
+        !! Raise `name`'s version counter to at least `floor_version`.
+        type(ssa_map_t), intent(inout) :: ssa
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: floor_version
+        integer :: i
+
+        do i = 1, ssa%n
+            if (trim(ssa%base(i)) == name) then
+                ssa%version(i) = max(ssa%version(i), floor_version)
+                return
+            end if
+        end do
+    end subroutine ssa_advance_to
 
     subroutine ssa_lookup(ssa, name, current)
         !! The current version of `name`.
