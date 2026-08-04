@@ -335,7 +335,9 @@ An AD tool may: the forms agree in exact arithmetic.
 | `substitute_temps` | inline a definition into its use |
 | `propagate_loop_zeros` | the first accumulation onto a cleared adjoint is an assignment |
 | `coalesce_element_updates` | repeated `z_b(i)` updates become one load and one store |
-| `factor_self_update` | `x = x*c1 + x*c2` becomes `x = x*(c1 + c2)` |
+| `rename_bodies` | one assignment per scalar per iteration, so substitution can see through an accumulation |
+| `factor_self_update` | `x = x*c1 + x*c2` becomes `x = x*(c1 + c2)`, around the target or around any variable the terms share |
+| `rotate_carried` | issue the loop-carried update first, behind a snapshot |
 | `regroup_products` | reassociate so invariant factors group together |
 | `hoist_invariants` | lift a wholly invariant statement out of the loop |
 | `hoist_subexpressions` | name the invariant coefficient, compute it once |
@@ -353,9 +355,27 @@ Dead-store elimination cannot: the read it appears to protect is the
 accumulation earlier in the body, which belongs to the *next* iteration, and
 that pass does not model iterations.
 
+`rotate_carried` runs last and looks like a pessimisation too: it adds a
+register move. The loop-carried dependence is the critical path, and anything
+scheduled before the update lengthens the wait for the next iteration.
+Snapshotting the incoming value buys a decoupled scatter for one move, and on
+euler it is worth 15%.
+
+Whether to substitute a definition read more than once cannot be decided in
+advance: duplicating it is right when factoring then folds the whole chain into
+constants and wrong when it does not. `optimise` therefore runs the sequence
+twice, once conservative and once willing to duplicate anything, and keeps
+whichever loop body has the smaller total expression size. Ties go to the
+conservative result.
+
 Every pass reasons only within a straight-line run of assignments; a definition
 whose reads are not all inside that window is left alone. The passes run on both
 the forward and the reverse pipeline.
+
+Substitution must also check that the definition's operands are unchanged
+between definition and use. That check was missing at first, and the oracle
+suite caught it as soon as `rename_bodies` made `t = u` followed by a write to
+`u` reachable - the inlined copy silently read the new `u`.
 
 ### Contracts
 
@@ -385,13 +405,15 @@ document. Currently open:
   for that choice and always prefers recomputation, which is right for the
   bandwidth-bound cases it was chosen for and wrong here. Dossier section 4.3.
 
-- **rk4 with the primal is 10% behind Enzyme.** 21.07 ns/input against 19.11,
-  on a primal costing 13.82. The reverse sweeps are 7.25 and 5.29. The whole
-  rk4 step is linear in `state`, so the adjoint collapses in principle to one
-  scaling and one scatter, but the linearity is spread across four stage
-  variables that are each accumulated onto, and `substitute_temps` handles only
-  a single reaching definition. Collapsing a wholly linear loop body is the fix
-  and is general. Gradient-only rk4 already leads Tapenade, 7.43 against 8.78.
+- **rk4 with the primal is 10% behind Enzyme.** 21.15 ns/input against 19.13,
+  on a primal costing 13.44; the reverse sweeps are 7.71 and 5.69. The whole rk4
+  step is linear in `state`, so the adjoint collapses in principle to one
+  scaling and one scatter. `rename_bodies` removed the multiple-definition
+  barrier and generalised factoring collapsed the same shape in bruss and ba,
+  but rk4's scatter is built as a chain of accumulations onto `z_b(i)`, and
+  factoring works within one statement. Merging an accumulation chain into a
+  single expression before factoring is the remaining step. Gradient-only rk4
+  already leads Tapenade, 7.68 against 8.71.
 
 - **The CSE pass is written but disabled.** `fortad_cse` produces wrong
   Hessians through the `fad_hvp` composition path, silently - a plausible but
