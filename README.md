@@ -62,7 +62,7 @@ same flang, correctness gating every timing. Full method and raw data in
 | Forward, 16 directions | ~10x faster per direction |
 | Reverse, reduction (dot_sin) | 1.7-1.8x faster |
 | Reverse, stencil with element writes | 2.1-2.2x faster |
-| Reverse, taped recurrence | **0.9x - Enzyme wins**, see below |
+| Reverse, taped recurrence | **0.97x - Enzyme still ahead**, see below |
 | Build time | 2.7x faster cold and incremental; 4x smaller object |
 | Threads | bit-identical results, 7.4x on 8 cores |
 
@@ -74,7 +74,7 @@ tool can restructure it.
 
 **Where fortad currently loses.** On a nonlinear loop-carried recurrence, where
 both engines must tape and neither fusion nor recomputation applies, Enzyme is
-10-12% faster. The likely cause is store-versus-recompute: fortad recomputes
+about 3.5% faster. The likely cause is store-versus-recompute: fortad recomputes
 `exp(...)` in the reverse sweep having already computed it forward, where
 storing it would trade a transcendental for a load. fortad has no cost model
 for that choice. This is an open defect, not a documented limitation.

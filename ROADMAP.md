@@ -334,13 +334,18 @@ Branches inside loops and recurrences inside nests are still refused by name.
 A competitor winning a benchmark is a defect with an owner, not a limitation to
 document. Currently open:
 
-- **Taped recurrences are 10-12% slower than Enzyme.** Measured on
-  `fortad-bench/cases/recurrence`. fortad recomputes values in the reverse
-  sweep that it already computed in the forward sweep, because it has no
-  store-versus-recompute cost model and currently always prefers recomputation.
-  That preference is right for the bandwidth-bound cases it was chosen for and
-  wrong here. Fixing it needs the cost model in dossier section 4.3, which was
-  planned and not yet built.
+- **Taped recurrences are about 3.5% slower than Enzyme.** Measured on
+  `fortad-bench/cases/recurrence`; was 10-12% before the square rule. What
+  remains is store-versus-recompute: fortad recomputes the statement it taped
+  the input of, where Enzyme appears to store more. fortad has no cost model
+  for that choice and always prefers recomputation, which is right for the
+  bandwidth-bound cases it was chosen for and wrong here. Dossier section 4.3.
+
+- **The CSE pass is written but disabled.** `fortad_cse` produces wrong
+  Hessians through the `fad_hvp` composition path, silently - a plausible but
+  non-symmetric result. It also did not pay for itself when it worked, because
+  gfortran already shared the expressions it hoisted. Both need resolving
+  before it goes back in the pipeline.
 
 ## Explicitly out of scope
 
