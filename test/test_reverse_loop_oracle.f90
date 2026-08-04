@@ -71,6 +71,40 @@ program test_reverse_loop_oracle
                "    end do"//nl// &
                "end subroutine k"//nl, failures)
 
+    ! An array written element by element inside the loop: the adjoint is a
+    ! scatter into c_b(i), and nothing is saved because c(i) survives the loop.
+    call check("revloop_element_write", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    real(8) :: c(n)"//nl// &
+               "    integer :: i"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        c(i) = a(i)*sin(b(i))"//nl// &
+               "        s = s + c(i)*c(i)"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
+    call check("revloop_element_and_temporary", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    real(8) :: c(n)"//nl// &
+               "    real(8) :: t"//nl// &
+               "    integer :: i"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        t = sqrt(1.0d0 + a(i)*a(i))"//nl// &
+               "        c(i) = t*tanh(b(i))"//nl// &
+               "        s = s + exp(-c(i))"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
     call check_refusal("revloop_refuses_recurrence", &
                        "subroutine k(n, a, b, s)"//nl// &
                        "    integer, intent(in) :: n"//nl// &

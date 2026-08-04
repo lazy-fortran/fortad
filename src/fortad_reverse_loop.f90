@@ -41,7 +41,7 @@ module fortad_reverse_loop
     integer, parameter, public :: LOOP_NOT_A_LOOP = 1
     integer, parameter, public :: LOOP_UNSUPPORTED = 2
 
-    public :: loop_shape_t, analyse_loop, split_accumulation
+    public :: loop_shape_t, analyse_loop, split_accumulation, target_base
 
     type :: loop_shape_t
         !! What `analyse_loop` found.
@@ -54,6 +54,9 @@ module fortad_reverse_loop
         integer :: n_accumulators = 0
         character(len=64), allocatable :: temporaries(:)
         integer :: n_temporaries = 0
+        !! Array-element targets, `c(i)`, written once per iteration.
+        character(len=64), allocatable :: elements(:)
+        integer :: n_elements = 0
     end type loop_shape_t
 
 contains
@@ -93,21 +96,33 @@ contains
         end if
 
         allocate (shape%accumulators(32), shape%temporaries(32))
+        allocate (shape%elements(32))
         shape%accumulators = ""
         shape%temporaries = ""
+        shape%elements = ""
         shape%n_accumulators = 0
         shape%n_temporaries = 0
+        shape%n_elements = 0
 
         do i = first + 1, shape%last - 1
             select case (p%stmts(i)%kind)
             case (FAD_ASSIGN)
                 target = p%stmts(i)%target
                 if (index(target, "(") > 0) then
-                    shape%status = LOOP_UNSUPPORTED
-                    shape%message = "reverse mode: an array-element "// &
-                        "assignment inside a loop needs scatter adjoints, "// &
-                        "which is the next milestone"
-                    return
+                    ! `c(i) = expr` writes a distinct element per iteration, so
+                    ! the value is still there after the loop and the adjoint is
+                    ! a scatter into `c_b(i)`. Nothing needs saving. What is not
+                    ! allowed is reading the same array back within the loop,
+                    ! which would make the write order matter.
+                    if (reads_name(p, p%stmts(i)%value, target_base(target))) then
+                        shape%status = LOOP_UNSUPPORTED
+                        shape%message = "reverse mode: '"//target_base(target)// &
+                            "' is both read and written in the same loop; that "// &
+                            "needs per-iteration storage"
+                        return
+                    end if
+                    call add_name(shape%elements, shape%n_elements, target)
+                    cycle
                 end if
                 is_accum = is_linear_accumulation(p, i, target)
                 if (is_accum) then
@@ -149,10 +164,10 @@ contains
             end select
         end do
 
-        if (shape%n_accumulators == 0) then
+        if (shape%n_accumulators == 0 .and. shape%n_elements == 0) then
             shape%status = LOOP_UNSUPPORTED
-            shape%message = "reverse mode: this loop accumulates nothing, so "// &
-                "its results do not leave the loop body"
+            shape%message = "reverse mode: this loop neither accumulates nor "// &
+                "writes array elements, so its results do not leave the body"
             return
         end if
 
@@ -242,6 +257,20 @@ contains
         terms(n) = idx
         signs(n) = sign
     end subroutine walk_spine
+
+    function target_base(target) result(base)
+        !! The array name of an element target, without its subscript.
+        character(len=*), intent(in) :: target
+        character(len=:), allocatable :: base
+        integer :: pos
+
+        pos = index(target, "(")
+        if (pos > 0) then
+            base = target(1:pos - 1)
+        else
+            base = target
+        end if
+    end function target_base
 
     recursive logical function reads_name(p, idx, name) result(yes)
         !! True when the expression reads `name`.

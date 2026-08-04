@@ -30,7 +30,7 @@ module fortad_reverse
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
                             fad_add, fad_mul, fad_neg, fad_real
     use fortad_reverse_loop, only: loop_shape_t, analyse_loop, LOOP_OK, &
-                                   split_accumulation
+                                   split_accumulation, target_base
     implicit none
     private
 
@@ -70,6 +70,10 @@ module fortad_reverse
         integer, allocatable :: body_sign(:)
         integer :: n_body = 0
     end type loop_record_t
+
+    !! Marker in `body_sign` for an array-element target, distinguishing it
+    !! from a scalar temporary (0) and an accumulation term (+-1).
+    integer, parameter :: ELEMENT_TARGET = 2
 
     integer, parameter :: ORDER_STMT = 1
     integer, parameter :: ORDER_LOOP = 2
@@ -206,18 +210,24 @@ contains
         type(fad_proc_t), intent(in) :: primal
         type(reverse_status_t), intent(inout) :: status
         type(loop_shape_t) :: shape
-        integer :: i
+        integer :: i, depth
 
+        depth = 0
         do i = 1, primal%n_stmts
             select case (primal%stmts(i)%kind)
             case (FAD_ASSIGN)
-                if (index(primal%stmts(i)%target, "(") > 0) then
+                ! Inside a loop, an element write is a scatter that analyse_loop
+                ! validates. Outside one there is no index to scatter over, so
+                ! the adjoint would have nowhere to go.
+                if (depth == 0 .and. index(primal%stmts(i)%target, "(") > 0) then
                     status%ok = .false.
                     status%message = "reverse mode: assignment to an array "// &
-                        "element is not supported yet; forward mode handles it"
+                        "element outside a loop is not supported yet; forward "// &
+                        "mode handles it"
                     return
                 end if
             case (FAD_DO)
+                depth = depth + 1
                 call analyse_loop(primal, i, shape)
                 if (shape%status /= LOOP_OK) then
                     status%ok = .false.
@@ -225,7 +235,7 @@ contains
                     return
                 end if
             case (FAD_END_DO)
-                continue
+                depth = max(0, depth - 1)
             case (FAD_IF, FAD_ELSE, FAD_END_IF)
                 ! Branches are handled by re-evaluating the condition in the
                 ! reverse sweep; see emit_branch_forward.
@@ -269,7 +279,10 @@ contains
             do j = 1, primal%n_stmts
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 if (.not. reads_any(primal, primal%stmts(j)%value, varied)) cycle
-                di = primal%decl_index(primal%stmts(j)%target)
+                ! An array-element target must resolve to its array, or the
+                ! array never becomes active and its adjoint is silently
+                ! dropped - a wrong gradient that looks plausible.
+                di = primal%decl_index(target_base(primal%stmts(j)%target))
                 if (di > 0) then
                     if (.not. varied(di)) then
                         varied(di) = .true.
@@ -286,7 +299,7 @@ contains
             changed = .false.
             do j = primal%n_stmts, 1, -1
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
-                di = primal%decl_index(primal%stmts(j)%target)
+                di = primal%decl_index(target_base(primal%stmts(j)%target))
                 if (di == 0) cycle
                 if (.not. useful(di)) cycle
                 if (mark_reads(primal, primal%stmts(j)%value, useful)) changed = .true.
@@ -821,7 +834,23 @@ contains
             if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
             s%kind = FAD_ASSIGN
             s%value = copy_renamed(primal, adjoint, primal%stmts(i)%value, ssa)
-            call ssa_lookup(ssa, primal%stmts(i)%target, fresh)
+            if (index(primal%stmts(i)%target, "(") > 0) then
+                fresh = primal%stmts(i)%target
+                ! An element target is not renamed, so its array still needs a
+                ! declaration in the generated procedure when it was a local.
+                block
+                    integer :: base_di
+                    type(fad_decl_t) :: bd
+                    base_di = primal%decl_index(target_base(fresh))
+                    if (base_di > 0) then
+                        bd = primal%decls(base_di)
+                        bd%is_result = .false.
+                        ignored = adjoint%add_decl(bd)
+                    end if
+                end block
+            else
+                call ssa_lookup(ssa, primal%stmts(i)%target, fresh)
+            end if
             s%target = fresh
             ignored = adjoint%add_stmt(s)
 
@@ -830,6 +859,15 @@ contains
             rec%body_is_accum(rec%n_body) = &
                 is_known_name(shape%accumulators, shape%n_accumulators, &
                               primal%stmts(i)%target)
+            if (index(primal%stmts(i)%target, "(") > 0) then
+                ! An array-element write: its adjoint is a scatter, and the
+                ! written value survives the loop so nothing is saved.
+                rec%body_lhs(rec%n_body) = fresh
+                rec%body_is_accum(rec%n_body) = .false.
+                rec%body_rhs(rec%n_body) = s%value
+                rec%body_sign(rec%n_body) = ELEMENT_TARGET
+                cycle
+            end if
             if (rec%body_is_accum(rec%n_body)) then
                 ! `s = s + e1 - e2 + ...`: the reverse sweep needs each term
                 ! and its sign, so the accumulation expands into one body
@@ -922,6 +960,13 @@ contains
             end do
             do i = 1, loops(k)%n_body
                 if (loops(k)%body_is_accum(i)) cycle
+                if (loops(k)%body_sign(i) == ELEMENT_TARGET) then
+                    ! The written array needs an adjoint array of its own,
+                    ! declared as a local unless it is already an argument.
+                    call declare_array_adjoint(primal, adjoint, &
+                        target_base(trim(loops(k)%body_lhs(i))), suffix, zero)
+                    cycle
+                end if
                 call declare_adjoint(primal, adjoint, ssa, &
                                      trim(loops(k)%body_lhs(i)), suffix)
                 s%kind = FAD_ASSIGN
@@ -1095,6 +1140,45 @@ contains
         ignored = adjoint%add_stmt(s)
     end subroutine emit_branch_reverse
 
+    subroutine declare_array_adjoint(primal, adjoint, base, suffix, zero)
+        !! Declare and zero the adjoint array of an array written in a loop.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        character(len=*), intent(in) :: base, suffix
+        integer, intent(in) :: zero
+        type(fad_decl_t) :: d
+        type(fad_stmt_t) :: s
+        integer :: di, ignored
+
+        di = primal%decl_index(base)
+        if (di == 0) return
+        if (adjoint%decl_index(base//suffix) > 0) return
+        d = primal%decls(di)
+        d%name = base//suffix
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        ignored = adjoint%add_decl(d)
+        s%kind = FAD_ASSIGN
+        s%target = base//suffix//"(:)"
+        s%value = zero
+        ignored = adjoint%add_stmt(s)
+    end subroutine declare_array_adjoint
+
+    function adjoint_element(target, suffix) result(name)
+        !! `c(i)` becomes `c_b(i)`: the suffix goes on the array name, not on
+        !! the whole reference.
+        character(len=*), intent(in) :: target, suffix
+        character(len=:), allocatable :: name
+        integer :: pos
+
+        pos = index(target, "(")
+        if (pos > 0) then
+            name = target(1:pos - 1)//suffix//target(pos:)
+        else
+            name = target//suffix
+        end if
+    end function adjoint_element
+
     logical function can_fuse(primal, rec, dependent) result(yes)
         !! Fusion is safe when the loop's accumulator adjoint is already final
         !! when the forward loop runs.
@@ -1258,37 +1342,55 @@ contains
         ignored = adjoint%add_stmt(s)
 
         ! Recompute the per-iteration temporaries rather than storing them.
+        ! An array-element write is not recomputed: its value is still in the
+        ! array, and rewriting it would be pure waste.
         do i = 1, rec%n_body
             if (rec%body_is_accum(i)) cycle
+            if (rec%body_sign(i) == ELEMENT_TARGET) cycle
             s%kind = FAD_ASSIGN
             s%target = trim(rec%body_lhs(i))
             s%value = rec%body_rhs(i)
             ignored = adjoint%add_stmt(s)
         end do
 
-        ! Push each accumulation's adjoint into its operands, in reverse order.
+        ! Then unwind the body in reverse order, whatever each statement is.
+        ! Kind-by-kind passes were wrong: an element write's adjoint is fed by
+        ! the accumulation that reads it, so the accumulation has to be
+        ! processed first, which reverse program order gives for free.
         do i = rec%n_body, 1, -1
-            if (.not. rec%body_is_accum(i)) cycle
-            seed_expr = adjoint%add_expr(expr_var(trim(rec%body_lhs(i))//suffix))
-            if (rec%body_sign(i) < 0) seed_expr = fad_neg(adjoint, seed_expr)
-            call accumulate(primal, adjoint, rec%body_rhs(i), seed_expr, ssa, &
-                            suffix, active, n_tmp, status)
-            if (.not. status%ok) return
-        end do
+            if (rec%body_is_accum(i)) then
+                seed_expr = adjoint%add_expr( &
+                    expr_var(trim(rec%body_lhs(i))//suffix))
+                if (rec%body_sign(i) < 0) seed_expr = fad_neg(adjoint, seed_expr)
+                call accumulate(primal, adjoint, rec%body_rhs(i), seed_expr, &
+                                ssa, suffix, active, n_tmp, status)
+                if (.not. status%ok) return
 
-        ! A temporary's adjoint is local to one iteration: push it on, then
-        ! clear it so the next iteration starts from zero.
-        do i = rec%n_body, 1, -1
-            if (rec%body_is_accum(i)) cycle
-            if (.not. adjoint_is_live(primal, ssa, rec%body_lhs(i), active)) cycle
-            seed_expr = adjoint%add_expr(expr_var(trim(rec%body_lhs(i))//suffix))
-            call accumulate(primal, adjoint, rec%body_rhs(i), seed_expr, ssa, &
-                            suffix, active, n_tmp, status)
-            if (.not. status%ok) return
-            s%kind = FAD_ASSIGN
-            s%target = trim(rec%body_lhs(i))//suffix
-            s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
-            ignored = adjoint%add_stmt(s)
+            else if (rec%body_sign(i) == ELEMENT_TARGET) then
+                seed_expr = adjoint%add_expr(expr_var(adjoint_element( &
+                    trim(rec%body_lhs(i)), suffix)))
+                call accumulate(primal, adjoint, rec%body_rhs(i), seed_expr, &
+                                ssa, suffix, active, n_tmp, status)
+                if (.not. status%ok) return
+                ! That element's adjoint belongs to this iteration alone.
+                s%kind = FAD_ASSIGN
+                s%target = adjoint_element(trim(rec%body_lhs(i)), suffix)
+                s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
+                ignored = adjoint%add_stmt(s)
+
+            else
+                if (.not. adjoint_is_live(primal, ssa, rec%body_lhs(i), &
+                                          active)) cycle
+                seed_expr = adjoint%add_expr( &
+                    expr_var(trim(rec%body_lhs(i))//suffix))
+                call accumulate(primal, adjoint, rec%body_rhs(i), seed_expr, &
+                                ssa, suffix, active, n_tmp, status)
+                if (.not. status%ok) return
+                s%kind = FAD_ASSIGN
+                s%target = trim(rec%body_lhs(i))//suffix
+                s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
+                ignored = adjoint%add_stmt(s)
+            end if
         end do
 
         s%kind = FAD_END_DO
