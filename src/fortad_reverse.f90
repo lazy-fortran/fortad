@@ -842,8 +842,22 @@ contains
         ! A taped loop needs one array per carried variable, sized from the
         ! loop bounds. The tape is the price of a recurrence that cannot be
         ! recomputed; everything else in this module exists to avoid paying it.
+        ! A tape is worth setting up whenever some temporary is expensive to
+        ! rebuild, not only when a carried variable forces one. Recomputing a
+        ! division or a transcendental in the reverse sweep costs tens of
+        ! cycles; a load costs a few. Tapes that turn out unused are removed by
+        ! dead-array elimination, so being generous here is free.
         rec%taped = shape%n_carried > 0
-        if (rec%taped) allocate (carried_entry(max(1, shape%n_carried)))
+        if (.not. rec%taped) then
+            do k = 1, shape%n_temporaries
+                if (worth_taping(primal, shape, trim(shape%temporaries(k)))) then
+                    rec%taped = .true.
+                    exit
+                end if
+            end do
+        end if
+        if (shape%n_carried > 0) allocate (carried_entry(max(1, shape%n_carried)))
+        if (.not. allocated(carried_entry)) allocate (carried_entry(1))
         if (rec%taped) then
             block
                 use fortad_emit, only: emit_expr
@@ -1222,7 +1236,7 @@ contains
         ! same values in the same order and stays parallelisable. Memory
         ! bandwidth, not arithmetic, is what bounds these kernels, so halving
         ! the traffic is the single largest win available here.
-        if (n_loops == 1 .and. .not. loops(1)%taped .and. &
+        if (n_loops == 1 .and. loops(1)%n_carried == 0 .and. &
             loops(1)%n_levels == 1 .and. &
             can_fuse(primal, loops(1), dependent)) then
             call fuse_loop(adjoint, loops(1), suffix)
@@ -1597,7 +1611,10 @@ contains
         do i = 1, rec%n_levels
             s%kind = FAD_DO
             s%target = trim(rec%nest_var(i))
-            if (rec%taped) then
+            ! Only a carried variable forces the reverse loop to run backwards.
+            ! A tape of per-iteration temporaries is indexed, not ordered, so a
+            ! loop with no recurrence keeps the primal's memory access pattern.
+            if (rec%n_carried > 0) then
                 s%lo = rec%nest_hi(i)
                 s%hi = rec%nest_lo(i)
                 s%step = adjoint%add_expr(expr_const("-1"))

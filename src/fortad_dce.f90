@@ -23,7 +23,8 @@ module fortad_dce
     implicit none
     private
 
-    public :: eliminate_dead_stores, fold_zero_accumulations
+    public :: eliminate_dead_stores, fold_zero_accumulations, &
+              eliminate_dead_arrays
 
 contains
 
@@ -60,6 +61,106 @@ contains
             if (n_out == 0) exit
         end do
     end subroutine eliminate_dead_stores
+
+    subroutine eliminate_dead_arrays(p)
+        !! Remove local arrays that are written and never read.
+        !!
+        !! A tape is decided on before the reverse sweep is built, and the
+        !! sweep may then turn out not to need it: the adjoint of
+        !! `state = state + dt*(a*state + b*z(i))` never reads the state it
+        !! restored. What is left is a loop writing an array nobody looks at,
+        !! which on the Euler kernel is 160 KB of memory traffic per call for
+        !! nothing.
+        !!
+        !! Scalar dead stores are removed first, so this sees the sweep as it
+        !! will actually be emitted rather than as it was built.
+        type(fad_proc_t), intent(inout) :: p
+        logical, allocatable :: keep(:)
+        type(fad_stmt_t), allocatable :: out(:)
+        type(fad_decl_t), allocatable :: decls(:)
+        character(len=:), allocatable :: name
+        integer :: d, i, n_out, n_decls
+
+        if (p%n_decls == 0 .or. p%n_stmts == 0) return
+        allocate (keep(p%n_stmts), out(p%n_stmts))
+
+        do d = 1, p%n_decls
+            if (.not. p%decls(d)%is_array) cycle
+            if (.not. allocated(p%decls(d)%name)) cycle
+            name = p%decls(d)%name
+            if (is_dummy(p, name)) cycle
+            if (array_is_read(p, name)) cycle
+
+            keep = .true.
+            do i = 1, p%n_stmts
+                if (p%stmts(i)%kind /= FAD_ASSIGN) cycle
+                if (.not. allocated(p%stmts(i)%target)) cycle
+                if (base_of(p%stmts(i)%target) /= name) cycle
+                keep(i) = .false.
+            end do
+
+            n_out = 0
+            do i = 1, p%n_stmts
+                if (.not. keep(i)) cycle
+                n_out = n_out + 1
+                out(n_out) = p%stmts(i)
+            end do
+            p%stmts(1:n_out) = out(1:n_out)
+            p%n_stmts = n_out
+
+            p%decls(d)%name = ""
+        end do
+
+        ! Drop the declarations that were blanked out.
+        allocate (decls(p%n_decls))
+        n_decls = 0
+        do d = 1, p%n_decls
+            if (.not. allocated(p%decls(d)%name)) cycle
+            if (len_trim(p%decls(d)%name) == 0) cycle
+            n_decls = n_decls + 1
+            decls(n_decls) = p%decls(d)
+        end do
+        p%decls(1:n_decls) = decls(1:n_decls)
+        p%n_decls = n_decls
+    end subroutine eliminate_dead_arrays
+
+    logical function array_is_read(p, name) result(yes)
+        !! Whether an array is read anywhere: in an expression, or in the
+        !! subscript of a write to it, or in a raw rule statement's text.
+        type(fad_proc_t), intent(in) :: p
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        yes = .true.
+        do i = 1, p%n_stmts
+            if (p%stmts(i)%kind == FAD_ASSIGN) then
+                ! A write to this array is not a read of it, but a write to
+                ! something else that mentions it is.
+                if (allocated(p%stmts(i)%target)) then
+                    if (base_of(p%stmts(i)%target) == name) then
+                        if (expr_reads(p, p%stmts(i)%value, name)) return
+                        cycle
+                    end if
+                end if
+            end if
+            if (statement_reads(p, i, name)) return
+        end do
+        yes = .false.
+    end function array_is_read
+
+    function base_of(target) result(base)
+        !! The name in an assignment target, without any subscript.
+        character(len=*), intent(in) :: target
+        character(len=:), allocatable :: base
+        integer :: pos
+
+        pos = index(target, "(")
+        if (pos > 0) then
+            base = target(1:pos - 1)
+        else
+            base = target
+        end if
+    end function base_of
 
     subroutine fold_zero_accumulations(p)
         !! Turn `x = 0` followed by `x = x + e` into `x = e`.
@@ -304,16 +405,11 @@ contains
 
         yes = .false.
         if (idx <= 0 .or. idx > p%n_exprs) return
-        select case (p%exprs(idx)%kind)
-        case (FAD_VAR, FAD_INDEX)
-            if (p%exprs(idx)%text == name) then
-                yes = .true.
-                return
-            end if
-        end select
-        ! A literal emitted by a registered rule carries Fortran text fortad did
-        ! not build, so it is scanned as text rather than assumed inert.
-        if (p%exprs(idx)%kind /= FAD_VAR .and. allocated(p%exprs(idx)%text)) then
+        ! A variable node may carry a whole subscripted reference in its text -
+        ! a tape restore is emitted as `x_tape(i - (1) + 1)` - so an exact
+        ! comparison misses it. Missing a read here does not merely leave dead
+        ! code behind, it deletes a store something needs.
+        if (allocated(p%exprs(idx)%text)) then
             if (mentions(p%exprs(idx)%text, name)) then
                 yes = .true.
                 return
