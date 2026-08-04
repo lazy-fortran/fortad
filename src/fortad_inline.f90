@@ -21,6 +21,7 @@ module fortad_inline
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
                          FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
                          FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_CALL_STMT, &
+                         FAD_IF, FAD_ELSE, FAD_END_IF, &
                          FAD_INTENT_NONE, expr_var
     use fortad_registry, only: registry_has, call_rule_has
     implicit none
@@ -42,6 +43,9 @@ module fortad_inline
         !! name is a local that was merely renamed.
         integer :: expr = 0
         character(len=:), allocatable :: renamed
+        !! An optional dummy the call site did not supply. `present` of it is
+        !! false, which is known here and nowhere later.
+        logical :: absent = .false.
     end type binding_t
 
 contains
@@ -182,13 +186,24 @@ contains
             n_actual = size(target%stmts(at)%call_args)
         n_binds = 0
         if (allocated(callee%params)) then
-            if (n_actual /= size(callee%params)) then
+            ! Fewer actuals than dummies means the trailing dummies are
+            ! optional and were left out. They are bound as absent, and
+            ! `present` of them folds to false when the body is spliced.
+            if (n_actual > size(callee%params)) then
                 status%ok = .false.
                 status%message = "call to "//trim(callee%name)// &
                                  " does not match its argument list"
                 return
             end if
             do i = 1, size(callee%params)
+                if (i > n_actual) then
+                    n_binds = n_binds + 1
+                    binds(n_binds)%name = trim(callee%params(i))
+                    binds(n_binds)%expr = 0
+                    binds(n_binds)%renamed = ""
+                    binds(n_binds)%absent = .true.
+                    cycle
+                end if
                 a = target%stmts(at)%call_args(i)
                 if (a <= 0 .or. a > target%n_exprs) then
                     status%ok = .false.
@@ -465,7 +480,19 @@ contains
         integer :: i, where_at
 
         where_at = at
-        do i = 1, callee%n_stmts
+        i = 0
+        do while (i < callee%n_stmts)
+            i = i + 1
+            ! `present(dummy)` is decided here: the call site either supplied
+            ! that argument or it did not. When it did not, the guarded branch
+            ! is dead and is dropped rather than emitted against a name that
+            ! does not exist.
+            if (callee%stmts(i)%kind == FAD_IF) then
+                if (guards_absent(callee, callee%stmts(i)%value, binds, n_binds)) then
+                    i = end_of_if(callee, i)
+                    cycle
+                end if
+            end if
             select case (callee%stmts(i)%kind)
             case (FAD_ASSIGN)
                 s%kind = FAD_ASSIGN
@@ -473,6 +500,11 @@ contains
                 s%value = import(target, callee, callee%stmts(i)%value, binds, &
                                  n_binds)
                 s%line = callee%stmts(i)%line
+            case (FAD_IF, FAD_ELSE, FAD_END_IF)
+                s = callee%stmts(i)
+                if (callee%stmts(i)%kind == FAD_IF) &
+                    s%value = import(target, callee, callee%stmts(i)%value, &
+                                     binds, n_binds)
             case (FAD_DO, FAD_END_DO)
                 s = callee%stmts(i)
                 if (callee%stmts(i)%kind == FAD_DO) then
@@ -493,6 +525,50 @@ contains
             where_at = where_at + 1
         end do
     end subroutine splice_body
+
+    logical function guards_absent(callee, cond, binds, n_binds) result(yes)
+        !! Whether this condition is `present(x)` for an x that was not passed.
+        type(fad_proc_t), intent(in) :: callee
+        integer, intent(in) :: cond
+        type(binding_t), intent(in) :: binds(:)
+        integer, intent(in) :: n_binds
+        integer :: arg, k
+
+        yes = .false.
+        if (cond <= 0 .or. cond > callee%n_exprs) return
+        if (callee%exprs(cond)%kind /= FAD_CALL) return
+        if (.not. same_name(callee%exprs(cond)%text, "present")) return
+        if (.not. allocated(callee%exprs(cond)%args)) return
+        if (size(callee%exprs(cond)%args) /= 1) return
+        arg = callee%exprs(cond)%args(1)
+        if (callee%exprs(arg)%kind /= FAD_VAR) return
+        do k = 1, n_binds
+            if (same_name(binds(k)%name, callee%exprs(arg)%text)) then
+                yes = binds(k)%absent
+                return
+            end if
+        end do
+    end function guards_absent
+
+    integer function end_of_if(callee, at) result(out)
+        !! The index of the FAD_END_IF closing the FAD_IF at `at`.
+        type(fad_proc_t), intent(in) :: callee
+        integer, intent(in) :: at
+        integer :: i, depth
+
+        depth = 0
+        do i = at, callee%n_stmts
+            if (callee%stmts(i)%kind == FAD_IF) depth = depth + 1
+            if (callee%stmts(i)%kind == FAD_END_IF) then
+                depth = depth - 1
+                if (depth == 0) then
+                    out = i
+                    return
+                end if
+            end if
+        end do
+        out = callee%n_stmts
+    end function end_of_if
 
     function renamed_target(binds, n_binds, text) result(out)
         !! Rename an assignment target, subscript and all.
