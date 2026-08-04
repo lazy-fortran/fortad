@@ -13,11 +13,12 @@ module fortad_taylor
     !! `k z_k = Σ i a_i z_{k-i}` directly. Nothing here differentiates a series
     !! expansion of the intrinsic; these are exact relations.
     !!
-    !! **Scope.** This is the arithmetic, as a runtime library with the
-    !! coefficient array as the unit of work. The transformation that rewrites a
-    !! Fortran kernel into calls to these routines is not built: what exists is
-    !! the piece whose correctness can be pinned exactly, and the roadmap says
-    !! so rather than implying a complete higher-order mode.
+    !! Every routine is `pure`: coefficients in, coefficients out, no state.
+    !! Generated Taylor-mode code is therefore pure too, which is what lets the
+    !! consumer's compiler treat a call to it as it would any other expression.
+    !!
+    !! The transformation that rewrites a Fortran kernel into calls to these
+    !! routines is `fortad_taylor_gen`.
     use fortad_kinds, only: dp
     implicit none
     private
@@ -28,7 +29,7 @@ module fortad_taylor
 
 contains
 
-    subroutine tay_const(value, z)
+    pure subroutine tay_const(value, z)
         !! A constant: no dependence on `t`.
         real(dp), intent(in) :: value
         real(dp), intent(out) :: z(0:)
@@ -37,7 +38,7 @@ contains
         z(0) = value
     end subroutine tay_const
 
-    subroutine tay_var(value, direction, z)
+    pure subroutine tay_var(value, direction, z)
         !! An independent variable seeded along `direction`.
         real(dp), intent(in) :: value, direction
         real(dp), intent(out) :: z(0:)
@@ -47,7 +48,7 @@ contains
         if (ubound(z, 1) >= 1) z(1) = direction
     end subroutine tay_var
 
-    subroutine tay_add(a, b, z)
+    pure subroutine tay_add(a, b, z)
         !! `z = a + b`.
         real(dp), intent(in) :: a(0:), b(0:)
         real(dp), intent(out) :: z(0:)
@@ -55,7 +56,7 @@ contains
         z = a + b
     end subroutine tay_add
 
-    subroutine tay_sub(a, b, z)
+    pure subroutine tay_sub(a, b, z)
         !! `z = a - b`.
         real(dp), intent(in) :: a(0:), b(0:)
         real(dp), intent(out) :: z(0:)
@@ -63,7 +64,7 @@ contains
         z = a - b
     end subroutine tay_sub
 
-    subroutine tay_scale(c, a, z)
+    pure subroutine tay_scale(c, a, z)
         !! `z = c*a` for a scalar `c`.
         real(dp), intent(in) :: c, a(0:)
         real(dp), intent(out) :: z(0:)
@@ -71,7 +72,7 @@ contains
         z = c*a
     end subroutine tay_scale
 
-    subroutine tay_mul(a, b, z)
+    pure subroutine tay_mul(a, b, z)
         !! `z = a*b`: the Cauchy product, `z_k = Σ a_i b_{k-i}`.
         real(dp), intent(in) :: a(0:), b(0:)
         real(dp), intent(out) :: z(0:)
@@ -86,7 +87,7 @@ contains
         end do
     end subroutine tay_mul
 
-    subroutine tay_div(a, b, z)
+    pure subroutine tay_div(a, b, z)
         !! `z = a/b`, from `a = z b`: `z_k = (a_k - Σ_{i<k} z_i b_{k-i}) / b_0`.
         !!
         !! Requires `b_0 /= 0`. A zero constant term means the quotient has a
@@ -107,7 +108,7 @@ contains
         end do
     end subroutine tay_div
 
-    subroutine tay_exp(a, z)
+    pure subroutine tay_exp(a, z)
         !! `z = exp(a)`, from `z' = z a'`: `k z_k = Σ_{i=1..k} i a_i z_{k-i}`.
         real(dp), intent(in) :: a(0:)
         real(dp), intent(out) :: z(0:)
@@ -125,7 +126,7 @@ contains
         end do
     end subroutine tay_exp
 
-    subroutine tay_log(a, z)
+    pure subroutine tay_log(a, z)
         !! `z = log(a)`, from `a z' = a'`:
         !! `z_k = (a_k - (1/k) Σ_{i=1..k-1} i z_i a_{k-i}) / a_0`.
         real(dp), intent(in) :: a(0:)
@@ -144,7 +145,7 @@ contains
         end do
     end subroutine tay_log
 
-    subroutine tay_sqrt(a, z)
+    pure subroutine tay_sqrt(a, z)
         !! `z = sqrt(a)`, from `z² = a`:
         !! `z_k = (a_k - Σ_{0<i<k} z_i z_{k-i}) / (2 z_0)`.
         real(dp), intent(in) :: a(0:)
@@ -163,7 +164,7 @@ contains
         end do
     end subroutine tay_sqrt
 
-    subroutine tay_sin_cos(a, s, c)
+    pure subroutine tay_sin_cos(a, s, c)
         !! `s = sin(a)` and `c = cos(a)` together.
         !!
         !! Their recurrences are coupled - `s' = c a'`, `c' = -s a'` - so
@@ -189,7 +190,7 @@ contains
         end do
     end subroutine tay_sin_cos
 
-    subroutine tay_pow_int(a, p, z)
+    pure subroutine tay_pow_int(a, p, z)
         !! `z = a**p` for an integer `p`, by repeated multiplication.
         !!
         !! Not via `exp(p log a)`: that would fail for negative `a` where the
@@ -222,7 +223,7 @@ contains
         end if
     end subroutine tay_pow_int
 
-    real(dp) function tay_derivative(z, k) result(value)
+    pure real(dp) function tay_derivative(z, k) result(value)
         !! The `k`-th derivative, recovered as `k! * z_k`.
         !!
         !! Taylor coefficients are the natural storage - the recurrences are
