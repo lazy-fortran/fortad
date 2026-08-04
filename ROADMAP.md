@@ -416,6 +416,16 @@ caller's `intent(in)` argument.
 
 ## Open defects
 
+- **The optimiser is superlinear in the size of a loop body.** fortfem's
+  degree-eleven Bezier edge area has a four-thousand-statement adjoint, and
+  fortad does not finish it in five minutes. `share_in_body` counted uses per
+  candidate across every statement and is fixed - it counts once per round now
+  - but `substitute_temps` still scans every statement per definition through
+  `escapes` and `rhs_stable`, and `name_subexpression` rewrites every statement
+  per hoist. Each is fine at thirty statements and quadratic at four thousand.
+  This is what blocks the fortfem benchmark suite; the operators themselves are
+  ported and their derivatives verified against fortsym.
+
 A competitor winning a benchmark is a defect with an owner, not a limitation to
 document. Currently open:
 
