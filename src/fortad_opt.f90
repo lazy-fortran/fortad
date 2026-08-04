@@ -124,6 +124,7 @@ contains
         call hoist_invariants(p)
         call hoist_subexpressions(p)
         call share_subexpressions(p)
+        call pack_adjacent_reads(p)
         call rotate_carried(p)
         call fold_identities(p)
         call balance_sums(p)
@@ -2895,6 +2896,314 @@ contains
         call insert_before(p, at, s)
         last = last + 1
     end subroutine name_subexpression
+
+    subroutine pack_adjacent_reads(p)
+        !! Read a run of adjacent array elements as one contiguous slice.
+        !!
+        !! A kernel over a batch reads `z(base + 1)` through `z(base + 4)`, four
+        !! separate element loads of four adjacent doubles. Read as a slice they
+        !! are two packed loads, which is what Enzyme's generated code does -
+        !! its loop carries `movupd` and `movhpd` where fortad carries four
+        !! scalar loads. Measured on fortfem's polygon edge area: 0.333
+        !! ns/input against 0.356.
+        !!
+        !! Only a run of three or more is worth a local and a copy.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, first, last, n_packed
+
+        n_packed = 0
+        i = 1
+        do while (i <= p%n_stmts)
+            if (p%stmts(i)%kind /= FAD_DO) then
+                i = i + 1
+                cycle
+            end if
+            call loop_extent(p, i, first, last)
+            if (last == 0 .or. .not. plain_body(p, first, last)) then
+                i = i + 1
+                cycle
+            end if
+            call pack_one_body(p, first, last, n_packed)
+            call loop_extent(p, first, first, last)
+            i = last + 1
+        end do
+    end subroutine pack_adjacent_reads
+
+    subroutine pack_one_body(p, first, last, n_packed)
+        !! Pack every run of adjacent reads in one loop body.
+        use fortad_emit, only: emit_expr
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(inout) :: first, last, n_packed
+        integer, parameter :: MAX_RUNS = 32, MAX_OFF = 64
+        character(len=64) :: arrays(MAX_RUNS)
+        character(len=128) :: bases(MAX_RUNS)
+        integer :: offsets(MAX_RUNS, MAX_OFF), n_offsets(MAX_RUNS)
+        integer :: nodes(MAX_RUNS, MAX_OFF)
+        integer :: n_runs, j, k, r, lo, hi
+
+        n_runs = 0
+        do j = first + 1, last - 1
+            if (p%stmts(j)%value <= 0) cycle
+            call collect_reads(p, p%stmts(j)%value, arrays, bases, offsets, &
+                               nodes, n_offsets, n_runs, MAX_RUNS, MAX_OFF)
+        end do
+
+        do r = 1, n_runs
+            if (n_offsets(r) < 3) cycle
+            ! A snapshot is only the array's contents while nothing writes it.
+            ! The adjoint array is accumulated into element by element, and an
+            ! element written twice would read a stale copy the second time.
+            if (written_in_body(p, first, last, trim(arrays(r)))) cycle
+            call sort_offsets(offsets(r, :), nodes(r, :), n_offsets(r))
+            lo = offsets(r, 1)
+            hi = offsets(r, n_offsets(r))
+            ! Contiguous only: a gap would mean loading elements nothing reads.
+            if (hi - lo + 1 /= n_offsets(r)) cycle
+            n_packed = n_packed + 1
+            call emit_slice(p, first, last, trim(arrays(r)), trim(bases(r)), &
+                            lo, hi, offsets(r, :), nodes(r, :), n_offsets(r), &
+                            n_packed)
+            call loop_extent(p, first, first, last)
+        end do
+    end subroutine pack_one_body
+
+    recursive subroutine collect_reads(p, idx, arrays, bases, offsets, nodes, &
+                                       n_offsets, n_runs, max_runs, max_off)
+        !! Record element reads of the form `array(base + literal)`.
+        use fortad_emit, only: emit_expr
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx, max_runs, max_off
+        character(len=64), intent(inout) :: arrays(:)
+        character(len=128), intent(inout) :: bases(:)
+        integer, intent(inout) :: offsets(:, :), nodes(:, :), n_offsets(:)
+        integer, intent(inout) :: n_runs
+        character(len=:), allocatable :: base_text
+        integer :: i, sub, off, r
+        logical :: found
+
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (p%exprs(idx)%kind == FAD_INDEX) then
+            if (allocated(p%exprs(idx)%args)) then
+                if (size(p%exprs(idx)%args) == 1) then
+                    sub = p%exprs(idx)%args(1)
+                    call split_offset(p, sub, base_text, off, found)
+                    if (found) then
+                        r = run_index(arrays, bases, n_runs, &
+                                      trim(p%exprs(idx)%text), base_text)
+                        if (r == 0 .and. n_runs < max_runs) then
+                            n_runs = n_runs + 1
+                            r = n_runs
+                            arrays(r) = trim(p%exprs(idx)%text)
+                            bases(r) = base_text
+                            n_offsets(r) = 0
+                        end if
+                        if (r > 0) call note_offset(offsets(r, :), nodes(r, :), &
+                                                    n_offsets(r), off, idx, &
+                                                    max_off)
+                    end if
+                end if
+            end if
+        end if
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            call collect_reads(p, p%exprs(idx)%args(i), arrays, bases, offsets, &
+                               nodes, n_offsets, n_runs, max_runs, max_off)
+        end do
+    end subroutine collect_reads
+
+    subroutine split_offset(p, idx, base_text, off, found)
+        !! Split a subscript into `base + literal`.
+        use fortad_emit, only: emit_expr
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=:), allocatable, intent(out) :: base_text
+        integer, intent(out) :: off
+        logical, intent(out) :: found
+        integer :: ios
+
+        found = .false.
+        off = 0
+        base_text = ""
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (p%exprs(idx)%kind /= FAD_BINOP) return
+        if (trim(p%exprs(idx)%text) /= "+") return
+        if (p%exprs(p%exprs(idx)%args(2))%kind /= FAD_CONST) return
+        read (p%exprs(p%exprs(idx)%args(2))%text, *, iostat=ios) off
+        if (ios /= 0) return
+        base_text = emit_expr(p, p%exprs(idx)%args(1))
+        found = .true.
+    end subroutine split_offset
+
+    integer function run_index(arrays, bases, n_runs, array, base) result(r)
+        character(len=64), intent(in) :: arrays(:)
+        character(len=128), intent(in) :: bases(:)
+        integer, intent(in) :: n_runs
+        character(len=*), intent(in) :: array, base
+        integer :: i
+
+        r = 0
+        do i = 1, n_runs
+            if (trim(arrays(i)) /= array) cycle
+            if (trim(bases(i)) /= base) cycle
+            r = i
+            return
+        end do
+    end function run_index
+
+    subroutine note_offset(offsets, nodes, n, off, node, cap)
+        integer, intent(inout) :: offsets(:), nodes(:), n
+        integer, intent(in) :: off, node, cap
+        integer :: i
+
+        do i = 1, n
+            if (offsets(i) == off) return
+        end do
+        if (n >= cap) return
+        n = n + 1
+        offsets(n) = off
+        nodes(n) = node
+    end subroutine note_offset
+
+    subroutine sort_offsets(offsets, nodes, n)
+        !! Insertion sort; a run is a handful of entries.
+        integer, intent(inout) :: offsets(:), nodes(:)
+        integer, intent(in) :: n
+        integer :: i, j, o, d
+
+        do i = 2, n
+            o = offsets(i)
+            d = nodes(i)
+            j = i - 1
+            do while (j >= 1)
+                if (offsets(j) <= o) exit
+                offsets(j + 1) = offsets(j)
+                nodes(j + 1) = nodes(j)
+                j = j - 1
+            end do
+            offsets(j + 1) = o
+            nodes(j + 1) = d
+        end do
+    end subroutine sort_offsets
+
+    subroutine emit_slice(p, first, last, array, base, lo, hi, offsets, nodes, &
+                          n, tag)
+        !! Copy the run into a local and point the reads at it.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(inout) :: first, last
+        character(len=*), intent(in) :: array, base
+        integer, intent(in) :: lo, hi, offsets(:), nodes(:), n, tag
+        type(fad_decl_t) :: d
+        type(fad_stmt_t) :: s
+        character(len=32) :: label
+        character(len=256) :: rhs
+        integer :: di, ignored, k, repl, at
+
+        di = p%decl_index(array)
+        if (di == 0) return
+        write (label, '(a,i0)') "fad_p", tag
+        d = p%decls(di)
+        d%name = trim(label)
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        d%is_array = .true.
+        d%is_contiguous = .false.
+        d%dims = itoa_local(hi - lo + 1)
+        ignored = p%add_decl(d)
+
+        write (rhs, '(a)') array//"("//base//" + "//itoa_local(lo)//":"// &
+            base//" + "//itoa_local(hi)//")"
+        s%kind = FAD_ASSIGN
+        s%target = trim(label)
+        s%value = p%add_expr(expr_var(trim(rhs)))
+        ! Before the first statement that reads the run, not at the top of the
+        ! body: the subscript's base is itself computed in the body, so a load
+        ! placed above it reads whatever the previous iteration left.
+        at = first + 1
+        do k = first + 1, last - 1
+            if (p%stmts(k)%value <= 0) cycle
+            if (any_node_in(p, p%stmts(k)%value, nodes, n)) then
+                at = k
+                exit
+            end if
+        end do
+        call insert_before(p, at, s)
+        last = last + 1
+
+        do k = 1, n
+            block
+                type(fad_expr_t) :: e
+                e%kind = FAD_INDEX
+                e%text = trim(label)
+                e%args = [p%add_expr(expr_const(itoa_local(offsets(k) - lo + 1)))]
+                repl = p%add_expr(e)
+            end block
+            call swap_all(p, first, last, nodes(k), repl)
+        end do
+    end subroutine emit_slice
+
+    logical function written_in_body(p, first, last, array) result(yes)
+        !! Whether any statement in the body assigns to this array.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        character(len=*), intent(in) :: array
+        character(len=:), allocatable :: target_name
+        integer :: j, paren
+
+        yes = .false.
+        do j = first + 1, last - 1
+            target_name = trim(p%stmts(j)%target)
+            paren = index(target_name, "(")
+            if (paren > 0) target_name = trim(target_name(:paren - 1))
+            if (target_name == array) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function written_in_body
+
+    recursive logical function any_node_in(p, idx, nodes, n) result(yes)
+        !! Whether an expression contains any of these arena nodes.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx, nodes(:), n
+        integer :: i, k
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        do k = 1, n
+            if (idx == nodes(k)) then
+                yes = .true.
+                return
+            end if
+        end do
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            if (any_node_in(p, p%exprs(idx)%args(i), nodes, n)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function any_node_in
+
+    subroutine swap_all(p, first, last, node, repl)
+        !! Replace one arena node everywhere in a loop body.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: first, last, node, repl
+        integer :: j
+
+        do j = first + 1, last - 1
+            if (p%stmts(j)%value <= 0) cycle
+            p%stmts(j)%value = swap_node(p, p%stmts(j)%value, node, repl)
+        end do
+    end subroutine swap_all
+
+    function itoa_local(value) result(text)
+        integer, intent(in) :: value
+        character(len=32) :: buf
+        character(len=:), allocatable :: text
+
+        write (buf, '(i0)') value
+        text = trim(buf)
+    end function itoa_local
 
     subroutine rotate_carried(p)
         !! Issue a loop-carried self-update first, behind a snapshot.
