@@ -21,7 +21,8 @@ module fortad
     use fortad_taylor_gen, only: differentiate_taylor, taylor_spec_t, &
                                  taylor_status_t
     use fortad_emit, only: emit_proc, emit_module
-    use fortad_dce, only: eliminate_dead_stores, fold_zero_accumulations
+    use fortad_dce, only: eliminate_dead_stores, fold_zero_accumulations, &
+                          eliminate_dead_arrays
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
                                fad_clear_rules
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
@@ -128,6 +129,7 @@ contains
 
         call fold_zero_accumulations(tangent)
         call eliminate_dead_stores(tangent)
+        call eliminate_dead_arrays(tangent)
 
         res%ok = .true.
         if (present(module_name)) then
@@ -191,6 +193,7 @@ contains
 
         call fold_zero_accumulations(adjoint)
         call eliminate_dead_stores(adjoint)
+        call eliminate_dead_arrays(adjoint)
 
         res%ok = .true.
         if (present(module_name)) then
