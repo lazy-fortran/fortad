@@ -22,6 +22,7 @@ module fortad_opt
     !! conservative - it gives up on code it could handle - but it needs no
     !! dataflow lattice, and a wrong answer here is a wrong derivative rather
     !! than a crash.
+    use fortad_affine, only: collapse_affine_loops
     use fortad_dce, only: eliminate_dead_stores
     use fortad_kinds, only: dp
     use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_expr_t, expr_var, &
@@ -201,6 +202,9 @@ contains
             call distribute_products(p)
             call factor_self_update(p)
         end do
+        ! With the body in single assignment and its copies propagated, the
+        ! affine analysis has the clearest view of it.
+        call collapse_affine_loops(p)
         call regroup_products(p)
         call hoist_invariants(p)
         call hoist_subexpressions(p)
