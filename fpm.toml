@@ -6,6 +6,7 @@ license = "MIT"
 
 [dependencies]
 fortfront = { path = "../fortfront" }
+fortgen = { path = "../fortgen" }
 
 [build]
 auto-examples = false
