@@ -23,12 +23,16 @@ module fortad
                                fad_clear_rules
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
                              recover_entries
+    use fortad_revolve, only: revolve_t, revolve_action_t, revolve_schedule, &
+                              REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
     implicit none
     private
 
     public :: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, fad_result_t, &
               fad_version, fad_add_rule, fad_add_call_rule, fad_clear_rules
     public :: sparsity_t, colour_columns, seed_matrix, recover_entries
+    public :: revolve_t, revolve_action_t, revolve_schedule
+    public :: REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
 
     character(len=*), parameter :: FORTAD_VERSION = "0.1.0"
 

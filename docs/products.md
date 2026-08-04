@@ -181,6 +181,37 @@ Recovery is **exact**, not approximate: compression is a rearrangement.
 and inventing one would be worse than asking. Be conservative: an over-full
 pattern costs sweeps, an under-full one silently loses derivative entries.
 
+## Adjoints of long time integrations
+
+The adjoint of an `n`-step integration needs each step's input state again, in
+reverse. Storing all `n` is often impossible; storing none means replaying from
+the start for every step, which is `O(n²)`. Binomial checkpointing is the
+optimal compromise, and the compromise is very good: with `s` slots and `r`
+repetitions it covers `binom(s+r, s)` steps.
+
+Measured from the schedules this generates: **1000 steps in 10 slots costs 3636
+forward steps** — about 3.6x the primal work, for 10 stored states instead of
+1000. 100 steps in 4 slots costs 379.
+
+```fortran
+use fortad, only: revolve_schedule, revolve_t, &
+                  REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
+
+call revolve_schedule(n_steps, n_slots, schedule)
+do i = 1, schedule%n_actions
+    select case (schedule%actions(i)%kind)
+    case (REV_ADVANCE);  ! run the primal from %from to %to
+    case (REV_TAKESHOT); ! save the current state into %slot
+    case (REV_RESTORE);  ! load %slot back
+    case (REV_TURN);     ! adjoint of step %from, whose input state is current
+    end select
+end do
+```
+
+This is a **schedule, not a driver**. fortad does not own your time loop, your
+state, or your storage, and a framework that demanded to would be useless in
+exactly the codes that need this most.
+
 ## Which mode, mechanically
 
 ```
