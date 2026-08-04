@@ -304,9 +304,10 @@ with the existing factorisation, transpose a BLAS call, apply the IFT at a
 converged point - are the next substantial piece of work, and the one most
 likely to change the shape of the benchmark results.
 
-After that, in rough order of expected value: per-iteration storage so
-nonlinear recurrences stop being refused, nested loops, Revolve checkpointing,
-sparsity with coloring, then the UQ and Gauss-Newton drivers.
+Per-iteration storage and nested loops are done. Remaining, in rough order of
+expected value: Revolve checkpointing, sparsity with coloring, higher-order
+Taylor kernels, then the UQ and Gauss-Newton drivers. Branches inside loops and
+recurrences inside nests are still refused by name.
 
 ## Explicitly out of scope
 
