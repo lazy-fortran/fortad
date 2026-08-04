@@ -117,6 +117,43 @@ For a least-squares residual `r(x)`, Gauss-Newton needs `J v` and `Jᵀ u`, neve
 Both are matrix-free, so the normal equations are solved by a Krylov method
 without ever forming `JᵀJ`. That is the whole reason to have both modes.
 
+## Differentiating a solve, not the solver
+
+The single largest win available here, and the one fortad cannot find on its
+own. Given `call linsolve(n, A, b, x)`, differentiating `A x = b` gives
+
+```
+A x_d = b_d - A_d x
+```
+
+— one more solve with the **same matrix**, so a solver holding a factorisation
+reuses it. Differentiating the solver's iterations instead is asymptotically
+worse and no loop-level cleverness recovers the difference.
+
+Register the rule and fortad emits it:
+
+```fortran
+call fad_add_call_rule("linsolve", 4, &
+    tangent=[character(len=80) :: &
+             "call linsolve($1, $2, $3d - matmul($2d, $4), $4d)"], &
+    adjoint=[character(len=80) :: &
+             "call linsolve_transposed($1, $2, $4b, fad_lambda)"])
+```
+
+Placeholders: `$k` is the k-th actual argument as written at the call site,
+`$kd` its tangent, `$kb` its adjoint. The primal call is emitted **before** the
+tangent statements, because a rule generally needs the call's outputs — the
+solve's tangent reads `x`. A rule needing a pre-call value must save it itself.
+
+The same shape covers a nonlinear solve (the implicit function theorem at the
+converged point), a fixed-point iteration (Christianson's two-phase adjoint),
+and a BLAS call (its own transpose). In each case the rule is mathematics the
+registrant knows and the tool does not.
+
+**Without a rule, a call is refused by name.** fortad never descends into a
+callee and never assumes one is inactive: a silently dropped derivative is
+worse than a build failure, because it looks plausible.
+
 ## Which mode, mechanically
 
 ```

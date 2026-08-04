@@ -239,10 +239,12 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 - [x] **P3.1 Custom-rule registry.** `frule`/`rrule`, projection, explicit
       opt-out. Wire it to fortnum's existing `fortnum_derivative_registry` so a
       kernel's `analytical` candidate becomes fortad's rule automatically.
-- [ ] **P3.2 BLAS and LAPACK rules.** Giles 2008. Reverse of a linear solve
+- [~] **P3.2 BLAS and LAPACK rules.** The mechanism exists and is tested on a
+      linear solve; the rule table itself is not yet written. Giles 2008. Reverse of a linear solve
       reuses the existing factorisation. Measure against Enzyme differentiating
       through `dgesv`.
-- [ ] **P3.3 Implicit differentiation of nonlinear solves and roots.** IFT at the
+- [~] **P3.3 Implicit differentiation of nonlinear solves and roots.** Same
+      mechanism; the linear case is done and tested. IFT at the
       converged point. Measure against Enzyme adjointing the iteration.
 - [ ] **P3.4 Fixed-point adjoints.** Christianson two-phase.
 - [ ] **P3.5 FFT, quadrature, interpolation, special-function rules.** Sourced
@@ -306,10 +308,14 @@ converged point - are the next substantial piece of work, and the one most
 likely to change the shape of the benchmark results.
 
 Per-iteration storage, nested loops, and the product documentation are done.
-Remaining, in rough order of expected value: **structured rules that emit
-statements** (the largest lever, still unbuilt), Revolve checkpointing,
-sparsity with coloring, and higher-order Taylor kernels. Branches inside loops
-and recurrences inside nests are still refused by name.
+Structured rules that emit statements are built: `fad_add_call_rule` takes
+Fortran statement templates, and the linear-solve case is tested against a real
+solver. That closes the dossier's largest predicted lever.
+
+Remaining, in rough order of expected value: Revolve checkpointing, sparsity
+with coloring, higher-order Taylor kernels, and reverse-mode rules applied
+automatically where fortnum already declares an `analytical` candidate.
+Branches inside loops and recurrences inside nests are still refused by name.
 
 ## Explicitly out of scope
 
