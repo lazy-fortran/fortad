@@ -7,6 +7,7 @@ program fortad_cli
     !!
     !! Reads Fortran, writes Fortran. Nothing else is needed to use the result:
     !! compile the generated file with the rest of your project.
+    use fortad, only: fad_add_rule
     use fortad, only: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, &
                       fad_result_t, fad_version
     implicit none
@@ -63,6 +64,50 @@ program fortad_cli
     end if
 
 contains
+
+    subroutine register_rule(spec, stat)
+        !! Register one `NAME:partial;partial;...` rule.
+        !!
+        !! The partials are Fortran written over `$1`, `$2`, ..., one per
+        !! argument, in order. Splitting on the first colon keeps a partial
+        !! free to contain one.
+        use, intrinsic :: iso_fortran_env, only: error_unit
+        use fortad, only: fad_add_rule
+        character(len=*), intent(in) :: spec
+        integer, intent(out) :: stat
+        integer, parameter :: MAX_PARTIALS = 16
+        character(len=256) :: partials(MAX_PARTIALS)
+        integer :: colon, n_partials, from, at
+
+        stat = 0
+        colon = index(spec, ":")
+        if (colon <= 1 .or. colon == len_trim(spec)) then
+            write (error_unit, '(a)') &
+                "fortad: a rule reads NAME:partial;partial;..., got: "//trim(spec)
+            stat = 1
+            return
+        end if
+
+        n_partials = 0
+        from = colon + 1
+        do
+            at = index(spec(from:), ";")
+            if (n_partials >= MAX_PARTIALS) exit
+            n_partials = n_partials + 1
+            if (at == 0) then
+                partials(n_partials) = adjustl(spec(from:))
+                exit
+            end if
+            partials(n_partials) = adjustl(spec(from:from + at - 2))
+            from = from + at
+        end do
+
+        call fad_add_rule(trim(spec(:colon - 1)), partials(:n_partials), stat)
+        if (stat /= 0) then
+            write (error_unit, '(a)') &
+                "fortad: could not register the rule for "//trim(spec(:colon - 1))
+        end if
+    end subroutine register_rule
 
     function run_reverse(source, independents, proc_name, module_name, &
                          with_primal, dep_name) result(res)
@@ -185,6 +230,25 @@ contains
                 if (allocated(dep_name)) deallocate (dep_name)
                 allocate (character(len=length) :: dep_name)
                 call get_command_argument(i, dep_name)
+            case ("--rule")
+                ! The derivative of a routine fortad cannot see inside: a
+                ! kernel behind a C binding, a table lookup, a library call.
+                ! Enzyme needs the same thing, spelled as a custom rule in C.
+                ! Written NAME:dNAME/darg1;dNAME/darg2, over $1, $2, ... - for
+                ! example  --rule 'bessel_i0:bessel_i1($1)'
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, length=length)
+                block
+                    character(len=:), allocatable :: spec
+                    allocate (character(len=length) :: spec)
+                    call get_command_argument(i, spec)
+                    call register_rule(spec, stat)
+                    if (stat /= 0) return
+                end block
             case ("--no-primal")
                 ! Emit the gradient alone. Everything the primal value kept
                 ! alive is then dead and is removed.
