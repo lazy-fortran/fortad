@@ -474,6 +474,20 @@ caller's `intent(in)` argument.
     result is packed. It measures 0.365 ns/input against 0.373 unvectorised,
     with Enzyme at 0.271. Marginal, nowhere near.
 
+  **The achievable ceiling has now been measured, and it does not reach the
+  target.** Two transformations are available and both were hand-written
+  against fortad's current output:
+
+  - reading the four adjacent inputs as one contiguous slice, so the loads pack:
+    0.333 ns/input against 0.356
+  - two batch elements an iteration with two partial accumulators, so the
+    reduction is reassociated: 0.347 against 0.380
+
+  Together they give 0.335 - no better than the slice alone, so they do not
+  compose - against Enzyme's 0.258. That is 1.30x, still outside 20%. Whatever
+  accounts for the remainder is not either of these and has survived seven
+  investigations.
+
   A seventh measurement bounds what is left. Enzyme processes two batch
   elements per iteration with packed loads where fortad processes one scalar.
   Hand-writing that - two partial accumulators, two elements an iteration -
