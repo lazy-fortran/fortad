@@ -17,6 +17,7 @@ module fortad_rules
     !! the outer call. Verbose, but the alternative is silently wrong output.
     use fortad_ir, only: fad_proc_t, expr_const, expr_var, expr_binop, &
                         expr_unop, expr_call, FAD_CONST
+    use fortad_registry, only: registry_has, registry_n_args, registry_partial
     implicit none
     private
 
@@ -39,7 +40,8 @@ contains
               "max", "min", "sign", "atan2", "hypot", "real", "dble", "sum")
             yes = .true.
         case default
-            yes = .false.
+            ! A user-registered rule counts as knowing the derivative.
+            yes = registry_has(name)
         end select
     end function has_rule
 
@@ -273,6 +275,10 @@ contains
             den = fad_add(p, u, v)
             out = fad_div(p, num, den)
 
+        case ("__registered__")
+            ! unreachable; keeps the select shape obvious
+            out = 0
+
         case ("hypot")
             ! (a*da + b*db) / hypot(a, b)
             if (size(args) < 2) return
@@ -283,8 +289,47 @@ contains
             num = fad_add(p, u, v)
             den = fad_fn2(p, "hypot", a, b)
             out = fad_div(p, num, den)
+
+        case default
+            out = jvp_registered(p, name, args, dargs)
         end select
     end function jvp_call
+
+    integer function jvp_registered(p, name, args, dargs) result(out)
+        !! Tangent from a user-registered rule: sum of partial_i * d(arg_i).
+        !!
+        !! The partial arrives as Fortran text with the actual argument text
+        !! substituted, and enters the IR as an opaque leaf. fortad does not
+        !! parse it, does not simplify it, and does not check it - that is the
+        !! contract the registry advertises.
+        use fortad_emit, only: emit_expr
+        type(fad_proc_t), intent(inout) :: p
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: args(:), dargs(:)
+        character(len=512), allocatable :: arg_texts(:)
+        character(len=:), allocatable :: partial_text
+        integer :: i, partial, term, total
+
+        out = 0
+        if (.not. registry_has(name)) return
+        if (registry_n_args(name) /= size(args)) return
+
+        allocate (arg_texts(size(args)))
+        do i = 1, size(args)
+            arg_texts(i) = emit_expr(p, args(i))
+        end do
+
+        total = 0
+        do i = 1, size(args)
+            if (dargs(i) == 0) cycle
+            partial_text = registry_partial(name, i, arg_texts)
+            if (len_trim(partial_text) == 0) cycle
+            partial = p%add_expr(expr_const("("//trim(partial_text)//")"))
+            term = fad_mul(p, partial, dargs(i))
+            total = fad_add(p, total, term)
+        end do
+        out = total
+    end function jvp_registered
 
     integer function jvp_minmax(p, name, a, b, da, db) result(out)
         !! Tangent of max/min: the tangent of whichever argument is selected,

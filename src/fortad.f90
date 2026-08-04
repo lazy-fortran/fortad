@@ -19,11 +19,12 @@ module fortad
     use fortad_reverse, only: differentiate_reverse, reverse_spec_t, &
                               reverse_status_t
     use fortad_emit, only: emit_proc, emit_module
+    use fortad_registry, only: fad_add_rule, fad_clear_rules
     implicit none
     private
 
     public :: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, fad_result_t, &
-              fad_version
+              fad_version, fad_add_rule, fad_clear_rules
 
     character(len=*), parameter :: FORTAD_VERSION = "0.1.0"
 

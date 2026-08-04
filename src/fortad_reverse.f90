@@ -1016,7 +1016,8 @@ contains
             if (.not. has_rule(node_text)) then
                 status%ok = .false.
                 status%message = "no derivative rule for '"//node_text// &
-                    "'; add one to fortad_rules"
+                    "'; register one with fad_add_rule, or keep it out of "// &
+                    "the active path"
                 return
             end if
             one = fad_real(adjoint, "1.0")
