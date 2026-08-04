@@ -6,8 +6,10 @@ program test_reverse_loop_oracle
     !! gradient, the adjoint identity against the generated JVP, and the
     !! recomputed primal.
     !!
-    !! It also checks the refusal boundary: a nonlinear loop-carried recurrence
-    !! must be declined by name, not silently mishandled.
+    !! Coverage spans the four loop shapes fortad distinguishes: a linear
+    !! accumulation, a per-iteration temporary, an array-element write, and a
+    !! nonlinear loop-carried recurrence. Only the last needs a tape, which is
+    !! the whole point of distinguishing them.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -105,7 +107,45 @@ program test_reverse_loop_oracle
                "    end do"//nl// &
                "end subroutine k"//nl, failures)
 
-    call check_refusal("revloop_refuses_recurrence", &
+    ! Nonlinear loop-carried recurrences: the one case that genuinely needs a
+    ! tape, so it is the one case where fortad pays for one.
+    call check("revloop_taped_recurrence", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    integer :: i"//nl// &
+               "    real(8) :: u"//nl// &
+               "    u = 1.0d0"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        u = u*exp(0.05d0*a(i))"//nl// &
+               "        s = s + u*b(i)"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
+    call check("revloop_taped_with_temporary", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    integer :: i"//nl// &
+               "    real(8) :: u"//nl// &
+               "    real(8) :: t"//nl// &
+               "    u = 0.5d0"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        t = tanh(a(i)) + 0.5d0"//nl// &
+               "        u = u*t + 0.1d0*b(i)"//nl// &
+               "        s = s + u*u"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
+    ! A second recurrence shape, with the accumulator reading the carried
+    ! variable rather than a temporary of it.
+    call check("revloop_recurrence_product", &
                        "subroutine k(n, a, b, s)"//nl// &
                        "    integer, intent(in) :: n"//nl// &
                        "    real(8), intent(in) :: a(n)"//nl// &
@@ -129,28 +169,6 @@ program test_reverse_loop_oracle
     end if
 
 contains
-
-    subroutine check_refusal(label, source, failures)
-        !! A construct outside the supported shape must be declined, and the
-        !! message must say what is unsupported.
-        character(len=*), intent(in) :: label, source
-        integer, intent(inout) :: failures
-        type(fad_result_t) :: res
-
-        res = fad_vjp(source, ["a", "b"])
-        if (res%ok) then
-            print *, "FAIL ", label, ": expected a refusal, got generated code"
-            failures = failures + 1
-            return
-        end if
-        if (index(res%message, "recurrence") == 0) then
-            print *, "FAIL ", label, ": refused for the wrong reason: ", &
-                res%message
-            failures = failures + 1
-            return
-        end if
-        print *, "pass ", label, " (refused: ", trim(res%message), ")"
-    end subroutine check_refusal
 
     subroutine check(label, source, failures)
         !! Generate JVP and VJP, compile with the primal, cross-check.
