@@ -38,26 +38,92 @@ module fortad_opt
     !! operation, whose result the factoring pass can then collapse, and not
     !! worth it for a large tree. This caps the expression a substitution may
     !! produce.
-    integer, parameter :: MAX_EXPR_NODES = 32
+    integer, parameter :: MAX_EXPR_NODES = 96
+    !! The bold attempt needs a far larger budget: collapsing a multi-stage
+    !! integrator means substituting every stage into the carried update before
+    !! factoring can fold the result back into one coefficient. The intermediate
+    !! expression is large even though the final one is tiny.
+    integer, parameter :: MAX_EXPR_NODES_BOLD = 2048
+
+    !! Substitution normally refuses a definition read more than once unless it
+    !! is a single cheap operation. Sometimes duplicating a larger definition is
+    !! what lets factoring fold the whole chain into constants, after which the
+    !! duplicates disappear - and sometimes it just duplicates work. Which one
+    !! it is cannot be decided in advance, so `optimise` tries both and keeps
+    !! the cheaper body. This flag selects the aggressive attempt.
+    logical :: aggressive = .false.
 
 contains
 
     subroutine optimise(p)
-        !! Run the passes to a fixed point.
+        !! Run the passes, twice, and keep the cheaper result.
         type(fad_proc_t), intent(inout) :: p
+        type(fad_proc_t) :: bold
+        integer :: base_cost, bold_cost
+
+        bold = p
+        call run_passes(p, .false.)
+        base_cost = loop_cost(p)
+
+        call run_passes(bold, .true.)
+        bold_cost = loop_cost(bold)
+
+        ! Ties go to the conservative result: it has fewer duplicated
+        ! subexpressions and so fewer chances of a register spill the cost
+        ! model cannot see.
+        if (bold_cost < base_cost) p = bold
+    end subroutine optimise
+
+    subroutine run_passes(p, bold) 
+        !! One pass sequence at the given substitution aggressiveness.
+        type(fad_proc_t), intent(inout) :: p
+        logical, intent(in) :: bold
         integer :: pass
 
+        aggressive = bold
+        call propagate_loop_zeros(p)
+        ! Renaming the body into single assignment first is what lets
+        ! substitution reach an accumulated variable. Without it a stage adjoint
+        ! that is written twice is opaque, and a loop body that is wholly linear
+        ! in its carried variable never collapses.
+        call rename_bodies(p)
         do pass = 1, 4
             call propagate_copies(p)
             call substitute_temps(p)
             call factor_self_update(p)
         end do
-        call propagate_loop_zeros(p)
         call coalesce_element_updates(p)
         call regroup_products(p)
         call hoist_invariants(p)
         call hoist_subexpressions(p)
-    end subroutine optimise
+        call rotate_carried(p)
+        aggressive = .false.
+    end subroutine run_passes
+
+    integer function loop_cost(p) result(cost)
+        !! Total expression size inside loops, as a stand-in for work done.
+        !!
+        !! Only loop bodies are counted: a statement outside a loop runs once
+        !! and is noise beside one that runs per element. Expression size counts
+        !! a duplicated subexpression twice, which is the whole point - it is
+        !! what tells the two attempts apart.
+        type(fad_proc_t), intent(in) :: p
+        integer :: i, depth
+
+        cost = 0
+        depth = 0
+        do i = 1, p%n_stmts
+            select case (p%stmts(i)%kind)
+            case (FAD_DO)
+                depth = depth + 1
+            case (FAD_END_DO)
+                depth = depth - 1
+            case (FAD_ASSIGN)
+                if (depth > 0 .and. p%stmts(i)%value > 0) &
+                    cost = cost + expr_size(p, p%stmts(i)%value)
+            end select
+        end do
+    end function loop_cost
 
     ! ------------------------------------------------------------------
     ! Straight-line reasoning
@@ -417,16 +483,26 @@ contains
                 end do
                 if (blocked .or. uses == 0 .or. last_use == 0) cycle
                 if (escapes(p, lhs, i, stop_at)) cycle
-                if (uses > 1 .and. .not. cheap(p, p%stmts(i)%value)) cycle
+                if (uses > 1 .and. .not. cheap(p, p%stmts(i)%value) &
+                    .and. .not. aggressive) cycle
 
                 do j = i + 1, last_use
                     if (p%stmts(j)%value <= 0) cycle
                     if (count_reads(p, p%stmts(j)%value, lhs) == 0) cycle
+                    ! The definition may only be moved to a point where it
+                    ! would still compute the same thing. `t = u` followed by a
+                    ! write to `u` and then a read of `t` is the case that
+                    ! matters: inlining there silently reads the new `u`.
+                    if (.not. rhs_stable(p, i, j)) cycle
                     block
                         integer :: new
                         new = replace_var(p, p%stmts(j)%value, lhs, &
                                           p%stmts(i)%value)
-                        if (expr_size(p, new) > MAX_EXPR_NODES) cycle
+                        if (aggressive) then
+                            if (expr_size(p, new) > MAX_EXPR_NODES_BOLD) cycle
+                        else
+                            if (expr_size(p, new) > MAX_EXPR_NODES) cycle
+                        end if
                         p%stmts(j)%value = new
                         changed = .true.
                     end block
@@ -435,6 +511,22 @@ contains
             if (.not. changed) exit
         end do
     end subroutine substitute_temps
+
+    logical function rhs_stable(p, def_idx, use_idx) result(yes)
+        !! Whether the definition's operands are unchanged between the two.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: def_idx, use_idx
+        integer :: k
+
+        yes = .false.
+        do k = def_idx + 1, use_idx - 1
+            if (p%stmts(k)%kind /= FAD_ASSIGN) return
+            if (.not. allocated(p%stmts(k)%target)) return
+            if (mentions(p, p%stmts(def_idx)%value, &
+                         base_of(p%stmts(k)%target))) return
+        end do
+        yes = .true.
+    end function rhs_stable
 
     logical function escapes(p, name, first, stop_at) result(yes)
         !! Whether `name` is mentioned outside the window it was tracked in.
@@ -543,22 +635,77 @@ contains
 
         do i = 1, p%n_stmts
             if (.not. simple_definition(p, i)) cycle
-            call factor_one(p, i)
+            ! The target first, because a self-update is the case that shortens
+            ! the loop-carried chain. Then any other variable common to the
+            ! terms: after a multi-stage integrator is substituted flat, every
+            ! term of the scatter carries the same carried adjoint, and pulling
+            ! it out turns a polynomial into one multiply.
+            if (factor_around(p, i, trim(p%stmts(i)%target))) cycle
+            call factor_by_common(p, i)
         end do
     end subroutine factor_self_update
 
-    subroutine factor_one(p, idx)
-        !! Factor the right-hand side of statement `idx` around its own target.
+    subroutine factor_by_common(p, idx)
+        !! Factor around whichever variable the terms share.
         type(fad_proc_t), intent(inout) :: p
         integer, intent(in) :: idx
         integer, parameter :: MAX_TERMS = 64
         integer :: terms(MAX_TERMS), signs(MAX_TERMS), n_terms
+        character(len=64) :: cands(32)
+        integer :: n_cands, i, k
+        logical :: ignored
+
+        n_terms = 0
+        call flatten_sum(p, p%stmts(idx)%value, 1, terms, signs, n_terms, MAX_TERMS)
+        if (n_terms < 2 .or. n_terms > MAX_TERMS) return
+
+        n_cands = 0
+        do i = 1, n_terms
+            call collect_factor_names(p, terms(i), cands, n_cands)
+        end do
+        do k = 1, n_cands
+            if (trim(cands(k)) == trim(p%stmts(idx)%target)) cycle
+            ignored = factor_around(p, idx, trim(cands(k)))
+            if (ignored) return
+        end do
+    end subroutine factor_by_common
+
+    subroutine collect_factor_names(p, idx, names, n)
+        !! Record the plain variables multiplied together in one term.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=64), intent(inout) :: names(:)
+        integer, intent(inout) :: n
+        integer, parameter :: MAX_FACTORS = 32
+        integer :: factors(MAX_FACTORS), n_factors, i, k
+        logical :: seen
+
+        n_factors = 0
+        call flatten_product(p, idx, factors, n_factors, MAX_FACTORS)
+        do i = 1, min(n_factors, MAX_FACTORS)
+            if (p%exprs(factors(i))%kind /= FAD_VAR) cycle
+            seen = .false.
+            do k = 1, n
+                if (trim(names(k)) == trim(p%exprs(factors(i))%text)) seen = .true.
+            end do
+            if (seen .or. n >= size(names)) cycle
+            n = n + 1
+            names(n) = trim(p%exprs(factors(i))%text)
+        end do
+    end subroutine collect_factor_names
+
+    logical function factor_around(p, idx, name) result(changed)
+        !! Factor the right-hand side of statement `idx` around `name`.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: name
+        integer, parameter :: MAX_TERMS = 64
+        integer :: terms(MAX_TERMS), signs(MAX_TERMS), n_terms
         integer :: coeffs(MAX_TERMS), coeff_signs(MAX_TERMS), n_coeffs
         integer :: rest(MAX_TERMS), rest_signs(MAX_TERMS), n_rest
-        character(len=:), allocatable :: name
         integer :: i, coeff, acc, value
 
-        name = trim(p%stmts(idx)%target)
+        changed = .false.
         n_terms = 0
         call flatten_sum(p, p%stmts(idx)%value, 1, terms, signs, n_terms, MAX_TERMS)
         if (n_terms < 2 .or. n_terms > MAX_TERMS) return
@@ -567,7 +714,7 @@ contains
         n_rest = 0
         do i = 1, n_terms
             coeff = coefficient_of(p, terms(i), name)
-            if (coeff == -1) return          ! `x` appears in a shape we cannot factor
+            if (coeff == -1) return          ! it appears in a shape we cannot factor
             if (coeff == 0) then
                 n_rest = n_rest + 1
                 rest(n_rest) = terms(i)
@@ -624,7 +771,8 @@ contains
             end block
         end do
         p%stmts(idx)%value = value
-    end subroutine factor_one
+        changed = .true.
+    end function factor_around
 
     recursive subroutine flatten_sum(p, idx, sign, terms, signs, n, cap)
         !! Split an expression into signed additive terms.
@@ -774,6 +922,124 @@ contains
         end do
         yes = .true.
     end function plain_body
+
+    subroutine rename_bodies(p)
+        !! Rewrite each loop body so every scalar is assigned at most once.
+        !!
+        !! A reverse sweep accumulates onto a stage adjoint several times in one
+        !! iteration. Substitution refuses to look through that, because the
+        !! name means different things at different points. Giving each write
+        !! its own name removes the ambiguity without changing what the body
+        !! computes, and the value carried to the next iteration is copied back
+        !! under the original name at the end.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, first, last
+
+        i = 1
+        do while (i <= p%n_stmts)
+            if (p%stmts(i)%kind /= FAD_DO) then
+                i = i + 1
+                cycle
+            end if
+            call loop_extent(p, i, first, last)
+            if (last == 0 .or. .not. plain_body(p, first, last)) then
+                i = i + 1
+                cycle
+            end if
+            call rename_one_body(p, first, last)
+            call loop_extent(p, first, first, last)
+            i = last + 1
+        end do
+    end subroutine rename_bodies
+
+    subroutine rename_one_body(p, first, last)
+        !! Rename multiply-assigned scalars in one loop body.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(inout) :: first, last
+        character(len=64) :: names(64)
+        integer :: counts(64), n_names
+        integer :: j, k
+
+        n_names = 0
+        do j = first + 1, last - 1
+            if (p%stmts(j)%kind /= FAD_ASSIGN) cycle
+            if (.not. allocated(p%stmts(j)%target)) cycle
+            if (index(p%stmts(j)%target, "(") > 0) cycle
+            if (is_dummy(p, trim(p%stmts(j)%target))) cycle
+            call bump(names, counts, n_names, trim(p%stmts(j)%target))
+        end do
+
+        do k = 1, n_names
+            if (counts(k) < 2) cycle
+            call rename_name(p, first, last, trim(names(k)))
+            call loop_extent(p, first, first, last)
+        end do
+    end subroutine rename_one_body
+
+    subroutine bump(names, counts, n, name)
+        !! Count one occurrence of a name.
+        character(len=64), intent(inout) :: names(:)
+        integer, intent(inout) :: counts(:), n
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        do i = 1, n
+            if (trim(names(i)) == name) then
+                counts(i) = counts(i) + 1
+                return
+            end if
+        end do
+        if (n >= size(names)) return
+        n = n + 1
+        names(n) = name
+        counts(n) = 1
+    end subroutine bump
+
+    subroutine rename_name(p, first, last, name)
+        !! Give each write of `name` in the body its own name.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: first
+        integer, intent(inout) :: last
+        character(len=*), intent(in) :: name
+        character(len=64) :: current
+        character(len=32) :: suffix
+        type(fad_decl_t) :: d
+        type(fad_stmt_t) :: s
+        integer :: j, version, di, ignored, repl
+
+        di = p%decl_index(name)
+        if (di == 0) return
+        current = name
+        version = 0
+        do j = first + 1, last - 1
+            if (p%stmts(j)%kind /= FAD_ASSIGN) cycle
+            ! Reads see the version in force at this point.
+            if (p%stmts(j)%value > 0 .and. trim(current) /= name) then
+                repl = p%add_expr(expr_var(trim(current)))
+                p%stmts(j)%value = replace_var(p, p%stmts(j)%value, name, repl)
+            end if
+            if (.not. allocated(p%stmts(j)%target)) cycle
+            if (trim(p%stmts(j)%target) /= name) cycle
+            version = version + 1
+            write (suffix, '(a,i0)') "__", version
+            current = name//trim(suffix)
+            d = p%decls(di)
+            d%name = trim(current)
+            d%intent = FAD_INTENT_NONE
+            d%is_result = .false.
+            ignored = p%add_decl(d)
+            p%stmts(j)%target = trim(current)
+        end do
+        if (version == 0 .or. trim(current) == name) return
+
+        ! Carry the last version back under the original name, for the next
+        ! iteration and for anything after the loop.
+        s%kind = FAD_ASSIGN
+        s%target = name
+        s%value = p%add_expr(expr_var(trim(current)))
+        call insert_before(p, last, s)
+        last = last + 1
+    end subroutine rename_name
 
     subroutine propagate_loop_zeros(p)
         !! Turn the first accumulation onto a per-iteration adjoint into a
@@ -1443,6 +1709,135 @@ contains
         p%stmts(1:n) = out(1:n)
         p%n_stmts = n
     end subroutine insert_before
+
+    subroutine rotate_carried(p)
+        !! Issue a loop-carried self-update first, behind a snapshot.
+        !!
+        !! The loop-carried dependence is the critical path: every iteration
+        !! waits for the previous one's `state_b`. Anything scheduled before the
+        !! update lengthens that wait, and a scatter into an array is the usual
+        !! offender. Snapshotting the incoming value and updating immediately
+        !! costs one register move and lets the scatter overlap with the next
+        !! iteration.
+        !!
+        !! This runs last, after the passes that shorten the update itself.
+        !! Running it earlier would only give them a snapshot to see through.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, first, last, n_snap
+
+        n_snap = 0
+        i = 1
+        do while (i <= p%n_stmts)
+            if (p%stmts(i)%kind /= FAD_DO) then
+                i = i + 1
+                cycle
+            end if
+            call loop_extent(p, i, first, last)
+            if (last == 0 .or. .not. plain_body(p, first, last)) then
+                i = i + 1
+                cycle
+            end if
+            call rotate_one(p, first, last, n_snap)
+            call loop_extent(p, first, first, last)
+            i = last + 1
+        end do
+    end subroutine rotate_carried
+
+    subroutine rotate_one(p, first, last, n_snap)
+        !! Rotate one self-update to the top of a loop body.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(inout) :: first, last, n_snap
+        character(len=:), allocatable :: name
+        character(len=32) :: label
+        type(fad_stmt_t) :: s, moved
+        type(fad_decl_t) :: d
+        integer :: j, k, di, ignored, repl, target_stmt
+
+        target_stmt = 0
+        do j = first + 2, last - 1
+            if (p%stmts(j)%kind /= FAD_ASSIGN) cycle
+            if (.not. allocated(p%stmts(j)%target)) cycle
+            if (index(p%stmts(j)%target, "(") > 0) cycle
+            name = trim(p%stmts(j)%target)
+            if (is_dummy(p, name)) cycle
+            if (p%stmts(j)%value <= 0) cycle
+            if (count_reads(p, p%stmts(j)%value, name) == 0) cycle
+            ! Written once, so moving it cannot reorder two updates.
+            if (count_writes(p, first, last, name) /= 1) cycle
+            ! Everything else it reads must be invariant, or it cannot run
+            ! before the statements it is being moved ahead of.
+            if (.not. ready_at_top(p, first, last, j, name)) cycle
+            target_stmt = j
+            exit
+        end do
+        if (target_stmt == 0) return
+
+        di = p%decl_index(name)
+        if (di == 0) return
+        n_snap = n_snap + 1
+        write (label, '(a,i0)') "fad_r", n_snap
+        d = p%decls(di)
+        d%name = trim(label)
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        d%is_array = .false.
+        if (allocated(d%dims)) deallocate (d%dims)
+        ignored = p%add_decl(d)
+
+        ! Reads of the incoming value, in the update itself and in everything
+        ! it is moving ahead of, become reads of the snapshot.
+        repl = p%add_expr(expr_var(trim(label)))
+        do k = first + 1, target_stmt
+            if (p%stmts(k)%value <= 0) cycle
+            p%stmts(k)%value = replace_var(p, p%stmts(k)%value, name, repl)
+        end do
+
+        moved = p%stmts(target_stmt)
+        do k = target_stmt, first + 2, -1
+            p%stmts(k) = p%stmts(k - 1)
+        end do
+        p%stmts(first + 1) = moved
+
+        s%kind = FAD_ASSIGN
+        s%target = trim(label)
+        s%value = p%add_expr(expr_var(name))
+        call insert_before(p, first + 1, s)
+        last = last + 1
+    end subroutine rotate_one
+
+    integer function count_writes(p, first, last, name) result(n)
+        !! How many statements in the body write `name`.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        character(len=*), intent(in) :: name
+        integer :: j
+
+        n = 0
+        do j = first + 1, last - 1
+            if (assigns_to(p, j, name)) n = n + 1
+        end do
+    end function count_writes
+
+    logical function ready_at_top(p, first, last, idx, name) result(yes)
+        !! Whether the update reads nothing the loop body produces but `name`.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last, idx
+        character(len=*), intent(in) :: name
+        integer :: j
+
+        yes = .false.
+        if (allocated(p%stmts(first)%target)) then
+            if (mentions(p, p%stmts(idx)%value, trim(p%stmts(first)%target))) return
+        end if
+        do j = first + 1, last - 1
+            if (j == idx) cycle
+            if (p%stmts(j)%kind /= FAD_ASSIGN) return
+            if (.not. allocated(p%stmts(j)%target)) return
+            if (base_of(p%stmts(j)%target) == name) cycle
+            if (mentions(p, p%stmts(idx)%value, base_of(p%stmts(j)%target))) return
+        end do
+        yes = .true.
+    end function ready_at_top
 
     subroutine hoist_invariants(p)
         !! Move assignments out of a loop when nothing they read changes in it.
