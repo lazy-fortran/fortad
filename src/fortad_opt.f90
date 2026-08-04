@@ -2013,37 +2013,47 @@ contains
 
     subroutine share_in_body(p, first, last, n_named)
         !! Hoist one repeated subexpression per round, until none is left.
+        !!
+        !! Uses are counted in a single traversal of the body rather than by
+        !! asking each candidate how often it appears. The per-candidate form
+        !! was O(nodes x statements x tree) a round, which is fine on a
+        !! thirty-statement kernel and takes minutes on a degree-eleven Bezier
+        !! with four thousand.
         type(fad_proc_t), intent(inout) :: p
         integer, intent(inout) :: first, last, n_named
         integer, parameter :: MIN_OPS = 2
-        integer :: node, j, best, best_gain, gain, uses, decl_i
+        integer :: node, j, best, best_gain, gain, decl_i
+        integer, allocatable :: uses(:)
         character(len=32) :: label
         logical :: again
 
         again = .true.
         do while (again)
             again = .false.
+            allocate (uses(max(1, p%n_exprs)))
+            uses = 0
+            do j = first + 1, last - 1
+                if (p%stmts(j)%value <= 0) cycle
+                call tally(p, p%stmts(j)%value, uses)
+            end do
+
             best = 0
             best_gain = 0
-            do node = 1, p%n_exprs
+            do node = 1, min(size(uses), p%n_exprs)
+                if (uses(node) < 2) cycle
                 if (op_count(p, node) < MIN_OPS) cycle
-                uses = 0
-                do j = first + 1, last - 1
-                    if (p%stmts(j)%value <= 0) cycle
-                    uses = uses + occurrences(p, p%stmts(j)%value, node)
-                end do
-                if (uses < 2) cycle
                 ! What is saved is one evaluation of the node per extra use.
-                gain = (uses - 1)*op_count(p, node)
+                gain = (uses(node) - 1)*op_count(p, node)
                 if (gain > best_gain) then
                     best_gain = gain
                     best = node
                 end if
             end do
+            deallocate (uses)
             if (best == 0) exit
 
-            ! The temporary takes its type from the subexpression, not from
-            ! the statement it sits in. `base + 1` inside `z(base + 1)` is an
+            ! The temporary takes its type from the subexpression, not from the
+            ! statement it sits in. `base + 1` inside `z(base + 1)` is an
             ! integer in a real-valued statement, and declaring it real makes
             ! the subscript illegal.
             decl_i = node_type_decl(p, best)
@@ -2056,6 +2066,21 @@ contains
             again = .true.
         end do
     end subroutine share_in_body
+
+    recursive subroutine tally(p, idx, uses)
+        !! Count every node an expression tree mentions.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer, intent(inout) :: uses(:)
+        integer :: i
+
+        if (idx <= 0 .or. idx > p%n_exprs .or. idx > size(uses)) return
+        uses(idx) = uses(idx) + 1
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            call tally(p, p%exprs(idx)%args(i), uses)
+        end do
+    end subroutine tally
 
     integer function node_type_decl(p, node) result(decl_i)
         !! A declaration whose type the subexpression's value would have.
