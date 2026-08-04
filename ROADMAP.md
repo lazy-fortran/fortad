@@ -430,9 +430,25 @@ caller's `intent(in)` argument.
   forward numbers sit at parity: reverse has one accumulation to make, forward
   has two that want to be one vector.
 
-  What to try: emit the value and its tangent into adjacent storage so the pair
-  is a candidate for one packed operation. That is a change to the forward
-  emitter, not to a pass.
+  Two explanations have been tested and are wrong:
+
+  - **Not accumulator pairing.** Writing the value and tangent accumulators as
+    a two-element array and accumulating `acc = acc + step*half` measures
+    0.359 ns/input against the current 0.356. Enzyme is at 0.257. The pair is
+    not what Enzyme is packing.
+  - **Not the compile pipeline.** The Enzyme object goes flang to IR, then
+    `opt -O3`, then `clang -O3`, while fortad's is `flang -O3` on Fortran.
+    Putting fortad's generated Fortran through the identical pipeline gives the
+    same instruction mix, four `mulsd` and three `subsd`. The scalar code is
+    what fortad emits, not what a compiler made of it.
+
+  What is left: Enzyme's loop has three `movhpd` and two `movupd`, loading
+  adjacent array elements as packed pairs. `z(base+1)` and `z(base+2)` are
+  adjacent, and fortad reads them one at a time. Whether the obstacle is the
+  named scalars fortad assigns them to, or the order in which the tangent
+  expression interleaves `z` and `z_d` accesses, is not yet known - and after
+  two wrong guesses the next step is to read the IR rather than to guess a
+  third time.
 
 - **`hoist_subexpressions` is still quadratic on a large loop body.** Two of
   the three passes that were have been fixed: `share_in_body` counts uses once
