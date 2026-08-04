@@ -145,6 +145,29 @@ program test_reverse_loop_oracle
 
     ! A second recurrence shape, with the accumulator reading the carried
     ! variable rather than a temporary of it.
+    ! The LSTM shape from the Enzyme benchmark suite: `h` is read at the top of
+    ! the body and assigned at the bottom, so the read sees the previous
+    ! iteration. Nothing in its own right-hand side reveals that, which is what
+    ! made an earlier version recompute it and produce a silently wrong
+    ! gradient.
+    call check("revloop_read_before_assign", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    integer :: i"//nl// &
+               "    real(8) :: h"//nl// &
+               "    real(8) :: g"//nl// &
+               "    h = 0.3d0"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        g = tanh(0.5d0*h + a(i))"//nl// &
+               "        h = g*b(i)"//nl// &
+               "        s = s + h*h"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
     call check("revloop_recurrence_product", &
                        "subroutine k(n, a, b, s)"//nl// &
                        "    integer, intent(in) :: n"//nl// &

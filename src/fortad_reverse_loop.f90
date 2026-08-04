@@ -145,11 +145,11 @@ contains
                             "same loop; that needs per-iteration storage"
                         return
                     end if
-                    if (reads_name(p, p%stmts(i)%value, target)) then
-                        ! A nonlinear loop-carried recurrence: the reverse
-                        ! sweep needs this variable's value at each iteration,
-                        ! and unlike a per-iteration temporary it cannot be
-                        ! recomputed from loop-invariant data. It is taped.
+                    if (is_loop_carried(p, shape%first, shape%last, i, target)) then
+                        ! Loop-carried: the reverse sweep needs this variable's
+                        ! value at each iteration, and unlike a per-iteration
+                        ! temporary it cannot be recomputed from loop-invariant
+                        ! data. It is taped.
                         call add_name(shape%carried, shape%n_carried, target)
                         cycle
                     end if
@@ -208,6 +208,40 @@ contains
 
         shape%status = LOOP_OK
     end subroutine analyse_loop
+
+    logical function is_loop_carried(p, first, last, stmt, target) result(yes)
+        !! Whether a variable assigned at `stmt` carries a value across
+        !! iterations.
+        !!
+        !! Two ways that happens, and only the first is obvious. The statement
+        !! may read the variable it assigns, `u = f(u)`. Or the variable may be
+        !! **read earlier in the body than it is assigned** - which means the
+        !! read sees the previous iteration's value:
+        !!
+        !!     do i = 1, n
+        !!         a = g(h)          ! reads last iteration's h
+        !!         h = f(a)          ! assigns this iteration's h
+        !!     end do
+        !!
+        !! Missing the second case is not a refusal, it is a wrong gradient:
+        !! the reverse sweep would recompute `h` from loop-invariant data and
+        !! silently use the wrong iteration's value. Found on the LSTM kernel
+        !! from the Enzyme benchmark suite, where `hidden` has exactly this
+        !! shape.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last, stmt
+        character(len=*), intent(in) :: target
+        integer :: k
+
+        yes = .true.
+        if (reads_name(p, p%stmts(stmt)%value, target)) return
+
+        do k = first + 1, stmt - 1
+            if (p%stmts(k)%kind /= FAD_ASSIGN) cycle
+            if (reads_name(p, p%stmts(k)%value, target)) return
+        end do
+        yes = .false.
+    end function is_loop_carried
 
     logical function is_linear_accumulation(p, stmt, target) result(yes)
         !! True when the statement adds a sum of terms to `target`, in any
