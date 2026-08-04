@@ -119,6 +119,7 @@ contains
         ! With the body in single assignment and its copies propagated, the
         ! affine analysis has the clearest view of it.
         call collapse_affine_loops(p)
+        call canonicalise_division_signs(p)
         call reciprocate_divisions(p)
         call regroup_products(p)
         call hoist_invariants(p)
@@ -2235,6 +2236,72 @@ contains
         e%args = new_args
         out = p%add_expr(e)
     end function swap_named
+
+    subroutine canonicalise_division_signs(p)
+        !! Put a difference used as a divisor into one canonical operand order.
+        !!
+        !! Interpolation weights divide by every pairwise difference of the
+        !! nodes, and each pair turns up in both orders: `node_1 - node_2` in
+        !! one weight, `node_2 - node_1` in the next. They are the same
+        !! magnitude, so one reciprocal serves both, but nothing downstream can
+        !! see that while the two spell differently.
+        !!
+        !! Ordering the operands by name and moving the sign into the numerator
+        !! makes them one expression, and the sharing and reciprocal passes
+        !! that already run take it from there. Negation is exact, so this
+        !! changes no rounding.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, new
+
+        do i = 1, p%n_stmts
+            if (p%stmts(i)%value <= 0) cycle
+            new = canonicalise_in(p, p%stmts(i)%value)
+            if (new > 0) p%stmts(i)%value = new
+        end do
+    end subroutine canonicalise_division_signs
+
+    recursive integer function canonicalise_in(p, idx) result(out)
+        use fortad_emit, only: emit_expr
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx
+        type(fad_expr_t) :: swapped, quotient, negated
+        integer :: i, child, divisor, n
+        logical :: changed
+
+        out = idx
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (allocated(p%exprs(idx)%args)) then
+            n = size(p%exprs(idx)%args)
+            changed = .false.
+            do i = 1, n
+                child = canonicalise_in(p, p%exprs(idx)%args(i))
+                if (child > 0 .and. child /= p%exprs(idx)%args(i)) then
+                    p%exprs(idx)%args(i) = child
+                    changed = .true.
+                end if
+            end do
+        end if
+
+        if (p%exprs(idx)%kind /= FAD_BINOP) return
+        if (trim(p%exprs(idx)%text) /= "/") return
+        divisor = p%exprs(idx)%args(2)
+        if (divisor <= 0 .or. divisor > p%n_exprs) return
+        if (p%exprs(divisor)%kind /= FAD_BINOP) return
+        if (trim(p%exprs(divisor)%text) /= "-") return
+        if (emit_expr(p, p%exprs(divisor)%args(1)) <= &
+            emit_expr(p, p%exprs(divisor)%args(2))) return
+
+        swapped%kind = FAD_BINOP
+        swapped%text = "-"
+        swapped%args = [p%exprs(divisor)%args(2), p%exprs(divisor)%args(1)]
+        quotient%kind = FAD_BINOP
+        quotient%text = "/"
+        quotient%args = [p%exprs(idx)%args(1), p%add_expr(swapped)]
+        negated%kind = FAD_UNOP
+        negated%text = "-"
+        negated%args = [p%add_expr(quotient)]
+        out = p%add_expr(negated)
+    end function canonicalise_in
 
     subroutine reciprocate_divisions(p)
         !! Turn division by a loop-invariant into multiplication by its
