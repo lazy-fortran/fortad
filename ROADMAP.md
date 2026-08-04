@@ -442,13 +442,29 @@ caller's `intent(in)` argument.
     same instruction mix, four `mulsd` and three `subsd`. The scalar code is
     what fortad emits, not what a compiler made of it.
 
-  What is left: Enzyme's loop has three `movhpd` and two `movupd`, loading
-  adjacent array elements as packed pairs. `z(base+1)` and `z(base+2)` are
-  adjacent, and fortad reads them one at a time. Whether the obstacle is the
-  named scalars fortad assigns them to, or the order in which the tangent
-  expression interleaves `z` and `z_d` accesses, is not yet known - and after
-  two wrong guesses the next step is to read the IR rather than to guess a
-  third time.
+  Reading the IR rather than guessing a third time: **both loops vectorise**.
+  Each carries a `<2 x double>` accumulator. The difference is that fortad's
+  packs a pair, then takes it apart again -
+
+      %27 = shufflevector <2 x double> %26, ..., <i32 1, i32 0>
+      %29 = fmul contract <2 x double> %27, %28
+      %30 = extractelement <2 x double> %29, i64 0
+      %32 = extractelement <2 x double> %29, i64 1
+      %31 = fsub contract double %24, %30
+
+  - one packed multiply whose lanes are immediately extracted to do the
+  subtractions in scalar. The `shufflevector` is a lane swap, which says the
+  pairing LLVM found does not match the order the terms are written in.
+
+  The terms of this tangent are `z(1)*z_d(4)`, `z_d(1)*z(4)`, `z(3)*z_d(2)`,
+  `z_d(3)*z(2)`: no two of them share an adjacent pair of array elements, so
+  there is no term order that makes the loads line up. Whatever Enzyme is doing
+  is not a reordering of the same four products.
+
+  This is a four-operation kernel and the gap is 0.1 ns per element. It is
+  recorded because it is the same mechanism behind every forward-mode case that
+  trails, and not pursued further because that is where the evidence ran out
+  and the value is elsewhere.
 
 - **`hoist_subexpressions` is still quadratic on a large loop body.** Two of
   the three passes that were have been fixed: `share_in_body` counts uses once
