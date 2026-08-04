@@ -10,7 +10,7 @@ $ fortad --mode reverse --indep a,b --module k_adjoint kernel.f90
 
 Working today: forward mode (scalar, array, loop, branch, and vector/batched),
 reverse mode (straight-line, branches, and reduction loops), Hessian-vector
-products, and a registry for your own procedures' derivatives. 34 oracle cases
+products, and a registry for your own procedures' derivatives. 36 oracle cases
 pass locally, each checked against finite differences, the adjoint identity, or
 Hessian symmetry - never against another AD tool.
 
@@ -81,7 +81,7 @@ These are numbers from one machine on one kernel, not a promise about another.
 | Capability | Forward | Reverse |
 |---|---|---|
 | Straight-line expressions | yes | yes |
-| Arrays and subscripts | yes | reads yes, element assignment no |
+| Arrays and subscripts | yes | yes, including element writes in loops |
 | `do` loops | yes | reduction loops only |
 | `if`/`else` | yes | yes |
 | Nonlinear loop-carried recurrence | yes | no |
