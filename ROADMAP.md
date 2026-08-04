@@ -264,10 +264,11 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 
 ## Phase 5 — Products
 
-- [ ] **P5.1 Linear UQ.** `cov(y) = J cov(x) Jᵀ` on the vector forward mode.
+- [x] **P5.1 Linear UQ.** `cov(y) = J cov(x) Jᵀ` on the vector forward mode.
       Document precisely where first-order propagation stops being valid
       (Saltelli et al. 2008).
-- [ ] **P5.2 Sensitivity analysis driver.** Mode selected automatically from
+- [x] **P5.2 Sensitivity analysis driver.** Documented and tested as a
+      shape rule rather than a wrapper; see docs/products.md. Mode selected automatically from
       input count, output count, and sparsity.
 - [~] **P5.3 Optimiser integration.** Gradients and HVPs exist and are
       tested; the driver layer does not. Gradients, Gauss-Newton `JᵀJv`,
@@ -304,10 +305,11 @@ with the existing factorisation, transpose a BLAS call, apply the IFT at a
 converged point - are the next substantial piece of work, and the one most
 likely to change the shape of the benchmark results.
 
-Per-iteration storage and nested loops are done. Remaining, in rough order of
-expected value: Revolve checkpointing, sparsity with coloring, higher-order
-Taylor kernels, then the UQ and Gauss-Newton drivers. Branches inside loops and
-recurrences inside nests are still refused by name.
+Per-iteration storage, nested loops, and the product documentation are done.
+Remaining, in rough order of expected value: **structured rules that emit
+statements** (the largest lever, still unbuilt), Revolve checkpointing,
+sparsity with coloring, and higher-order Taylor kernels. Branches inside loops
+and recurrences inside nests are still refused by name.
 
 ## Explicitly out of scope
 

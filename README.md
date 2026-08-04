@@ -11,7 +11,7 @@ $ fortad --mode reverse --indep a,b --module k_adjoint kernel.f90
 Working today: forward mode (scalar, array, loop, branch, and vector/batched),
 reverse mode (straight-line, branches, and loops - reductions, element writes,
 and taped recurrences), Hessian-vector products, and a registry for your own
-procedures' derivatives. 40 oracle cases
+procedures' derivatives. 41 oracle cases
 pass locally, each checked against finite differences, the adjoint identity, or
 Hessian symmetry - never against another AD tool.
 
@@ -99,9 +99,9 @@ wrong derivative.
 |---|---|---|---|
 | Optimiser gradients | grad f | reverse | working |
 | Newton-Krylov | H v | forward-over-reverse | working |
-| Sensitivity analysis | rows or columns of J | forward or reverse | working, no driver yet |
-| Linear UQ | cov(y) = J cov(x) J^T | vector forward | vector mode works, no driver yet |
-| Gauss-Newton | J, J^T J v | vector forward + reverse | planned |
+| Sensitivity analysis | rows or columns of J | forward or reverse | working, [documented](docs/products.md) |
+| Linear UQ | cov(y) = J cov(x) J^T | vector forward | working, [documented](docs/products.md) |
+| Gauss-Newton | J, J^T J v | vector forward + reverse | working, [documented](docs/products.md) |
 | Sparse Jacobians and Hessians | compressed | coloring | planned |
 | Higher order | Taylor coefficients | generated kernels | planned |
 
@@ -157,7 +157,9 @@ end if
 ```
 
 `fad_jvp`, `fad_vjp`, and `fad_hvp` all take Fortran source and return Fortran
-source. Passing `module_name` is recommended: the consumer then gets a
+source. **[docs/products.md](docs/products.md)** works back from the product you
+want - gradient, Hessian-vector product, linear UQ, sensitivity, Gauss-Newton -
+to the call that gets it, with the cost of each. Passing `module_name` is recommended: the consumer then gets a
 compiler-checked interface rather than an external declaration nobody verifies.
 
 Generated procedures are `pure` and hold no state, so they are thread-safe by
