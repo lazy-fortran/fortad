@@ -34,9 +34,11 @@ module fortad_affine
     !! Bezier edge area, non-terminating on a quintic Lagrange weight - and
     !! every bound put on it was a number chosen to fit the kernels tried.
     use fortad_kinds, only: dp
-    use fortad_ir, only: fad_proc_t, fad_expr_t, expr_var, expr_const, &
+    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
+                        expr_var, expr_const, &
                         expr_binop, FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, &
-                        FAD_CALL, FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO
+                        FAD_CALL, FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, &
+                        FAD_INTENT_NONE
     implicit none
     private
 
@@ -80,6 +82,7 @@ contains
                 cycle
             end if
             call collapse_one(p, first, last)
+            call extent(p, first, first, last)
             i = last + 1
         end do
     end subroutine collapse_affine_loops
@@ -87,11 +90,12 @@ contains
     subroutine collapse_one(p, first, last)
         !! Rewrite one loop body, if it is affine in exactly one carrier.
         type(fad_proc_t), intent(inout) :: p
-        integer, intent(in) :: first, last
+        integer, intent(inout) :: first, last
         character(len=:), allocatable :: carrier
         type(table_t) :: table
         integer, allocatable :: rewritten(:)
-        integer :: j, at
+        integer :: j
+        character(len=:), allocatable :: snapshot
         type(form_t) :: f
         logical :: ok
 
@@ -99,11 +103,14 @@ contains
         call find_carrier(p, first, last, carrier, ok)
         if (.not. ok) return
 
-        ! Every form is stated in terms of the incoming `u`, so every statement
-        ! that reads it has to run before the one that overwrites it. After
-        ! single-assignment renaming that is the last statement in the body, but
-        ! it is checked rather than assumed.
-        if (.not. assigned_last(p, first, last, carrier)) return
+        ! Every form is stated in terms of the value the carrier held on entry,
+        ! named by a snapshot taken before anything in the body runs. Where the
+        ! carrier is overwritten then stops mattering. Without the snapshot a
+        ! statement scheduled after the update reads the new value and the
+        ! adjoint comes out one iteration late - and checking for direct reads
+        ! does not catch it, because the read is of an earlier snapshot whose
+        ! own form mentions the carrier.
+
 
         allocate (rewritten(last - first))
         rewritten = 0
@@ -111,7 +118,7 @@ contains
         call seed(p, table, carrier, ok)
         if (.not. ok) return
 
-        at = carrier_write(p, first, last, carrier)
+        snapshot = snapshot_name(p)
         do j = first + 1, last - 1
             call form_of(p, p%stmts(j)%value, table, carrier, f)
             if (.not. f%affine) return
@@ -120,8 +127,7 @@ contains
             ! there to be read - and a snapshot taken before the update still
             ! has a form mentioning the carrier, so checking for direct reads
             ! is not enough. Anything after the update has to be free of it.
-            if (j > at .and. .not. is_zero(p, f%a)) return
-            rewritten(j - first) = combine(p, f, carrier)
+            rewritten(j - first) = combine(p, f, snapshot)
             call store(table, target_key(p, j), f, ok)
             if (.not. ok) return
         end do
@@ -130,6 +136,7 @@ contains
         do j = first + 1, last - 1
             if (rewritten(j - first) > 0) p%stmts(j)%value = rewritten(j - first)
         end do
+        call take_snapshot(p, first, carrier, snapshot)
     end subroutine collapse_one
 
     subroutine seed(p, table, carrier, ok)
@@ -274,49 +281,65 @@ contains
         end do
     end subroutine gather
 
-    integer function carrier_write(p, first, last, carrier) result(at)
-        !! Where in the body the carrier is overwritten.
+    function snapshot_name(p) result(name)
+        !! A local name for the carrier's value on entry to the iteration.
         type(fad_proc_t), intent(in) :: p
-        integer, intent(in) :: first, last
-        character(len=*), intent(in) :: carrier
-        integer :: j
+        character(len=:), allocatable :: name
+        character(len=32) :: buffer
+        integer :: k
 
-        at = last
-        do j = first + 1, last - 1
-            if (.not. allocated(p%stmts(j)%target)) cycle
-            if (target_key(p, j) == carrier) then
-                at = j
-                return
+        do k = 1, 999
+            write (buffer, '(a,i0)') "fad_u", k
+            if (p%decl_index(trim(buffer)) == 0) exit
+        end do
+        name = trim(buffer)
+    end function snapshot_name
+
+    subroutine take_snapshot(p, first, carrier, snapshot)
+        !! Insert `snapshot = carrier` as the body's first statement.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: first
+        character(len=*), intent(in) :: carrier, snapshot
+        type(fad_stmt_t), allocatable :: out(:)
+        type(fad_stmt_t) :: s
+        type(fad_decl_t) :: d
+        integer :: di, ignored, i, n
+
+        di = p%decl_index(carrier)
+        if (di == 0) return
+        d = p%decls(di)
+        d%name = snapshot
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        d%is_array = .false.
+        if (allocated(d%dims)) deallocate (d%dims)
+        ignored = p%add_decl(d)
+
+        s%kind = FAD_ASSIGN
+        s%target = snapshot
+        s%value = p%add_expr(expr_var(carrier))
+
+        allocate (out(p%n_stmts + 1))
+        n = 0
+        do i = 1, p%n_stmts
+            if (i == first + 1) then
+                n = n + 1
+                out(n) = s
             end if
+            n = n + 1
+            out(n) = p%stmts(i)
         end do
-    end function carrier_write
-
-    logical function assigned_last(p, first, last, carrier) result(yes)
-        !! Whether the carrier is written once, after everything that reads it.
-        !!
-        !! Every form is stated in terms of the value the carrier held on entry
-        !! to the iteration, so a statement that reads it after it has been
-        !! overwritten would be reading something else.
-        type(fad_proc_t), intent(in) :: p
-        integer, intent(in) :: first, last
-        character(len=*), intent(in) :: carrier
-        integer :: j, writes, at
-
-        yes = .false.
-        writes = 0
-        at = 0
-        do j = first + 1, last - 1
-            if (.not. allocated(p%stmts(j)%target)) return
-            if (target_key(p, j) /= carrier) cycle
-            writes = writes + 1
-            at = j
-        end do
-        if (writes /= 1) return
-        do j = at + 1, last - 1
-            if (reads(p, p%stmts(j)%value, carrier)) return
-        end do
-        yes = .true.
-    end function assigned_last
+        if (size(p%stmts) < n) then
+            block
+                type(fad_stmt_t), allocatable :: grown(:)
+                allocate (grown(2*n))
+                grown(1:p%n_stmts) = p%stmts(1:p%n_stmts)
+                call move_alloc(grown, p%stmts)
+            end block
+        end if
+        p%stmts(1:n) = out(1:n)
+        p%n_stmts = n
+    end subroutine take_snapshot
 
     recursive subroutine form_of(p, idx, table, carrier, f)
         !! The affine form of an expression in the carried variable.
