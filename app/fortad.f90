@@ -3,6 +3,7 @@ program fortad_cli
     !!
     !!     fortad --indep x,y kernel.f90
     !!     fortad --indep a,b --directions nd -o kernel_d.f90 kernel.f90
+    !!     fortad --mode reverse --indep x --no-primal kernel.f90
     !!
     !! Reads Fortran, writes Fortran. Nothing else is needed to use the result:
     !! compile the generated file with the rest of your project.
@@ -15,11 +16,12 @@ program fortad_cli
     character(len=:), allocatable :: module_name
     character(len=32), allocatable :: independents(:)
     type(fad_result_t) :: res
-    logical :: roundtrip_only
+    logical :: roundtrip_only, with_primal
     integer :: unit, stat
 
     call parse_arguments(input_path, output_path, indep_list, directions, &
-                         proc_name, mode, module_name, roundtrip_only, stat)
+                         proc_name, mode, module_name, roundtrip_only, &
+                         with_primal, stat)
     if (stat /= 0) then
         call usage()
         error stop 2
@@ -35,7 +37,8 @@ program fortad_cli
         res = fad_roundtrip(source)
     else if (mode == "reverse") then
         independents = split_commas(indep_list)
-        res = run_reverse(source, independents, proc_name, module_name)
+        res = run_reverse(source, independents, proc_name, module_name, &
+                          with_primal)
     else if (mode == "hessian") then
         independents = split_commas(indep_list)
         res = run_hessian(source, independents, proc_name, module_name)
@@ -70,22 +73,26 @@ program fortad_cli
 
 contains
 
-    function run_reverse(source, independents, proc_name, module_name) result(res)
+    function run_reverse(source, independents, proc_name, module_name, &
+                         with_primal) result(res)
         !! Reverse mode, with the optional arguments genuinely absent when the
         !! user did not supply them.
         character(len=*), intent(in) :: source, independents(:)
         character(len=*), intent(in) :: proc_name, module_name
+        logical, intent(in) :: with_primal
         type(fad_result_t) :: res
 
         if (len_trim(proc_name) > 0 .and. len_trim(module_name) > 0) then
             res = fad_vjp(source, independents, name=trim(proc_name), &
-                          module_name=trim(module_name))
+                          module_name=trim(module_name), with_primal=with_primal)
         else if (len_trim(proc_name) > 0) then
-            res = fad_vjp(source, independents, name=trim(proc_name))
+            res = fad_vjp(source, independents, name=trim(proc_name), &
+                          with_primal=with_primal)
         else if (len_trim(module_name) > 0) then
-            res = fad_vjp(source, independents, module_name=trim(module_name))
+            res = fad_vjp(source, independents, module_name=trim(module_name), &
+                          with_primal=with_primal)
         else
-            res = fad_vjp(source, independents)
+            res = fad_vjp(source, independents, with_primal=with_primal)
         end if
     end function run_reverse
 
@@ -108,13 +115,14 @@ contains
     end function run_hessian
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
-                               proc_name, mode, module_name, roundtrip_only, stat)
+                               proc_name, mode, module_name, roundtrip_only, &
+                         with_primal, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
         character(len=:), allocatable, intent(out) :: indep_list, directions
         character(len=:), allocatable, intent(out) :: proc_name, mode
         character(len=:), allocatable, intent(out) :: module_name
-        logical, intent(out) :: roundtrip_only
+        logical, intent(out) :: roundtrip_only, with_primal
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
@@ -127,6 +135,7 @@ contains
         mode = "forward"
         module_name = ""
         roundtrip_only = .false.
+        with_primal = .true.
         stat = 0
 
         n = command_argument_count()
@@ -189,6 +198,10 @@ contains
                 end if
                 call get_command_argument(i, arg, length)
                 module_name = trim(arg(1:length))
+            case ("--no-primal")
+                ! Emit the gradient alone. Everything the primal value kept
+                ! alive is then dead and is removed.
+                with_primal = .false.
             case ("--roundtrip")
                 roundtrip_only = .true.
             case ("--version")
@@ -229,6 +242,8 @@ contains
             "direction-count argument"
         write (*, '(a)') "      --name f_jvp      name of the generated procedure"
         write (*, '(a)') "  -o, --output path     write here instead of stdout"
+        write (*, '(a)') "      --no-primal       reverse mode: return the "// &
+            "gradient only, not the primal value"
         write (*, '(a)') "      --roundtrip       parse and re-emit, do not "// &
             "differentiate"
         write (*, '(a)') "      --version         print version and exit"

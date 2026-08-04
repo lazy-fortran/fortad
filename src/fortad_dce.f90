@@ -24,9 +24,146 @@ module fortad_dce
     private
 
     public :: eliminate_dead_stores, fold_zero_accumulations, &
-              eliminate_dead_arrays
+              eliminate_dead_arrays, eliminate_dead_loops
 
 contains
+
+    subroutine eliminate_dead_loops(p)
+        !! Remove a loop nothing outside it reads.
+        !!
+        !! Dead-store elimination works one statement at a time and will not
+        !! touch a loop: the body's assignments feed each other, so none of them
+        !! looks individually dead. But a loop whose every written name is
+        !! unread after it computes nothing, and that is exactly what is left of
+        !! a primal sweep when the caller asked for the gradient alone.
+        !!
+        !! Removal is conservative. A loop is dropped only when it contains no
+        !! call, writes no dummy argument, and no name it writes is read
+        !! anywhere outside it - including by an earlier statement, since a
+        !! later iteration of an enclosing construct could read it.
+        type(fad_proc_t), intent(inout) :: p
+        type(fad_stmt_t), allocatable :: out(:)
+        logical, allocatable :: keep(:)
+        integer :: i, j, depth, last, n_out, passes
+        logical :: changed, dead
+
+        if (p%n_stmts == 0) return
+        allocate (keep(p%n_stmts), out(p%n_stmts))
+
+        do passes = 1, 8
+            keep = .true.
+            changed = .false.
+            i = 1
+            do while (i <= p%n_stmts)
+                if (p%stmts(i)%kind /= FAD_DO .or. .not. keep(i)) then
+                    i = i + 1
+                    cycle
+                end if
+                depth = 0
+                last = 0
+                do j = i, p%n_stmts
+                    select case (p%stmts(j)%kind)
+                    case (FAD_DO)
+                        depth = depth + 1
+                    case (FAD_END_DO)
+                        depth = depth - 1
+                        if (depth == 0) then
+                            last = j
+                            exit
+                        end if
+                    end select
+                end do
+                if (last == 0) then
+                    i = i + 1
+                    cycle
+                end if
+                if (loop_is_dead(p, i, last)) then
+                    keep(i:last) = .false.
+                    changed = .true.
+                    i = last + 1
+                else
+                    i = i + 1
+                end if
+            end do
+            if (.not. changed) exit
+            n_out = 0
+            do i = 1, p%n_stmts
+                if (.not. keep(i)) cycle
+                n_out = n_out + 1
+                out(n_out) = p%stmts(i)
+            end do
+            p%stmts(1:n_out) = out(1:n_out)
+            p%n_stmts = n_out
+            if (n_out == 0) exit
+        end do
+    end subroutine eliminate_dead_loops
+
+    logical function loop_is_dead(p, first, last) result(yes)
+        !! Whether the loop spanning `first..last` can be removed outright.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        character(len=:), allocatable :: name
+        integer :: i, j
+
+        yes = .false.
+        do i = first, last
+            ! A call may do anything; a raw statement is text fortad cannot see
+            ! into. Neither can be proved dead.
+            if (p%stmts(i)%kind == FAD_CALL_STMT) return
+            if (p%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (.not. allocated(p%stmts(i)%target)) return
+            name = base_of(p%stmts(i)%target)
+            ! Writing a dummy argument is visible to the caller.
+            if (is_dummy_name(p, name)) return
+            do j = 1, p%n_stmts
+                if (j >= first .and. j <= last) cycle
+                if (reads_outside(p, j, name)) return
+            end do
+        end do
+        yes = .true.
+    end function loop_is_dead
+
+    logical function reads_outside(p, idx, name) result(yes)
+        !! Whether statement `idx` reads `name`.
+        !!
+        !! `statement_reads` deliberately counts a mention inside an assignment
+        !! target, so that `c(i) = ...` is seen to read `i`. Here that is too
+        !! strong: a plain `state = ...` overwrites the name rather than reading
+        !! it, and counting it would keep every loop alive.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: name
+        integer :: par
+
+        yes = .false.
+        if (idx < 1 .or. idx > p%n_stmts) return
+        if (p%stmts(idx)%kind == FAD_ASSIGN) then
+            if (allocated(p%stmts(idx)%target)) then
+                par = index(p%stmts(idx)%target, "(")
+                if (par == 0 .and. trim(p%stmts(idx)%target) == name) then
+                    yes = expr_reads(p, p%stmts(idx)%value, name)
+                    return
+                end if
+            end if
+        end if
+        yes = statement_reads(p, idx, name)
+    end function reads_outside
+
+    logical function is_dummy_name(p, name) result(yes)
+        !! Whether a name is a dummy argument of the procedure.
+        type(fad_proc_t), intent(in) :: p
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        yes = .false.
+        if (.not. allocated(p%params)) return
+        do i = 1, size(p%params)
+            if (trim(p%params(i)) == name) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function is_dummy_name
 
     subroutine eliminate_dead_stores(p)
         !! Remove assignments whose result is never read.

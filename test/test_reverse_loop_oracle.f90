@@ -172,6 +172,26 @@ program test_reverse_loop_oracle
     ! depends on it through a temporary computed earlier in the same iteration.
     ! A syntactic check calls this a linear accumulation and produces a reversed
     ! gradient; the dependence has to be followed transitively.
+    ! A *linear* carried recurrence. Its adjoint coefficient does not depend
+    ! on the carried value, so no tape is needed - but the adjoint still flows
+    ! backwards across iterations, so the loop may not be fused or run forwards.
+    ! Every other recurrence case here is nonlinear, and this shape slipped
+    ! through until the Enzyme suite caught it.
+    call check("revloop_linear_recurrence", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    integer :: i"//nl// &
+               "    real(8) :: u"//nl// &
+               "    u = 1.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        u = 0.9d0*u + 0.05d0*a(i) + 0.02d0*b(i)"//nl// &
+               "    end do"//nl// &
+               "    s = u"//nl// &
+               "end subroutine k"//nl, failures)
+
     call check("revloop_transitive_dependence", &
                "subroutine k(n, a, b, s)"//nl// &
                "    integer, intent(in) :: n"//nl// &
