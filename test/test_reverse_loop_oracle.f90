@@ -172,6 +172,30 @@ program test_reverse_loop_oracle
     ! depends on it through a temporary computed earlier in the same iteration.
     ! A syntactic check calls this a linear accumulation and produces a reversed
     ! gradient; the dependence has to be followed transitively.
+    ! An integer index computed in the body and used in array subscripts.
+    !!
+    ! The subscript lives in the assignment target's text, not in the expression
+    ! arena, so a pass that renames the index has to rewrite it there too. One
+    ! did not: every load was renamed and every store was left indexed by the
+    ! original name, which by then held nothing. The generated code segfaulted
+    ! rather than returning a wrong number, but only because the stale index
+    ! happened to be large; nothing guaranteed that.
+    call check("revloop_computed_subscript", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    integer :: i, base"//nl// &
+               "    real(8) :: term"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        base = i - 1"//nl// &
+               "        term = a(base + 1)*sin(b(base + 1))"//nl// &
+               "        s = s + term"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
     ! A *linear* carried recurrence. Its adjoint coefficient does not depend
     ! on the carried value, so no tape is needed - but the adjoint still flows
     ! backwards across iterations, so the loop may not be fused or run forwards.

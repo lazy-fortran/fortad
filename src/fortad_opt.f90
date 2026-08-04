@@ -1283,6 +1283,20 @@ contains
                 repl = p%add_expr(expr_var(trim(current)))
                 p%stmts(j)%value = replace_var(p, p%stmts(j)%value, name, repl)
             end if
+            ! A subscript in the assignment *target* is a read too. It lives in
+            ! the target's text rather than in the expression arena, so
+            ! `replace_var` never sees it. Missing this renamed every load and
+            ! left every store indexed by the original name, which by then held
+            ! nothing: `z_b(base + 1) = z_b(base__2 + 1) + ...` with `base`
+            ! never assigned.
+            if (allocated(p%stmts(j)%target) .and. trim(current) /= name) then
+                if (index(p%stmts(j)%target, "(") > 0) then
+                    if (name_in_text(subscript_of(p%stmts(j)%target), name)) then
+                        p%stmts(j)%target = rename_in_text(p%stmts(j)%target, &
+                                                           name, trim(current))
+                    end if
+                end if
+            end if
             if (.not. allocated(p%stmts(j)%target)) cycle
             if (trim(p%stmts(j)%target) /= name) cycle
             version = version + 1
@@ -1305,6 +1319,51 @@ contains
         call insert_before(p, last, s)
         last = last + 1
     end subroutine rename_name
+
+    function subscript_of(target) result(text)
+        !! The subscript part of an assignment target, or an empty string.
+        character(len=*), intent(in) :: target
+        character(len=:), allocatable :: text
+        integer :: pos
+
+        pos = index(target, "(")
+        if (pos > 0) then
+            text = target(pos:)
+        else
+            text = ""
+        end if
+    end function subscript_of
+
+    function rename_in_text(target, name, replacement) result(text)
+        !! Replace whole-identifier occurrences of `name` in a target's
+        !! subscript, leaving the array name itself alone.
+        character(len=*), intent(in) :: target, name, replacement
+        character(len=:), allocatable :: text, head
+        integer :: pos, from, l
+
+        pos = index(target, "(")
+        if (pos == 0) then
+            text = target
+            return
+        end if
+        head = target(1:pos - 1)
+        text = target(pos:)
+        l = len_trim(name)
+        from = 1
+        do
+            pos = index(text(from:), trim(name))
+            if (pos == 0) exit
+            pos = pos + from - 1
+            if (boundary(text, pos - 1) .and. boundary(text, pos + l)) then
+                text = text(1:pos - 1)//trim(replacement)//text(pos + l:)
+                from = pos + len_trim(replacement)
+            else
+                from = pos + 1
+            end if
+            if (from > len(text)) exit
+        end do
+        text = head//text
+    end function rename_in_text
 
     subroutine propagate_loop_zeros(p)
         !! Turn the first accumulation onto a per-iteration adjoint into a
