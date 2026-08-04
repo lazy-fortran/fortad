@@ -461,10 +461,25 @@ caller's `intent(in)` argument.
   there is no term order that makes the loads line up. Whatever Enzyme is doing
   is not a reordering of the same four products.
 
-  This is a four-operation kernel and the gap is 0.1 ns per element. It is
-  recorded because it is the same mechanism behind every forward-mode case that
-  trails, and not pursued further because that is where the evidence ran out
-  and the value is elsewhere.
+  Two further measurements, and they do not agree with each other:
+
+  - **Reassociation of the reduction is what blocks vectorisation.** Compiling
+    fortad's own output with `-ffast-math` turns it fully packed - nineteen
+    `mulpd`, seventeen packed loads, no scalar multiplies - which is Enzyme's
+    shape exactly. flang will not reorder `y = y + ...` across iterations
+    without permission, and Enzyme's IR carries that permission.
+  - **But vectorising it does not close the gap.** Strip-mining the reduction
+    four ways reassociates it explicitly and portably, with no flags, and the
+    result is packed. It measures 0.365 ns/input against 0.373 unvectorised,
+    with Enzyme at 0.271. Marginal, nowhere near.
+
+  So the scalar code is a real difference and is not the reason Enzyme is
+  faster here. Six explanations have now been tested on this kernel -
+  reassociation cost, instruction scheduling, accumulator pairing, compile
+  pipeline, term ordering, reduction vectorisation - and all six are wrong or
+  insufficient. It is four operations and 0.1 ns per element, and the next
+  person to look at it should start from the fact that six plausible answers
+  are already eliminated.
 
 - **Generation cost is no longer a defect, and here is what it took.**
   fortfem's degree-eleven Bezier edge area took 20.5s to differentiate. It
