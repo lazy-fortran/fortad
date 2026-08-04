@@ -60,14 +60,24 @@ same flang, correctness gating every timing. Full method and raw data in
 |---|---|
 | Forward, one direction | ~8% faster, and matches a hand-written tangent |
 | Forward, 16 directions | ~10x faster per direction |
-| Reverse (gradient) | 1.7-1.8x faster, within 5-9% of a hand-written adjoint |
+| Reverse, reduction (dot_sin) | 1.7-1.8x faster |
+| Reverse, stencil with element writes | 2.1-2.2x faster |
+| Reverse, taped recurrence | **0.9x - Enzyme wins**, see below |
 | Build time | 2.7x faster cold and incremental; 4x smaller object |
 | Threads | bit-identical results, 7.4x on 8 cores |
 
-The reverse-mode margin comes from fusing the adjoint into the primal loop, so
-the arrays are streamed once rather than twice. Enzyme differentiates a program
-it must run forward and then reverse; a source-level tool can restructure the
-derivative program itself.
+The reverse-mode wins come from restructuring the derivative program - fusing
+the adjoint into the primal loop so arrays stream once rather than twice, and
+scattering into array adjoints without materialising a history. Enzyme
+differentiates a program it must run forward and then reverse; a source-level
+tool can restructure it.
+
+**Where fortad currently loses.** On a nonlinear loop-carried recurrence, where
+both engines must tape and neither fusion nor recomputation applies, Enzyme is
+10-12% faster. The likely cause is store-versus-recompute: fortad recomputes
+`exp(...)` in the reverse sweep having already computed it forward, where
+storing it would trade a transcendental for a load. fortad has no cost model
+for that choice. This is an open defect, not a documented limitation.
 
 The build-time figure excludes building or installing a matching LLVM and the
 Enzyme plugin. That is a cost fortad does not have at all, but it is paid once,

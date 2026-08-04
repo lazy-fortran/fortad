@@ -329,6 +329,19 @@ reverse-mode rules applied automatically where fortnum already declares an
 `analytical` candidate.
 Branches inside loops and recurrences inside nests are still refused by name.
 
+## Open defects
+
+A competitor winning a benchmark is a defect with an owner, not a limitation to
+document. Currently open:
+
+- **Taped recurrences are 10-12% slower than Enzyme.** Measured on
+  `fortad-bench/cases/recurrence`. fortad recomputes values in the reverse
+  sweep that it already computed in the forward sweep, because it has no
+  store-versus-recompute cost model and currently always prefers recomputation.
+  That preference is right for the bandwidth-bound cases it was chosen for and
+  wrong here. Fixing it needs the cost model in dossier section 4.3, which was
+  planned and not yet built.
+
 ## Explicitly out of scope
 
 Recorded so they are not rediscovered as good ideas:
