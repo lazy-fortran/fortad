@@ -450,6 +450,14 @@ document. Currently open:
   module lands at 89 to 91. Well inside the standard's 132; a style defect, not
   a portability one.
 
+- **lagrange4 in forward mode is 21% behind Enzyme**, the one measurement
+  outside the 20% target across both modes and all eight fortnum operators
+  (1.299 against 1.071 ns/input). The kernel evaluates four Lagrange basis
+  functions over the same point, and their tangents share most of their
+  subexpressions. Enzyme shares them; fortad does not, because its CSE pass is
+  disabled. This is the first workload that makes the disabled pass cost
+  something measurable.
+
 - **The CSE pass is written but disabled.** `fortad_cse` produces wrong
   Hessians through the `fad_hvp` composition path, silently - a plausible but
   non-symmetric result. It also did not pay for itself when it worked, because
