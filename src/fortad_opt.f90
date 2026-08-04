@@ -44,6 +44,18 @@ module fortad_opt
     !! produce.
     integer, parameter :: MAX_EXPR_NODES = 96
 
+    !! Names the span table holds. A procedure with more distinct names than
+    !! this loses the shortcut and substitution declines rather than guessing.
+    integer, parameter :: MAX_SPAN = 4096
+
+    type :: span_t
+        !! The first and last statement mentioning each name.
+        character(len=64) :: names(MAX_SPAN) = ""
+        integer :: first_at(MAX_SPAN) = 0
+        integer :: last_at(MAX_SPAN) = 0
+        integer :: n = 0
+    end type span_t
+
 contains
 
     subroutine optimise(p)
@@ -410,11 +422,14 @@ contains
         !! then usually hoisted out of the loop entirely.
         type(fad_proc_t), intent(inout) :: p
         character(len=:), allocatable :: lhs
+        type(span_t) :: span
         integer :: i, j, uses, last_use, stop_at
         logical :: changed, blocked
 
         do while (.true.)
             changed = .false.
+            ! Rebuilt each round, because the previous round rewrote statements.
+            call build_span(p, span)
             do i = 1, p%n_stmts
                 if (.not. simple_definition(p, i)) cycle
                 lhs = trim(p%stmts(i)%target)
@@ -465,7 +480,7 @@ contains
                     end if
                 end do
                 if (blocked .or. uses == 0 .or. last_use == 0) cycle
-                if (escapes(p, lhs, i, stop_at)) cycle
+                if (escapes(p, lhs, i, stop_at, span)) cycle
                 if (uses > 1 .and. .not. cheap(p, p%stmts(i)%value)) cycle
 
                 do j = i + 1, last_use
@@ -506,36 +521,131 @@ contains
         yes = .true.
     end function rhs_stable
 
-    logical function escapes(p, name, first, stop_at) result(yes)
+    logical function escapes(p, name, first, stop_at, span) result(yes)
         !! Whether `name` is mentioned outside the window it was tracked in.
         !!
         !! Substitution is only sound if every read of the definition was seen.
         !! Reads before the definition belong to an earlier value, and reads
         !! after the window may see this one through a path this pass does not
         !! model, so either rules it out.
+        !!
+        !! Answered from a precomputed span - the first and last statement that
+        !! mentions each name - rather than by scanning the procedure. Scanning
+        !! made substitution quadratic in the number of statements, which is
+        !! unnoticeable on a thirty-statement kernel and is most of the time
+        !! spent on a four-thousand-statement one.
         type(fad_proc_t), intent(in) :: p
         character(len=*), intent(in) :: name
         integer, intent(in) :: first, stop_at
-        integer :: j
+        type(span_t), intent(in) :: span
+        integer :: k
 
         yes = .true.
-        do j = 1, p%n_stmts
-            if (j >= first .and. j < stop_at) cycle
-            if (p%stmts(j)%value > 0) then
-                if (mentions(p, p%stmts(j)%value, name)) return
-            end if
-            if (p%stmts(j)%lo > 0) then
-                if (mentions(p, p%stmts(j)%lo, name)) return
-            end if
-            if (p%stmts(j)%hi > 0) then
-                if (mentions(p, p%stmts(j)%hi, name)) return
-            end if
-            if (allocated(p%stmts(j)%target)) then
-                if (name_in_text(p%stmts(j)%target, name)) return
-            end if
-        end do
+        k = span_index(span, name)
+        if (k == 0) then
+            ! Mentioned nowhere at all, so nothing outside the window either.
+            yes = .false.
+            return
+        end if
+        if (span%first_at(k) < first) return
+        if (span%last_at(k) >= stop_at) return
         yes = .false.
     end function escapes
+
+    subroutine build_span(p, span)
+        !! The first and last statement mentioning each name in the procedure.
+        type(fad_proc_t), intent(in) :: p
+        type(span_t), intent(out) :: span
+        character(len=64) :: names(MAX_SPAN)
+        integer :: j, i, n
+
+        n = 0
+        do j = 1, p%n_stmts
+            if (p%stmts(j)%value > 0) call span_names(p, p%stmts(j)%value, &
+                                                     names, n, span, j)
+            if (p%stmts(j)%lo > 0) call span_names(p, p%stmts(j)%lo, names, n, &
+                                                   span, j)
+            if (p%stmts(j)%hi > 0) call span_names(p, p%stmts(j)%hi, names, n, &
+                                                   span, j)
+            if (allocated(p%stmts(j)%target)) &
+                call note_span(span, names, n, trim(p%stmts(j)%target), j)
+        end do
+        span%n = n
+        do i = 1, n
+            span%names(i) = names(i)
+        end do
+    end subroutine build_span
+
+    recursive subroutine span_names(p, idx, names, n, span, at)
+        !! Record every name an expression mentions as seen at statement `at`.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx, at
+        character(len=64), intent(inout) :: names(:)
+        integer, intent(inout) :: n
+        type(span_t), intent(inout) :: span
+        integer :: i
+
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (allocated(p%exprs(idx)%text)) then
+            select case (p%exprs(idx)%kind)
+            case (FAD_VAR, FAD_INDEX)
+                call note_span(span, names, n, trim(p%exprs(idx)%text), at)
+            end select
+        end if
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            call span_names(p, p%exprs(idx)%args(i), names, n, span, at)
+        end do
+    end subroutine span_names
+
+    subroutine note_span(span, names, n, text, at)
+        !! Widen a name's span, and every name whose text this one contains.
+        !!
+        !! `z_b(i)` mentions `i` and `z_b`, and a target carries its subscript
+        !! in its text, so the containment test is what the scanning version
+        !! did with `name_in_text`.
+        type(span_t), intent(inout) :: span
+        character(len=64), intent(inout) :: names(:)
+        integer, intent(inout) :: n
+        character(len=*), intent(in) :: text
+        integer, intent(in) :: at
+        character(len=:), allocatable :: base
+        integer :: i, par
+
+        base = trim(text)
+        par = index(base, "(")
+        if (par > 1) base = base(1:par - 1)
+        do i = 1, n
+            if (trim(names(i)) /= base) cycle
+            span%first_at(i) = min(span%first_at(i), at)
+            span%last_at(i) = max(span%last_at(i), at)
+            return
+        end do
+        if (n >= MAX_SPAN) return
+        n = n + 1
+        names(n) = base
+        span%first_at(n) = at
+        span%last_at(n) = at
+    end subroutine note_span
+
+    integer function span_index(span, name) result(k)
+        !! Where a name sits in the span table, or zero.
+        type(span_t), intent(in) :: span
+        character(len=*), intent(in) :: name
+        character(len=:), allocatable :: base
+        integer :: i, par
+
+        base = trim(name)
+        par = index(base, "(")
+        if (par > 1) base = base(1:par - 1)
+        k = 0
+        do i = 1, span%n
+            if (trim(span%names(i)) == base) then
+                k = i
+                return
+            end if
+        end do
+    end function span_index
 
     logical function simple_definition(p, idx) result(yes)
         !! Whether a statement is `name = expression` with a plain target.
@@ -874,6 +984,13 @@ contains
 
     logical function loop_invariant(p, first, last, idx) result(yes)
         !! Whether an expression has the same value in every iteration.
+        !!
+        !! Asked statement by statement. Inverting it - collecting the names the
+        !! body writes and asking the expression whether it reads any of them -
+        !! looks like the better shape and is not: the body writes as many names
+        !! as it has statements, so the inner loop moves rather than
+        !! disappears, and it measured three and a half times slower on
+        !! fortfem's degree-eleven Bezier.
         type(fad_proc_t), intent(in) :: p
         integer, intent(in) :: first, last, idx
         integer :: j
@@ -1949,32 +2066,30 @@ contains
 
     subroutine insert_before(p, at, s)
         !! Insert a statement immediately before index `at`.
+        !!
+        !! Shifts in place. Building the new list in a temporary and copying it
+        !! back meant an allocation and two full copies per insertion, and
+        !! hoisting inserts once per invariant it finds - on fortfem's
+        !! degree-eleven Bezier that is hundreds of insertions into a
+        !! four-thousand-statement list.
         type(fad_proc_t), intent(inout) :: p
         integer, intent(in) :: at
         type(fad_stmt_t), intent(in) :: s
-        type(fad_stmt_t), allocatable :: out(:)
-        integer :: i, n
+        integer :: i
 
-        allocate (out(p%n_stmts + 1))
-        n = 0
-        do i = 1, p%n_stmts
-            if (i == at) then
-                n = n + 1
-                out(n) = s
-            end if
-            n = n + 1
-            out(n) = p%stmts(i)
-        end do
-        if (size(p%stmts) < n) then
+        if (p%n_stmts + 1 > size(p%stmts)) then
             block
                 type(fad_stmt_t), allocatable :: grown(:)
-                allocate (grown(2*n))
+                allocate (grown(2*(p%n_stmts + 1)))
                 grown(1:p%n_stmts) = p%stmts(1:p%n_stmts)
                 call move_alloc(grown, p%stmts)
             end block
         end if
-        p%stmts(1:n) = out(1:n)
-        p%n_stmts = n
+        do i = p%n_stmts, at, -1
+            p%stmts(i + 1) = p%stmts(i)
+        end do
+        p%stmts(at) = s
+        p%n_stmts = p%n_stmts + 1
     end subroutine insert_before
 
     subroutine share_subexpressions(p)

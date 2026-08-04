@@ -416,15 +416,22 @@ caller's `intent(in)` argument.
 
 ## Open defects
 
-- **The optimiser is superlinear in the size of a loop body.** fortfem's
-  degree-eleven Bezier edge area has a four-thousand-statement adjoint, and
-  fortad does not finish it in five minutes. `share_in_body` counted uses per
-  candidate across every statement and is fixed - it counts once per round now
-  - but `substitute_temps` still scans every statement per definition through
-  `escapes` and `rhs_stable`, and `name_subexpression` rewrites every statement
-  per hoist. Each is fine at thirty statements and quadratic at four thousand.
-  This is what blocks the fortfem benchmark suite; the operators themselves are
-  ported and their derivatives verified against fortsym.
+- **`hoist_subexpressions` is still quadratic on a large loop body.** Two of
+  the three passes that were have been fixed: `share_in_body` counts uses once
+  per round instead of per candidate, and `escapes` answers from a precomputed
+  span of where each name is mentioned instead of scanning the procedure.
+  fortfem's quintic Lagrange weights went from 11.0s to 0.40s and its quartic
+  Bezier from 3.2s to 0.37s.
+
+  Its degree-eleven Bezier is still 20s, and `hoist_subexpressions` is about
+  half of that: `loop_invariant` asks the body statement by statement whether
+  an expression mentions its target, once per candidate node. Inverting it -
+  collecting the names the body writes and asking the expression whether it
+  reads any - is the obvious shape and measured three and a half times *slower*,
+  because a body writes as many names as it has statements and the inner loop
+  moves rather than disappearing. What it needs is a membership test that is
+  not a linear scan, which means giving the pass a real set rather than an
+  array of names.
 
 A competitor winning a benchmark is a defect with an owner, not a limitation to
 document. Currently open:
