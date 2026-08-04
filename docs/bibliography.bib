@@ -1,0 +1,365 @@
+% fortad bibliography.
+%
+% Metadata only. No PDF, no full text, and no publisher-formatted excerpt is
+% ever committed to this repository. `scripts/fetch_literature.py` resolves each
+% entry against Crossref/arXiv/DBLP and downloads only openly licensed copies
+% into the gitignored `literature/` tree; paywalled items are reported with
+% their identifier so they can be retrieved through the reader's own access.
+%
+% DOIs are deliberately absent from most entries: the fetch script resolves and
+% records them from Crossref, so the committed file never asserts an identifier
+% that has not been machine-verified. Run the script before citing.
+
+% ---------------------------------------------------------------- foundations
+
+@book{griewank2008evaluating,
+  author    = {Griewank, Andreas and Walther, Andrea},
+  title     = {Evaluating Derivatives: Principles and Techniques of Algorithmic
+               Differentiation},
+  edition   = {2nd},
+  publisher = {SIAM},
+  year      = {2008},
+  note      = {The reference text. Chapters on the cheap gradient principle,
+               cross-country elimination, checkpointing, and higher-order Taylor
+               propagation define the design space fortad works in.}
+}
+
+@article{griewank2000revolve,
+  author  = {Griewank, Andreas and Walther, Andrea},
+  title   = {Algorithm 799: {Revolve}: An Implementation of Checkpointing for
+             the Reverse or Adjoint Mode of Computational Differentiation},
+  journal = {ACM Transactions on Mathematical Software},
+  volume  = {26},
+  number  = {1},
+  pages   = {19--45},
+  year    = {2000},
+  note    = {Optimal binomial checkpointing. The schedule fortad must implement
+             for time-stepping adjoints.}
+}
+
+@article{christianson1994reverse,
+  author  = {Christianson, Bruce},
+  title   = {Reverse Accumulation and Attractive Fixed Points},
+  journal = {Optimization Methods and Software},
+  volume  = {3},
+  year    = {1994},
+  note    = {Two-phase adjoint of a fixed-point iteration: converge the primal,
+             then converge the adjoint, instead of taping every iteration. The
+             single largest structural win available over IR-level AD on solver
+             codes.}
+}
+
+@article{curtis1974estimation,
+  author  = {Curtis, A. R. and Powell, M. J. D. and Reid, J. K.},
+  title   = {On the Estimation of Sparse {Jacobian} Matrices},
+  journal = {IMA Journal of Applied Mathematics},
+  volume  = {13},
+  year    = {1974},
+  note    = {Column compression by structurally orthogonal grouping. The origin
+             of sparse Jacobian AD.}
+}
+
+@article{gebremedhin2005what,
+  author  = {Gebremedhin, Assefaw H. and Manne, Fredrik and Pothen, Alex},
+  title   = {What Color Is Your {Jacobian}? Graph Coloring for Computing
+             Derivatives},
+  journal = {SIAM Review},
+  volume  = {47},
+  number  = {4},
+  year    = {2005},
+  note    = {The survey that maps every Jacobian/Hessian compression scheme onto
+             a coloring problem: distance-2 for Jacobians, star coloring for
+             Hessians, acyclic coloring for the substitution method.}
+}
+
+@article{naumann2008optimal,
+  author  = {Naumann, Uwe},
+  title   = {Optimal {Jacobian} Accumulation is {NP}-complete},
+  journal = {Mathematical Programming},
+  volume  = {112},
+  year    = {2008},
+  note    = {Why fortad ships heuristics for cross-country elimination and does
+             not promise optimality.}
+}
+
+@book{naumann2012art,
+  author    = {Naumann, Uwe},
+  title     = {The Art of Differentiating Computer Programs: An Introduction to
+               Algorithmic Differentiation},
+  publisher = {SIAM},
+  year      = {2012}
+}
+
+@inproceedings{gower2012edgepushing,
+  author    = {Gower, Robert M. and Mello, Margarida P.},
+  title     = {A New Framework for the Computation of {Hessians}},
+  booktitle = {Optimization Methods and Software},
+  year      = {2012},
+  note      = {edge\_pushing: a genuine second-order reverse sweep rather than
+               forward-over-reverse. Competitive when the Hessian is sparse.}
+}
+
+% ------------------------------------------------------- source transformation
+
+@article{hascoet2013tapenade,
+  author  = {Hasco{\"e}t, Laurent and Pascual, Val{\'e}rie},
+  title   = {The {Tapenade} Automatic Differentiation Tool: Principles, Model,
+             and Specification},
+  journal = {ACM Transactions on Mathematical Software},
+  volume  = {39},
+  number  = {3},
+  year    = {2013},
+  note    = {The definitive specification of a Fortran source-transformation AD
+             tool. Read this before writing any fortad transformation.}
+}
+
+@article{hascoet2005tbr,
+  author  = {Hasco{\"e}t, Laurent and Naumann, Uwe and Pascual, Val{\'e}rie},
+  title   = {``To Be Recorded'' Analysis in Reverse-Mode Automatic
+             Differentiation},
+  journal = {Future Generation Computer Systems},
+  volume  = {21},
+  year    = {2005},
+  note    = {The analysis that decides which values the forward sweep must save.
+             Gets most of the tape away. Mandatory for fortad.}
+}
+
+@article{bischof1996adifor,
+  author  = {Bischof, Christian and Carle, Alan and Khademi, Peyvand and
+             Mauer, Andrew},
+  title   = {{ADIFOR} 2.0: Automatic Differentiation of {Fortran} 77 Programs},
+  journal = {IEEE Computational Science and Engineering},
+  volume  = {3},
+  number  = {3},
+  year    = {1996}
+}
+
+@article{utke2008openad,
+  author  = {Utke, Jean and Naumann, Uwe and Fagan, Mike and Tallent, Nathan and
+             Strout, Michelle and Heimbach, Patrick and Hill, Chris and
+             Wunsch, Carl},
+  title   = {{OpenAD/F}: A Modular Open-Source Tool for Automatic
+             Differentiation of {Fortran} Codes},
+  journal = {ACM Transactions on Mathematical Software},
+  volume  = {34},
+  number  = {4},
+  year    = {2008}
+}
+
+@article{giering1998recipes,
+  author  = {Giering, Ralf and Kaminski, Thomas},
+  title   = {Recipes for Adjoint Code Construction},
+  journal = {ACM Transactions on Mathematical Software},
+  volume  = {24},
+  number  = {4},
+  year    = {1998},
+  note    = {TAF's construction rules, statement by statement. Still the
+             clearest specification of what an adjoint statement looks like.}
+}
+
+@inproceedings{vassilev2015clad,
+  author    = {Vassilev, Vassil and Vassilev, Martin and Penev, Alexander and
+               Moneta, Lorenzo and Ilieva, Violeta},
+  title     = {{Clad} --- Automatic Differentiation Using {Clang} and {LLVM}},
+  booktitle = {Journal of Physics: Conference Series},
+  year      = {2015},
+  note      = {AST-level AD emitting C++. The existence proof that source-level
+               AD need not lose to IR-level AD.}
+}
+
+@article{vanmerrienboer2018tangent,
+  author  = {van Merri{\"e}nboer, Bart and Moldovan, Dan and Wiltschko, Alexander},
+  title   = {{Tangent}: Automatic Differentiation Using Source-Code
+             Transformation for Dynamically Typed Array Programming},
+  journal = {Advances in Neural Information Processing Systems},
+  year    = {2018},
+  note    = {Source-in, readable-source-out AD. Closest product precedent.}
+}
+
+@article{vanmerrienboer2018survey,
+  author  = {van Merri{\"e}nboer, Bart and Breuleux, Olivier and
+             Bergeron, Arnaud and Lamblin, Pascal},
+  title   = {Automatic Differentiation in {ML}: Where We Are and Where We Should
+             Be Going},
+  journal = {Advances in Neural Information Processing Systems},
+  year    = {2018}
+}
+
+% ------------------------------------------------------------------ IR-level
+
+@inproceedings{moses2020enzyme,
+  author    = {Moses, William S. and Churavy, Valentin},
+  title     = {Instead of Rewriting Foreign Code for Machine Learning,
+               Automatically Synthesize Fast Gradients},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2020},
+  note      = {The original Enzyme paper. The central claim fortad contests is
+               that differentiating after optimisation is worth 4.2x over
+               differentiating before it.}
+}
+
+@inproceedings{moses2021enzymegpu,
+  author    = {Moses, William S. and Churavy, Valentin and Paehler, Ludger and
+               H{\"u}ckelheim, Jan and Narayanan, Sri Hari Krishna and
+               Schanen, Michel and Doerfert, Johannes},
+  title     = {Reverse-Mode Automatic Differentiation and Optimization of {GPU}
+               Kernels via {Enzyme}},
+  booktitle = {SC '21},
+  year      = {2021}
+}
+
+@inproceedings{moses2022typeanalysis,
+  author    = {Moses, William S. and Narayanan, Sri Hari Krishna and
+               Paehler, Ludger and Churavy, Valentin and Schanen, Michel and
+               H{\"u}ckelheim, Jan and Doerfert, Johannes and Hovland, Paul},
+  title     = {Scalable Automatic Differentiation of Multiple Parallel Paradigms
+               through Compiler Augmentation},
+  booktitle = {SC '22},
+  year      = {2022},
+  note      = {Enzyme's type analysis and parallel (OpenMP/MPI/CUDA) handling.
+               The type analysis exists only because LLVM IR has lost the type
+               information Fortran still has. fortad does not need it.}
+}
+
+@inproceedings{innes2019zygote,
+  author    = {Innes, Michael},
+  title     = {Don't Unroll Adjoint: Differentiating {SSA}-Form Programs},
+  year      = {2019},
+  note      = {Source-to-source reverse mode on a typed SSA IR. The structure
+               fortad borrows, adapted for Fortran's mutation-heavy code.}
+}
+
+@inproceedings{bradbury2018jax,
+  author = {Bradbury, James and Frostig, Roy and Hawkins, Peter and
+            Johnson, Matthew James and Leary, Chris and Maclaurin, Dougal and
+            Necula, George and Paszke, Adam and VanderPlas, Jake and
+            Wanderman-Milne, Skye and Zhang, Qiao},
+  title  = {{JAX}: Composable Transformations of {Python+NumPy} Programs},
+  year   = {2018},
+  note   = {JVP plus transposition instead of a separate reverse mode. The
+            architectural idea that halves fortad's rule table.}
+}
+
+@article{paszke2021getting,
+  author  = {Paszke, Adam and Johnson, Daniel D. and Duvenaud, David and
+             Vytiniotis, Dimitrios and Radul, Alexey and Johnson, Matthew J. and
+             Ragan-Kelley, Jonathan and Maclaurin, Dougal},
+  title   = {Getting to the Point: Index Sets and Parallelism-Preserving
+             Autodiff for Pointful Array Programming},
+  journal = {Proceedings of the ACM on Programming Languages (ICFP)},
+  year    = {2021},
+  note    = {How to transpose indexed array code without destroying parallelism.
+             Directly applicable to Fortran loop nests and array sections; this
+             is where a naive adjoint turns a parallel loop into a serial
+             accumulation and loses to Enzyme.}
+}
+
+@inproceedings{huckelheim2021parallel,
+  author    = {H{\"u}ckelheim, Jan and Hasco{\"e}t, Laurent},
+  title     = {Source-to-Source Automatic Differentiation of {OpenMP} Parallel
+               Loops},
+  booktitle = {ACM Transactions on Mathematical Software},
+  year      = {2022},
+  note      = {Reduction handling and race-free adjoints of parallel loops in a
+               source transformation setting.}
+}
+
+@article{huckelheim2019vectorized,
+  author  = {H{\"u}ckelheim, Jan and Hovland, Paul and Strout, Michelle M. and
+             M{\"u}ller, Jens-Dominik},
+  title   = {Reverse-Mode Algorithmic Differentiation of an OpenMP-Parallel
+             Compressible Flow Solver},
+  journal = {International Journal of High Performance Computing Applications},
+  year    = {2019}
+}
+
+@article{hogan2014adept,
+  author  = {Hogan, Robin J.},
+  title   = {Fast Reverse-Mode Automatic Differentiation Using Expression
+             Templates in {C}\texttt{++}},
+  journal = {ACM Transactions on Mathematical Software},
+  volume  = {40},
+  number  = {4},
+  year    = {2014},
+  note    = {Statement-level preaccumulation via expression templates, with
+             careful benchmarks against ADOL-C and hand-written adjoints.}
+}
+
+@article{sagebaum2019codipack,
+  author  = {Sagebaum, Max and Albring, Tim and Gauger, Nicolas R.},
+  title   = {High-Performance Derivative Computations Using {CoDiPack}},
+  journal = {ACM Transactions on Mathematical Software},
+  year    = {2019}
+}
+
+@article{walther2008adolc,
+  author  = {Walther, Andrea and Griewank, Andreas},
+  title   = {Getting Started with {ADOL-C}},
+  journal = {Combinatorial Scientific Computing},
+  year    = {2012}
+}
+
+% ------------------------------------------------ implicit and structured diff
+
+@inproceedings{blondel2022implicit,
+  author    = {Blondel, Mathieu and Berthet, Quentin and Cuturi, Marco and
+               Frostig, Roy and Hoyer, Stephan and Llinares-L{\'o}pez, Felipe and
+               Pedregosa, Fabian and Vert, Jean-Philippe},
+  title     = {Efficient and Modular Implicit Differentiation},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2022},
+  note      = {The modern framing of implicit-function-theorem differentiation
+               of solvers and optimisers.}
+}
+
+@article{giles2008collected,
+  author  = {Giles, Mike B.},
+  title   = {Collected Matrix Derivative Results for Forward and Reverse Mode
+             Algorithmic Differentiation},
+  journal = {Advances in Automatic Differentiation},
+  year    = {2008},
+  note    = {Forward and reverse rules for LU, Cholesky, QR, eigendecomposition
+             and the matrix product. The content of fortad's LAPACK rule table.}
+}
+
+@article{gebbie2022adjoint,
+  author  = {Heimbach, Patrick and Hill, Chris and Giering, Ralf},
+  title   = {An Efficient Exact Adjoint of the Parallel {MIT} General
+             Circulation Model, Generated via Automatic Differentiation},
+  journal = {Future Generation Computer Systems},
+  volume  = {21},
+  year    = {2005},
+  note    = {What a real Fortran adjoint at scale actually requires.}
+}
+
+% ------------------------------------------------------- UQ and sensitivities
+
+@book{saltelli2008global,
+  author    = {Saltelli, Andrea and Ratto, Marco and Andres, Terry and
+               Campolongo, Francesca and Cariboni, Jessica and Gatelli, Debora and
+               Saisana, Michaela and Tarantola, Stefano},
+  title     = {Global Sensitivity Analysis: The Primer},
+  publisher = {Wiley},
+  year      = {2008},
+  note      = {Where derivative-based local sensitivity stops being enough.
+               Bounds the claims fortad may make for UQ.}
+}
+
+@book{smith2013uncertainty,
+  author    = {Smith, Ralph C.},
+  title     = {Uncertainty Quantification: Theory, Implementation, and
+               Applications},
+  publisher = {SIAM},
+  year      = {2013},
+  note      = {First-order second-moment propagation: cov(y) = J cov(x) J^T.
+               The linear UQ product fortad's forward mode delivers directly.}
+}
+
+@article{nocedal2006numerical,
+  author    = {Nocedal, Jorge and Wright, Stephen J.},
+  title     = {Numerical Optimization},
+  publisher = {Springer},
+  year      = {2006},
+  note      = {Which derivative object each optimiser actually consumes:
+               gradient, Gauss-Newton, Hessian-vector product, full Hessian.}
+}

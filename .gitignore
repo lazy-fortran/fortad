@@ -1,0 +1,17 @@
+# Third-party checkouts and downloaded literature are NEVER committed.
+# See LEGAL.md. Everything below is fetched locally by scripts/ and stays local.
+upstream/*
+!upstream/README.md
+literature/*
+!literature/README.md
+
+# Generated inventories derived from local checkouts (may contain upstream text)
+docs/generated/
+
+# Build artefacts
+build/
+build-*/
+*.mod
+*.smod
+*.o
+*.a
