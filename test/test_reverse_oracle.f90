@@ -14,6 +14,30 @@ program test_reverse_oracle
     implicit none
 
     character(len=1), parameter :: nl = achar(10)
+    character(len=*), parameter :: BRANCH_SOURCE = &
+        "function f(x, y) result(z)"//nl// &
+        "    real(8), intent(in) :: x, y"//nl// &
+        "    real(8) :: z"//nl// &
+        "    if (x > y) then"//nl// &
+        "        z = x*x + sin(y)"//nl// &
+        "    else"//nl// &
+        "        z = exp(y)*x"//nl// &
+        "    end if"//nl// &
+        "end function f"//nl
+    character(len=*), parameter :: ASYM_SOURCE = &
+        "function f(x, y) result(z)"//nl// &
+        "    real(8), intent(in) :: x, y"//nl// &
+        "    real(8) :: t"//nl// &
+        "    real(8) :: z"//nl// &
+        "    t = x + y"//nl// &
+        "    if (x > y) then"//nl// &
+        "        t = t*t"//nl// &
+        "        t = sin(t) + x"//nl// &
+        "        z = t*y"//nl// &
+        "    else"//nl// &
+        "        z = log(1.0d0 + t*t)*x"//nl// &
+        "    end if"//nl// &
+        "end function f"//nl
     integer :: failures
 
     failures = 0
@@ -62,6 +86,15 @@ program test_reverse_oracle
                "    b = exp(a) + cos(a*x)"//nl// &
                "    z = log(1.0d0 + b*b) * sqrt(abs(a) + 2.0d0)"//nl// &
                "end function f"//nl, "0.6d0", "1.25d0", failures)
+
+    ! Branches: both arms, and an asymmetric case where the two arms assign
+    ! different numbers of intermediates so the join needs a real merge.
+    call check("rev_branch_then_arm", BRANCH_SOURCE, "1.5d0", "0.4d0", failures)
+    call check("rev_branch_else_arm", BRANCH_SOURCE, "0.4d0", "1.5d0", failures)
+    call check("rev_branch_asymmetric_then", ASYM_SOURCE, "1.4d0", "0.5d0", &
+               failures)
+    call check("rev_branch_asymmetric_else", ASYM_SOURCE, "0.5d0", "1.4d0", &
+               failures)
 
     if (failures == 0) then
         print *, "test_reverse_oracle: all cases passed"
