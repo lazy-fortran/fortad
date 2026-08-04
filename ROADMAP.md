@@ -338,6 +338,7 @@ An AD tool may: the forms agree in exact arithmetic.
 | `rename_bodies` | one assignment per scalar per iteration, so substitution can see through an accumulation |
 | `factor_self_update` | `x = x*c1 + x*c2` becomes `x = x*(c1 + c2)`, around the target or around any variable the terms share |
 | `rotate_carried` | issue the loop-carried update first, behind a snapshot |
+| `distribute_products` | expand `(a + b)*c` so factoring sees a sum of products |
 | `regroup_products` | reassociate so invariant factors group together |
 | `hoist_invariants` | lift a wholly invariant statement out of the loop |
 | `hoist_subexpressions` | name the invariant coefficient, compute it once |
@@ -364,9 +365,11 @@ euler it is worth 15%.
 Whether to substitute a definition read more than once cannot be decided in
 advance: duplicating it is right when factoring then folds the whole chain into
 constants and wrong when it does not. `optimise` therefore runs the sequence
-twice, once conservative and once willing to duplicate anything, and keeps
-whichever loop body has the smaller total expression size. Ties go to the
-conservative result.
+twice, once conservative and once willing to duplicate anything and to
+distribute products over sums, and keeps whichever loop body has the fewer
+arithmetic operations. Ties go to the conservative result. Counting operations
+rather than nodes matters: a form with fewer multiplies but more operands looks
+worse on node count and is faster.
 
 Every pass reasons only within a straight-line run of assignments; a definition
 whose reads are not all inside that window is left alone. The passes run on both
@@ -414,6 +417,13 @@ document. Currently open:
   factoring works within one statement. Merging an accumulation chain into a
   single expression before factoring is the remaining step. Gradient-only rk4
   already leads Tapenade, 7.68 against 8.71.
+
+- **The bold/conservative choice is made per procedure, not per loop.** A
+  kernel whose primal loop collapses under distribution but whose adjoint loop
+  does not gets whichever effect is larger. Forcing the bold form on euler
+  measures 1.96 ns/input against the 3.17 the cost model chooses - a 38% win
+  left on the table because the same decision has to serve both loops.
+  Deciding per loop is the fix.
 
 - **The CSE pass is written but disabled.** `fortad_cse` produces wrong
   Hessians through the `fad_hvp` composition path, silently - a plausible but

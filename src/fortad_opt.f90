@@ -69,8 +69,14 @@ contains
         bold_cost = loop_cost(bold)
 
         ! Ties go to the conservative result: it has fewer duplicated
-        ! subexpressions and so fewer chances of a register spill the cost
-        ! model cannot see.
+        ! subexpressions and so fewer live values, which the cost model cannot
+        ! see.
+        !
+        ! The choice is made for the whole procedure, and that is its weakness.
+        ! A kernel whose primal loop collapses under distribution but whose
+        ! adjoint loop does not gets whichever effect is larger; forcing the
+        ! bold form on euler measured 1.96 ns/input against the 3.17 chosen
+        ! here. Deciding per loop is the fix and is not done.
         if (bold_cost < base_cost) p = bold
     end subroutine optimise
 
@@ -82,6 +88,12 @@ contains
 
         aggressive = bold
         call propagate_loop_zeros(p)
+        ! Coalescing before renaming, so that a scatter built as a chain of
+        ! accumulations onto an array element becomes a chain onto a scalar.
+        ! Renaming then puts that chain into single assignment, substitution
+        ! flattens it into one expression, and factoring can pull the carried
+        ! adjoint out of it. Coalescing afterwards leaves the chain opaque.
+        call coalesce_element_updates(p)
         ! Renaming the body into single assignment first is what lets
         ! substitution reach an accumulated variable. Without it a stage adjoint
         ! that is written twice is opaque, and a loop body that is wholly linear
@@ -90,9 +102,9 @@ contains
         do pass = 1, 4
             call propagate_copies(p)
             call substitute_temps(p)
+            if (bold) call distribute_products(p)
             call factor_self_update(p)
         end do
-        call coalesce_element_updates(p)
         call regroup_products(p)
         call hoist_invariants(p)
         call hoist_subexpressions(p)
@@ -104,9 +116,11 @@ contains
         !! Total expression size inside loops, as a stand-in for work done.
         !!
         !! Only loop bodies are counted: a statement outside a loop runs once
-        !! and is noise beside one that runs per element. Expression size counts
-        !! a duplicated subexpression twice, which is the whole point - it is
-        !! what tells the two attempts apart.
+        !! and is noise beside one that runs per element. Only operator nodes
+        !! are counted: a variable or a literal is free, and counting leaves
+        !! made a form with fewer arithmetic operations but more operands look
+        !! worse. A duplicated subexpression counts twice, which is the point -
+        !! it is what tells the two attempts apart.
         type(fad_proc_t), intent(in) :: p
         integer :: i, depth
 
@@ -120,7 +134,7 @@ contains
                 depth = depth - 1
             case (FAD_ASSIGN)
                 if (depth > 0 .and. p%stmts(i)%value > 0) &
-                    cost = cost + expr_size(p, p%stmts(i)%value)
+                    cost = cost + op_count(p, p%stmts(i)%value)
             end select
         end do
     end function loop_cost
@@ -209,6 +223,24 @@ contains
             n = n + expr_size(p, p%exprs(idx)%args(i))
         end do
     end function expr_size
+
+    recursive integer function op_count(p, idx) result(n)
+        !! Arithmetic operations in an expression tree.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer :: i
+
+        n = 0
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_BINOP, FAD_UNOP, FAD_CALL)
+            n = 1
+        end select
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            n = n + op_count(p, p%exprs(idx)%args(i))
+        end do
+    end function op_count
 
     recursive integer function count_reads(p, idx, name) result(n)
         !! How many times `name` is read as a plain variable in an expression.
@@ -618,6 +650,135 @@ contains
     ! ------------------------------------------------------------------
     ! Pass 3: factoring a self-update
     ! ------------------------------------------------------------------
+
+    subroutine distribute_products(p)
+        !! Expand `(a + b)*c` into `a*c + b*c` inside loop bodies.
+        !!
+        !! Factoring works on a sum of products. Substituting a multi-stage
+        !! recurrence flat produces nested sums instead, and every term of
+        !! `(x*p + x*q)*r` mentions `x` twice as far as the factoring pass can
+        !! tell. Distributing first puts the expression back in the shape the
+        !! factoring needs, and the factoring immediately undoes the growth by
+        !! pulling `x` out of the whole thing.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, first, last, j, budget
+
+        budget = MAX_EXPR_NODES
+        if (aggressive) budget = MAX_EXPR_NODES_BOLD
+        i = 1
+        do while (i <= p%n_stmts)
+            if (p%stmts(i)%kind /= FAD_DO) then
+                i = i + 1
+                cycle
+            end if
+            call loop_extent(p, i, first, last)
+            if (last == 0 .or. .not. plain_body(p, first, last)) then
+                i = i + 1
+                cycle
+            end if
+            do j = first + 1, last - 1
+                if (p%stmts(j)%value <= 0) cycle
+                block
+                    integer :: new
+                    new = distribute(p, p%stmts(j)%value, budget)
+                    if (new > 0) p%stmts(j)%value = new
+                end block
+            end do
+            i = last + 1
+        end do
+    end subroutine distribute_products
+
+    recursive integer function distribute(p, idx, budget) result(out)
+        !! Rewrite a product over a sum, or zero if the result would be too big.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx, budget
+        integer, allocatable :: new_args(:)
+        type(fad_expr_t) :: e
+        character(len=:), allocatable :: text_here
+        integer :: i, kind_here, a, b
+        logical :: changed
+
+        out = idx
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (expr_size(p, idx) > budget) then
+            out = 0
+            return
+        end if
+
+        if (p%exprs(idx)%kind == FAD_BINOP) then
+            if (trim(p%exprs(idx)%text) == "*") then
+                a = p%exprs(idx)%args(1)
+                b = p%exprs(idx)%args(2)
+                if (is_sum(p, a)) then
+                    out = expand(p, a, b, .true., budget)
+                    if (out /= 0) return
+                    out = idx
+                else if (is_sum(p, b)) then
+                    out = expand(p, b, a, .false., budget)
+                    if (out /= 0) return
+                    out = idx
+                end if
+            end if
+        end if
+
+        if (.not. allocated(p%exprs(idx)%args)) return
+        kind_here = p%exprs(idx)%kind
+        text_here = p%exprs(idx)%text
+        new_args = p%exprs(idx)%args
+        changed = .false.
+        do i = 1, size(new_args)
+            block
+                integer :: sub
+                sub = distribute(p, new_args(i), budget)
+                if (sub == 0) then
+                    out = 0
+                    return
+                end if
+                if (sub /= new_args(i)) changed = .true.
+                new_args(i) = sub
+            end block
+        end do
+        if (.not. changed) return
+        e%kind = kind_here
+        e%text = text_here
+        e%args = new_args
+        out = p%add_expr(e)
+    end function distribute
+
+    logical function is_sum(p, idx) result(yes)
+        !! Whether an expression is a top-level sum or difference.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (p%exprs(idx)%kind /= FAD_BINOP) return
+        yes = trim(p%exprs(idx)%text) == "+" .or. trim(p%exprs(idx)%text) == "-"
+    end function is_sum
+
+    recursive integer function expand(p, sum_idx, other, sum_left, budget) &
+        result(out)
+        !! Build `(a op b)*c` as `a*c op b*c`, keeping the operand order.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: sum_idx, other, budget
+        logical, intent(in) :: sum_left
+        character(len=:), allocatable :: op
+        integer :: a, b, left, right
+
+        out = 0
+        op = trim(p%exprs(sum_idx)%text)
+        a = p%exprs(sum_idx)%args(1)
+        b = p%exprs(sum_idx)%args(2)
+        if (sum_left) then
+            left = p%add_expr(expr_binop("*", a, other))
+            right = p%add_expr(expr_binop("*", b, other))
+        else
+            left = p%add_expr(expr_binop("*", other, a))
+            right = p%add_expr(expr_binop("*", other, b))
+        end if
+        out = p%add_expr(expr_binop(op, left, right))
+        out = distribute(p, out, budget)
+    end function expand
 
     subroutine factor_self_update(p)
         !! Rewrite `x = x*c1 + x*c2 + r` as `x = x*(c1 + c2) + r`.
