@@ -54,6 +54,8 @@ module fortad_opt
     !! this loses the shortcut and substitution declines rather than guessing.
     integer, parameter :: MAX_SPAN = 4096
 
+
+
     type :: span_t
         !! The first and last statement mentioning each name.
         character(len=64) :: names(MAX_SPAN) = ""
@@ -447,7 +449,7 @@ contains
         type(fad_proc_t), intent(inout) :: p
         character(len=:), allocatable :: lhs
         type(span_t) :: span
-        integer :: i, j, uses, last_use, stop_at
+        integer :: i, j, uses, last_use, stop_at, last_mention
         logical :: changed, blocked
 
         do while (.true.)
@@ -464,8 +466,19 @@ contains
                 uses = 0
                 last_use = 0
                 blocked = .false.
+                ! The span says where this name is last mentioned, so the walk
+                ! stops there instead of at the end of the procedure. Walking to
+                ! the end costs a tree comparison per statement per definition,
+                ! which is quadratic and was nine of the twenty seconds
+                ! fortfem's degree-eleven Bezier took.
                 stop_at = p%n_stmts + 1
-                do j = i + 1, p%n_stmts
+                last_mention = p%n_stmts
+                block
+                    integer :: k
+                    k = span_index(span, lhs)
+                    if (k > 0) last_mention = min(last_mention, span%last_at(k))
+                end block
+                do j = i + 1, last_mention
                     ! The run ends at the first thing that is not a plain
                     ! assignment. That is not a failure - it just bounds the
                     ! window - but everything outside the window must then be
@@ -1009,12 +1022,27 @@ contains
     logical function loop_invariant(p, first, last, idx) result(yes)
         !! Whether an expression has the same value in every iteration.
         !!
-        !! Asked statement by statement. Inverting it - collecting the names the
-        !! body writes and asking the expression whether it reads any of them -
-        !! looks like the better shape and is not: the body writes as many names
-        !! as it has statements, so the inner loop moves rather than
-        !! disappears, and it measured three and a half times slower on
-        !! fortfem's degree-eleven Bezier.
+        !! Asked statement by statement, which is O(body) a question, and
+        !! `hoist_subexpressions` asks once per node of every statement. On
+        !! fortfem's degree-eleven Bezier that is half the generation time.
+        !!
+        !! Three attempts to precompute it are recorded because each failed
+        !! differently and the next attempt should not repeat them:
+        !!
+        !! - Inverting the question - collect the names the body writes, ask
+        !!   the expression whether it reads any - measured 3.5x slower. The
+        !!   body writes as many names as it has statements, so the inner loop
+        !!   moved rather than disappearing.
+        !! - A flag per arena node, rebuilt per loop, measured 15x slower.
+        !!   Hoisting creates nodes, so the cache was invalid on every hoist.
+        !! - A flag per arena node with a hash set for membership and an
+        !!   extend-rather-than-rebuild cache produced wrong derivatives: three
+        !!   forward-mode oracles failed. Extending is not sound as written,
+        !!   and the reason was not found before the attempt was withdrawn.
+        !!
+        !! The shape is right and the invalidation is what is hard: the answer
+        !! depends on the loop body, and every pass that asks the question also
+        !! rewrites the body.
         type(fad_proc_t), intent(in) :: p
         integer, intent(in) :: first, last, idx
         integer :: j
@@ -1031,6 +1059,7 @@ contains
         end do
         yes = .true.
     end function loop_invariant
+
 
     logical function plain_body(p, first, last) result(yes)
         !! Whether a loop body is a run of plain assignments.
