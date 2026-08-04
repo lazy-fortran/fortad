@@ -162,15 +162,13 @@ contains
                         call add_name(shape%carried, shape%n_carried, target)
                         cycle
                     end if
-                    if (is_known(shape%temporaries, shape%n_temporaries, target)) then
-                        shape%status = LOOP_UNSUPPORTED
-                        shape%message = "reverse mode: '"//target// &
-                            "' is assigned more than once in the loop body; "// &
-                            "the reverse sweep would need to know which "// &
-                            "version each use saw"
-                        return
+                    ! A temporary written more than once is not ambiguous: the
+                    ! emitter gives each write its own version, exactly as it
+                    ! does outside a loop. It is recorded once here.
+                    if (.not. is_known(shape%temporaries, shape%n_temporaries, &
+                                       target)) then
+                        call add_name(shape%temporaries, shape%n_temporaries, target)
                     end if
-                    call add_name(shape%temporaries, shape%n_temporaries, target)
                 end if
             case (FAD_DO)
                 ! A nested loop is part of the same nest: the accumulator's

@@ -436,20 +436,6 @@ document. Currently open:
   single expression before factoring is the remaining step. Gradient-only rk4
   already leads Tapenade, 7.68 against 8.71.
 
-- **A scalar written more than once in a loop body is refused.** Bundle
-  adjustment writes `qx` three times - project, divide through, scale - so this
-  costs a whole workload rather than an unusual corner, and it is why `ba` is
-  out of the Enzyme suite.
-
-  A body-local single-assignment pass on the primal is the obvious fix and does
-  not work as written: the reverse sweep has SSA machinery of its own, and with
-  the primal renamed it seeded adjoints named for variables the primal no
-  longer writes. The forward sweep it produced was correct and the adjoint was
-  not - the suite's cross-check against Enzyme caught it at relative 1. The two
-  renamings have to be reconciled rather than layered, which is the actual
-  piece of work. The refusal stays until then: a refusal is a fact the caller
-  can act on, and a wrong gradient is not.
-
 - **An assumed-size dummy silently becomes assumed-shape.** A primal declaring
   `real(dp), intent(in) :: z(*)` produces a derivative declaring
   `dimension(:)`. The generated routine then no longer matches the caller's

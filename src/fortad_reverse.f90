@@ -1073,6 +1073,27 @@ contains
                         ignored = adjoint%add_decl(bd)
                     end if
                 end block
+            else if (is_known_name(shape%temporaries, shape%n_temporaries, &
+                                   primal%stmts(i)%target)) then
+                ! A per-iteration temporary gets a version per write, like any
+                ! straight-line assignment. Holding it to one name is what made
+                ! a second write ambiguous, and the loop was refused for it -
+                ! bundle adjustment writes `qx` three times. An accumulator is
+                ! different and keeps its single name: it is the same storage
+                ! across iterations by definition.
+                call ssa_fresh(ssa, primal%stmts(i)%target, fresh)
+                block
+                    integer :: tdi
+                    type(fad_decl_t) :: td
+                    tdi = primal%decl_index(primal%stmts(i)%target)
+                    if (tdi > 0) then
+                        td = primal%decls(tdi)
+                        td%name = fresh
+                        td%intent = FAD_INTENT_NONE
+                        td%is_result = .false.
+                        ignored = adjoint%add_decl(td)
+                    end if
+                end block
             else
                 call ssa_lookup(ssa, primal%stmts(i)%target, fresh)
             end if

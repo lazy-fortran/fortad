@@ -196,6 +196,28 @@ program test_reverse_loop_oracle
                "    end do"//nl// &
                "end subroutine k"//nl, failures)
 
+    ! A temporary written more than once in the body, the second write reading
+    ! the first. This was refused outright - "the reverse sweep would need to
+    ! know which version each use saw" - because the emitter held a temporary
+    ! to one name inside a loop. It gives each write its own version now, as it
+    ! always did outside a loop. Bundle adjustment writes `qx` three times, so
+    ! the refusal cost a whole workload rather than an unusual corner.
+    call check("revloop_temporary_written_twice", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    integer :: i"//nl// &
+               "    real(8) :: t"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        t = a(i)*a(i)"//nl// &
+               "        t = t/b(i)"//nl// &
+               "        s = s + t*t"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
     ! A *linear* carried recurrence. Its adjoint coefficient does not depend
     ! on the carried value, so no tape is needed - but the adjoint still flows
     ! backwards across iterations, so the loop may not be fused or run forwards.
