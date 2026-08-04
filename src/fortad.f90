@@ -43,7 +43,7 @@ contains
         v = FORTAD_VERSION
     end function fad_version
 
-    function fad_jvp(source, independents, name, suffix) result(res)
+    function fad_jvp(source, independents, name, suffix, n_directions) result(res)
         !! Forward mode. Returns a subroutine computing the primal and its
         !! Jacobian-vector product in one sweep.
         !!
@@ -57,6 +57,11 @@ contains
         character(len=*), intent(in), optional :: name
         !! Suffix for tangent variables. Defaults to `_d`.
         character(len=*), intent(in), optional :: suffix
+        !! Name of a direction-count dummy argument. Supplying it selects
+        !! **vector mode**: the generated routine carries that many tangent
+        !! directions through a single primal sweep, with the direction axis
+        !! leading every tangent array so it is the contiguous one.
+        character(len=*), intent(in), optional :: n_directions
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal, tangent
         type(lower_status_t) :: lstat
@@ -81,6 +86,10 @@ contains
         end do
         if (present(name)) spec%name = name
         if (present(suffix)) spec%suffix = suffix
+        if (present(n_directions)) then
+            spec%vector = .true.
+            spec%ndir_name = n_directions
+        end if
 
         call differentiate_forward(primal, spec, tangent, fstat)
         if (.not. fstat%ok) then
