@@ -11,7 +11,7 @@ program fortad_cli
                       fad_result_t, fad_version
     implicit none
 
-    character(len=:), allocatable :: input_path, output_path, indep_list
+    character(len=:), allocatable :: input_path, output_path, indep_list, dep_name
     character(len=:), allocatable :: directions, proc_name, source, mode
     character(len=:), allocatable :: module_name
     character(len=32), allocatable :: independents(:)
@@ -21,7 +21,7 @@ program fortad_cli
 
     call parse_arguments(input_path, output_path, indep_list, directions, &
                          proc_name, mode, module_name, roundtrip_only, &
-                         with_primal, stat)
+                         with_primal, dep_name, stat)
     if (stat /= 0) then
         call usage()
         error stop 2
@@ -38,7 +38,7 @@ program fortad_cli
     else if (mode == "reverse") then
         independents = split_commas(indep_list)
         res = run_reverse(source, independents, proc_name, module_name, &
-                          with_primal)
+                          with_primal, dep_name)
     else if (mode == "hessian") then
         independents = split_commas(indep_list)
         res = run_hessian(source, independents, proc_name, module_name)
@@ -65,14 +65,14 @@ program fortad_cli
 contains
 
     function run_reverse(source, independents, proc_name, module_name, &
-                         with_primal) result(res)
-        !! Reverse mode. A blank name or module means "use the default".
+                         with_primal, dep_name) result(res)
+        !! Reverse mode. A blank name, module or dependent means "the default".
         character(len=*), intent(in) :: source, independents(:)
-        character(len=*), intent(in) :: proc_name, module_name
+        character(len=*), intent(in) :: proc_name, module_name, dep_name
         logical, intent(in) :: with_primal
         type(fad_result_t) :: res
 
-        res = fad_vjp(source, independents, name=proc_name, &
+        res = fad_vjp(source, independents, dependent=dep_name, name=proc_name, &
                       module_name=module_name, with_primal=with_primal)
     end function run_reverse
 
@@ -88,13 +88,14 @@ contains
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
                                proc_name, mode, module_name, roundtrip_only, &
-                         with_primal, stat)
+                               with_primal, dep_name, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
         character(len=:), allocatable, intent(out) :: indep_list, directions
         character(len=:), allocatable, intent(out) :: proc_name, mode
         character(len=:), allocatable, intent(out) :: module_name
         logical, intent(out) :: roundtrip_only, with_primal
+        character(len=:), allocatable, intent(out) :: dep_name
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
@@ -108,6 +109,7 @@ contains
         module_name = ""
         roundtrip_only = .false.
         with_primal = .true.
+        dep_name = ""
         stat = 0
 
         n = command_argument_count()
@@ -170,6 +172,19 @@ contains
                 end if
                 call get_command_argument(i, arg, length)
                 module_name = trim(arg(1:length))
+            case ("--dep")
+                ! Which output to differentiate. Needed when the primal has
+                ! more than one `intent(out)` argument and fortad cannot tell
+                ! which one the caller means.
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, length=length)
+                if (allocated(dep_name)) deallocate (dep_name)
+                allocate (character(len=length) :: dep_name)
+                call get_command_argument(i, dep_name)
             case ("--no-primal")
                 ! Emit the gradient alone. Everything the primal value kept
                 ! alive is then dead and is removed.
@@ -214,6 +229,8 @@ contains
             "direction-count argument"
         write (*, '(a)') "      --name f_jvp      name of the generated procedure"
         write (*, '(a)') "  -o, --output path     write here instead of stdout"
+        write (*, '(a)') "      --dep name        which output to "// &
+            "differentiate, when there is more than one"
         write (*, '(a)') "      --no-primal       return the derivative only, "// &
             "not the primal value"
         write (*, '(a)') "      --roundtrip       parse and re-emit, do not "// &
