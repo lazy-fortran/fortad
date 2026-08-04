@@ -23,6 +23,7 @@ module fortad_opt
     !! dataflow lattice, and a wrong answer here is a wrong derivative rather
     !! than a crash.
     use fortad_dce, only: eliminate_dead_stores
+    use fortad_kinds, only: dp
     use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_expr_t, expr_var, &
                          expr_const, expr_binop, FAD_CONST, FAD_VAR, &
                          FAD_BINOP, FAD_UNOP, FAD_CALL, FAD_INDEX, &
@@ -181,6 +182,7 @@ contains
         bold_mask = mask
         n_bold_loops = size(mask)
 
+        call fold_identities(p)
         call propagate_loop_zeros(p)
         ! Coalescing before renaming, so that a scatter built as a chain of
         ! accumulations onto an array element becomes a chain onto a scalar.
@@ -203,6 +205,7 @@ contains
         call hoist_invariants(p)
         call hoist_subexpressions(p)
         call rotate_carried(p)
+        call fold_identities(p)
         ! Substitution and factoring leave their inputs behind. Clearing them
         ! here is not cosmetic: the cost model counts operations in loop
         ! bodies, and a collapsed body that still carries the statements it
@@ -1364,6 +1367,142 @@ contains
         end do
         text = head//text
     end function rename_in_text
+
+    subroutine fold_identities(p)
+        !! Remove arithmetic that does nothing: `x + 0`, `x*1`, `x**1`, `0 - x`.
+        !!
+        !! The rule table produces these honestly - the derivative of a node
+        !! against a constant is a zero or a one, and the builder writes what
+        !! the rule says. They survive to the emitted source because a Fortran
+        !! compiler will not fold `x - 0.0` either: for signed zero and for a
+        !! NaN it is not the identity. For a derivative it is, and the
+        !! difference is not observable in the answer.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, pass
+        logical :: changed
+
+        do pass = 1, 4
+            changed = .false.
+            do i = 1, p%n_stmts
+                if (p%stmts(i)%value > 0) then
+                    block
+                        integer :: new
+                        new = fold(p, p%stmts(i)%value)
+                        if (new /= p%stmts(i)%value) then
+                            p%stmts(i)%value = new
+                            changed = .true.
+                        end if
+                    end block
+                end if
+            end do
+            if (.not. changed) exit
+        end do
+    end subroutine fold_identities
+
+    recursive integer function fold(p, idx) result(out)
+        !! Rebuild an expression with the identities applied.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx
+        integer, allocatable :: new_args(:)
+        type(fad_expr_t) :: e
+        character(len=:), allocatable :: text_here, op
+        integer :: i, kind_here, a, b
+        logical :: changed
+
+        out = idx
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (.not. allocated(p%exprs(idx)%args)) return
+
+        kind_here = p%exprs(idx)%kind
+        text_here = p%exprs(idx)%text
+        new_args = p%exprs(idx)%args
+        changed = .false.
+        do i = 1, size(new_args)
+            block
+                integer :: sub
+                sub = fold(p, new_args(i))
+                if (sub /= new_args(i)) changed = .true.
+                new_args(i) = sub
+            end block
+        end do
+
+        if (kind_here == FAD_BINOP) then
+            op = trim(text_here)
+            a = new_args(1)
+            b = new_args(2)
+            select case (op)
+            case ("+")
+                if (is_literal(p, b, 0.0_dp)) then
+                    out = a
+                    return
+                else if (is_literal(p, a, 0.0_dp)) then
+                    out = b
+                    return
+                end if
+            case ("-")
+                if (is_literal(p, b, 0.0_dp)) then
+                    out = a
+                    return
+                else if (is_literal(p, a, 0.0_dp)) then
+                    e%kind = FAD_UNOP
+                    e%text = "-"
+                    e%args = [b]
+                    out = p%add_expr(e)
+                    return
+                end if
+            case ("*")
+                if (is_literal(p, b, 1.0_dp)) then
+                    out = a
+                    return
+                else if (is_literal(p, a, 1.0_dp)) then
+                    out = b
+                    return
+                end if
+            case ("/")
+                if (is_literal(p, b, 1.0_dp)) then
+                    out = a
+                    return
+                end if
+            case ("**")
+                if (is_literal(p, b, 1.0_dp)) then
+                    out = a
+                    return
+                end if
+            end select
+        end if
+
+        if (.not. changed) return
+        e%kind = kind_here
+        e%text = text_here
+        e%args = new_args
+        out = p%add_expr(e)
+    end function fold
+
+    logical function is_literal(p, idx, value) result(yes)
+        !! Whether an expression is exactly this literal.
+        !!
+        !! The text is parsed rather than pattern-matched, because the same
+        !! number reaches here as `0`, `0.0`, `0.0d0` and `0.0_dp` depending on
+        !! which rule produced it.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        real(dp), intent(in) :: value
+        character(len=:), allocatable :: text
+        real(dp) :: number
+        integer :: ios, pos
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (p%exprs(idx)%kind /= FAD_CONST) return
+        if (.not. allocated(p%exprs(idx)%text)) return
+        text = trim(adjustl(p%exprs(idx)%text))
+        ! A kind suffix is not something `read` understands.
+        pos = index(text, "_")
+        if (pos > 1) text = text(1:pos - 1)
+        read (text, *, iostat=ios) number
+        if (ios /= 0) return
+        yes = number == value
+    end function is_literal
 
     subroutine propagate_loop_zeros(p)
         !! Turn the first accumulation onto a per-iteration adjoint into a
