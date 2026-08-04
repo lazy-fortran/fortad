@@ -11,12 +11,13 @@ module fortad_lower
                         assignment_node, binary_op_node, identifier_node, &
                         literal_node, call_or_subscript_node, declaration_node, &
                         do_loop_node, if_node, parameter_declaration_node, &
+                        subroutine_call_node, &
                         INPUT_MODE_STANDARD
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
                         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
                         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
-                        FAD_END_IF, FAD_INDEX, FAD_INTENT_NONE, FAD_INTENT_IN, &
-                        FAD_INTENT_OUT, FAD_INTENT_INOUT
+                        FAD_END_IF, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
+                        FAD_INTENT_IN, FAD_INTENT_OUT, FAD_INTENT_INOUT
     implicit none
     private
 
@@ -274,6 +275,25 @@ contains
                 e%kind = FAD_END_IF
                 ignored = proc%add_stmt(e)
             end block
+
+        type is (subroutine_call_node)
+            ! A call is opaque: fortad differentiates it through a registered
+            ! rule or not at all. Descending into the callee would need
+            ! whole-program analysis fortad does not do.
+            s%kind = FAD_CALL_STMT
+            s%line = n%line
+            s%target = n%name
+            block
+                integer, allocatable :: cargs(:)
+                integer :: ci
+                allocate (cargs(size(n%arg_indices)))
+                do ci = 1, size(n%arg_indices)
+                    cargs(ci) = lower_expr(arena, n%arg_indices(ci), proc, status)
+                    if (.not. status%ok) return
+                end do
+                s%call_args = cargs
+            end block
+            ignored = proc%add_stmt(s)
 
         type is (do_loop_node)
             s%kind = FAD_DO

@@ -13,7 +13,8 @@ module fortad_emit
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
                         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
                         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
-                        FAD_ELSE, FAD_END_IF, FAD_INTENT_IN, FAD_INTENT_OUT, &
+                        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
+                        FAD_INTENT_IN, FAD_INTENT_OUT, &
                         FAD_INTENT_INOUT
     use fortgen_buffer, only: buffer_t
     use fortgen_layout, only: put_wrapped, indent_of
@@ -133,13 +134,17 @@ contains
         type(fad_proc_t), intent(in) :: p
         integer :: i
 
-        ! Generated derivative code only does arithmetic on its arguments: no
-        ! I/O, no saved state, no side effects. Saying so lets the consumer's
-        ! compiler hoist, vectorise, and parallelise calls to it.
+        ! Code fortad writes itself does only arithmetic on its arguments -
+        ! no I/O, no saved state - so saying `pure` lets the consumer's
+        ! compiler hoist, vectorise, and parallelise calls to it. A procedure
+        ! that calls something fortad cannot see gets no such claim.
+        if (p%is_pure) then
+            call b%put("pure ")
+        end if
         if (p%is_function) then
-            call b%put("pure function "//p%name//"(")
+            call b%put("function "//p%name//"(")
         else
-            call b%put("pure subroutine "//p%name//"(")
+            call b%put("subroutine "//p%name//"(")
         end if
         if (allocated(p%params)) then
             do i = 1, size(p%params)
@@ -187,6 +192,12 @@ contains
 
         select case (s%kind)
         case (FAD_ASSIGN)
+            ! A registered rule supplies a whole statement, already written as
+            ! Fortran. It is emitted verbatim rather than rebuilt.
+            if (s%target == "!fad_raw") then
+                call write_expr(b, p, s%value)
+                return
+            end if
             call b%put(s%target)
             call b%put(" = ")
             call write_expr(b, p, s%value)
@@ -199,6 +210,16 @@ contains
                 call b%put(", ")
                 call write_expr(b, p, s%step)
             end if
+        case (FAD_CALL_STMT)
+            call b%put("call "//s%target//"(")
+            block
+                integer :: k
+                do k = 1, size(s%call_args)
+                    if (k > 1) call b%put(", ")
+                    call write_expr(b, p, s%call_args(k))
+                end do
+            end block
+            call b%put(")")
         case (FAD_END_DO)
             call b%put("end do")
         case (FAD_IF)
