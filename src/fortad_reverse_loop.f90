@@ -1,0 +1,241 @@
+module fortad_reverse_loop
+    !! Reverse mode over reduction loops.
+    !!
+    !! The loop shape this handles is the one real gradient workloads are made
+    !! of: a loop whose body computes per-iteration temporaries and accumulates
+    !! them linearly into one or more running totals.
+    !!
+    !!     do i = lo, hi
+    !!         t = g(a(i), b(i))
+    !!         s = s + t
+    !!     end do
+    !!
+    !! Two facts make this case both correct and fast without any tape.
+    !!
+    !! First, the adjoint of a linear accumulation does not need the
+    !! accumulator's value. `s = s + e` contributes `e_b += s_b` and leaves
+    !! `s_b` unchanged, so `s_b` is loop-invariant and nothing about `s` has to
+    !! be saved.
+    !!
+    !! Second, every per-iteration temporary depends only on loop-invariant
+    !! values and on arrays indexed by the loop variable, so the reverse sweep
+    !! recomputes it instead of storing it. Recomputation costs flops; a tape
+    !! costs memory bandwidth, and on current hardware bandwidth is the scarcer
+    !! resource.
+    !!
+    !! The consequence worth stating: because `s_b` is loop-invariant and the
+    !! per-iteration work is independent, **the emitted reverse loop carries no
+    !! loop-carried dependence and is parallelisable**, which a taped adjoint of
+    !! the same loop is not.
+    !!
+    !! A loop that does not fit this shape - a nonlinear loop-carried
+    !! recurrence, for instance - is refused by name. That needs per-iteration
+    !! storage and belongs to the next milestone.
+    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
+                        FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
+                        FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_BINOP, FAD_CONST
+    implicit none
+    private
+
+    integer, parameter, public :: LOOP_OK = 0
+    integer, parameter, public :: LOOP_NOT_A_LOOP = 1
+    integer, parameter, public :: LOOP_UNSUPPORTED = 2
+
+    public :: loop_shape_t, analyse_loop
+
+    type :: loop_shape_t
+        !! What `analyse_loop` found.
+        integer :: status = LOOP_NOT_A_LOOP
+        character(len=:), allocatable :: message
+        !! Statement indices of the `do` and its matching `end do`.
+        integer :: first = 0, last = 0
+        !! Names accumulated into linearly, and the temporaries recomputed.
+        character(len=64), allocatable :: accumulators(:)
+        integer :: n_accumulators = 0
+        character(len=64), allocatable :: temporaries(:)
+        integer :: n_temporaries = 0
+    end type loop_shape_t
+
+contains
+
+    subroutine analyse_loop(p, first, shape)
+        !! Classify the loop starting at statement `first`.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first
+        type(loop_shape_t), intent(out) :: shape
+        character(len=:), allocatable :: target
+        integer :: i, depth
+        logical :: is_accum
+
+        shape%status = LOOP_NOT_A_LOOP
+        if (first < 1 .or. first > p%n_stmts) return
+        if (p%stmts(first)%kind /= FAD_DO) return
+
+        shape%first = first
+        depth = 0
+        shape%last = 0
+        do i = first, p%n_stmts
+            select case (p%stmts(i)%kind)
+            case (FAD_DO)
+                depth = depth + 1
+            case (FAD_END_DO)
+                depth = depth - 1
+                if (depth == 0) then
+                    shape%last = i
+                    exit
+                end if
+            end select
+        end do
+        if (shape%last == 0) then
+            shape%status = LOOP_UNSUPPORTED
+            shape%message = "unterminated do loop"
+            return
+        end if
+
+        allocate (shape%accumulators(32), shape%temporaries(32))
+        shape%accumulators = ""
+        shape%temporaries = ""
+        shape%n_accumulators = 0
+        shape%n_temporaries = 0
+
+        do i = first + 1, shape%last - 1
+            select case (p%stmts(i)%kind)
+            case (FAD_ASSIGN)
+                target = p%stmts(i)%target
+                if (index(target, "(") > 0) then
+                    shape%status = LOOP_UNSUPPORTED
+                    shape%message = "reverse mode: an array-element "// &
+                        "assignment inside a loop needs scatter adjoints, "// &
+                        "which is the next milestone"
+                    return
+                end if
+                is_accum = is_linear_accumulation(p, i, target)
+                if (is_accum) then
+                    call add_name(shape%accumulators, shape%n_accumulators, target)
+                else
+                    if (is_known(shape%accumulators, shape%n_accumulators, target)) then
+                        shape%status = LOOP_UNSUPPORTED
+                        shape%message = "reverse mode: '"//target// &
+                            "' is both accumulated and overwritten in the "// &
+                            "same loop; that needs per-iteration storage"
+                        return
+                    end if
+                    if (reads_name(p, p%stmts(i)%value, target)) then
+                        shape%status = LOOP_UNSUPPORTED
+                        shape%message = "reverse mode: nonlinear loop-carried "// &
+                            "recurrence in '"//target//"' needs per-iteration "// &
+                            "storage, which is the next milestone"
+                        return
+                    end if
+                    if (is_known(shape%temporaries, shape%n_temporaries, target)) then
+                        shape%status = LOOP_UNSUPPORTED
+                        shape%message = "reverse mode: '"//target// &
+                            "' is assigned more than once in the loop body; "// &
+                            "the reverse sweep would need to know which "// &
+                            "version each use saw"
+                        return
+                    end if
+                    call add_name(shape%temporaries, shape%n_temporaries, target)
+                end if
+            case (FAD_DO, FAD_END_DO)
+                shape%status = LOOP_UNSUPPORTED
+                shape%message = "reverse mode: nested loops are not supported yet"
+                return
+            case (FAD_IF, FAD_ELSE, FAD_END_IF)
+                shape%status = LOOP_UNSUPPORTED
+                shape%message = "reverse mode: a branch inside a loop needs "// &
+                    "control-flow reversal, which is the next milestone"
+                return
+            end select
+        end do
+
+        if (shape%n_accumulators == 0) then
+            shape%status = LOOP_UNSUPPORTED
+            shape%message = "reverse mode: this loop accumulates nothing, so "// &
+                "its results do not leave the loop body"
+            return
+        end if
+
+        shape%status = LOOP_OK
+    end subroutine analyse_loop
+
+    logical function is_linear_accumulation(p, stmt, target) result(yes)
+        !! True for `v = v + e` or `v = v - e` where `e` does not read `v`.
+        !!
+        !! That is the shape whose adjoint leaves the accumulator's own adjoint
+        !! untouched, which is what removes the loop-carried dependence from the
+        !! reverse sweep.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: stmt
+        character(len=*), intent(in) :: target
+        integer :: root, left, right
+
+        yes = .false.
+        root = p%stmts(stmt)%value
+        if (root <= 0 .or. root > p%n_exprs) return
+        if (p%exprs(root)%kind /= FAD_BINOP) return
+        if (trim(p%exprs(root)%text) /= "+" .and. &
+            trim(p%exprs(root)%text) /= "-") return
+
+        left = p%exprs(root)%args(1)
+        right = p%exprs(root)%args(2)
+        if (left <= 0 .or. left > p%n_exprs) return
+        if (p%exprs(left)%kind /= FAD_VAR) return
+        if (p%exprs(left)%text /= target) return
+        if (reads_name(p, right, target)) return
+        yes = .true.
+    end function is_linear_accumulation
+
+    recursive logical function reads_name(p, idx, name) result(yes)
+        !! True when the expression reads `name`.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            if (p%exprs(idx)%text == name) then
+                yes = .true.
+                return
+            end if
+        end select
+        do i = 1, size(p%exprs(idx)%args)
+            if (reads_name(p, p%exprs(idx)%args(i), name)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function reads_name
+
+    subroutine add_name(names, n, name)
+        !! Append a name if it is not already present.
+        character(len=64), intent(inout) :: names(:)
+        integer, intent(inout) :: n
+        character(len=*), intent(in) :: name
+
+        if (is_known(names, n, name)) return
+        if (n >= size(names)) return
+        n = n + 1
+        names(n) = name
+    end subroutine add_name
+
+    logical function is_known(names, n, name) result(yes)
+        !! Membership test.
+        character(len=64), intent(in) :: names(:)
+        integer, intent(in) :: n
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        yes = .false.
+        do i = 1, n
+            if (trim(names(i)) == name) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function is_known
+
+end module fortad_reverse_loop
