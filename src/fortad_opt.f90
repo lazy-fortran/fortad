@@ -2383,6 +2383,13 @@ contains
             return
         end if
         ! Repeated: one reciprocal serves every division by it.
+        !
+        ! It is kept on measurement rather than on the argument. Turning it off
+        ! moves fortfem's quintic Lagrange adjoint from 1.26x Enzyme to 1.24x
+        ! and its tangent from 0.88x to 1.15x, so the tangent pays for the
+        ! adjoint several times over. The divide count is the same either way,
+        ! which says the win is in what the reciprocal lets the vectoriser do
+        ! rather than in the division it removes.
         if (original < 1 .or. original > size(divisors)) return
         yes = divisors(original) > 1
     end function worth_reciprocating
