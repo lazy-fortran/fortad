@@ -22,7 +22,8 @@ module fortad
     implicit none
     private
 
-    public :: fad_jvp, fad_vjp, fad_roundtrip, fad_result_t, fad_version
+    public :: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, fad_result_t, &
+              fad_version
 
     character(len=*), parameter :: FORTAD_VERSION = "0.1.0"
 
@@ -172,6 +173,61 @@ contains
             res%code = emit_proc(adjoint)
         end if
     end function fad_vjp
+
+    function fad_hvp(source, independents, dependent, name, module_name) result(res)
+        !! Second order: forward mode applied to the generated adjoint.
+        !!
+        !! This is **forward-over-reverse**, the standard route to a
+        !! Hessian-vector product, and fortad obtains it by composing with
+        !! itself: it differentiates its own emitted adjoint. Nothing in the
+        !! second pass knows it is running on generated code, which is a useful
+        !! property - if the emitter ever produced Fortran fortad could not read
+        !! back, this would be the first thing to fail.
+        !!
+        !! Seed the tangents with the direction `v` and the dependent's adjoint
+        !! with one; the tangents of the returned adjoints are `H v`.
+        !!
+        !! Cost is `O(primal)` per product, independent of the number of
+        !! inputs, which is what makes Newton-Krylov practical.
+        character(len=*), intent(in) :: source
+        character(len=*), intent(in) :: independents(:)
+        !! The dependent. Defaults as for `fad_vjp`.
+        character(len=*), intent(in), optional :: dependent
+        !! Name of the generated procedure. Defaults to `<primal>_hvp`.
+        character(len=*), intent(in), optional :: name
+        !! Wrap the result in a module of this name.
+        character(len=*), intent(in), optional :: module_name
+        type(fad_result_t) :: res
+        type(fad_result_t) :: adjoint
+        character(len=:), allocatable :: inner_name, outer_name
+
+        inner_name = "fad_inner_vjp"
+        if (present(dependent)) then
+            adjoint = fad_vjp(source, independents, dependent=dependent, &
+                              name=inner_name)
+        else
+            adjoint = fad_vjp(source, independents, name=inner_name)
+        end if
+        if (.not. adjoint%ok) then
+            res%ok = .false.
+            res%message = "reverse pass failed: "//adjoint%message
+            return
+        end if
+
+        outer_name = "fad_hvp"
+        if (present(name)) outer_name = name
+
+        if (present(module_name)) then
+            res = fad_jvp(adjoint%code, independents, name=outer_name, &
+                          module_name=module_name)
+        else
+            res = fad_jvp(adjoint%code, independents, name=outer_name)
+        end if
+        if (.not. res%ok) then
+            res%message = "forward pass over the generated adjoint failed: "// &
+                          res%message
+        end if
+    end function fad_hvp
 
     function fad_roundtrip(source) result(res)
         !! Parse and re-emit without differentiating.
