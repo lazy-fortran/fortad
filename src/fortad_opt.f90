@@ -98,6 +98,7 @@ contains
         call share_subexpressions(p)
         call rotate_carried(p)
         call fold_identities(p)
+        call fold_negations(p)
         ! Substitution and factoring leave their inputs behind.
         call eliminate_dead_stores(p)
     end subroutine optimise
@@ -1198,6 +1199,168 @@ contains
         end do
         text = head//text
     end function rename_in_text
+
+    subroutine fold_negations(p)
+        !! Move a negated term's sign into the sum around it.
+        !!
+        !! The rule table produces negations honestly - the derivative of a
+        !! subtraction is a subtraction, the derivative of `cos` is `-sin` - and
+        !! they arrive as `(-a)*b + c`, which is a negate, a multiply and an
+        !! add. Written as `c - a*b` it is a multiply and a subtract. The
+        !! polygon edge area's tangent carries two of them.
+        !!
+        !! A Fortran compiler will not do this either: for a signed zero
+        !! `(-a)*b + c` and `c - a*b` differ, and it has no licence to decide
+        !! that does not matter. For a derivative it does not.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, pass
+        logical :: changed
+
+        do pass = 1, 3
+            changed = .false.
+            do i = 1, p%n_stmts
+                if (p%stmts(i)%value <= 0) cycle
+                block
+                    integer :: new
+                    new = fold_negations_in(p, p%stmts(i)%value)
+                    if (new /= p%stmts(i)%value) then
+                        p%stmts(i)%value = new
+                        changed = .true.
+                    end if
+                end block
+            end do
+            if (.not. changed) exit
+        end do
+    end subroutine fold_negations
+
+    recursive integer function fold_negations_in(p, idx) result(out)
+        !! Fold negations in every sum in an expression, not only the outermost.
+        !!
+        !! The sum that carries them is usually nested: the polygon edge area's
+        !! tangent is a sum of four products scaled by a half, so the whole
+        !! statement is a product and only its left operand is a sum.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx
+        integer, allocatable :: new_args(:)
+        type(fad_expr_t) :: e
+        character(len=:), allocatable :: text_here
+        integer :: i, kind_here, folded
+        logical :: changed
+
+        out = idx
+        if (idx <= 0 .or. idx > p%n_exprs) return
+
+        if (allocated(p%exprs(idx)%args)) then
+            kind_here = p%exprs(idx)%kind
+            text_here = p%exprs(idx)%text
+            new_args = p%exprs(idx)%args
+            changed = .false.
+            do i = 1, size(new_args)
+                block
+                    integer :: sub
+                    sub = fold_negations_in(p, new_args(i))
+                    if (sub /= new_args(i)) changed = .true.
+                    new_args(i) = sub
+                end block
+            end do
+            if (changed) then
+                e%kind = kind_here
+                e%text = text_here
+                e%args = new_args
+                out = p%add_expr(e)
+            end if
+        end if
+
+        folded = signed_sum(p, out)
+        if (folded > 0) out = folded
+    end function fold_negations_in
+
+    integer function signed_sum(p, idx) result(out)
+        !! Rebuild a sum with each term's negations pulled into its sign.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx
+        integer, parameter :: MAX_TERMS = 64
+        integer :: terms(MAX_TERMS), signs(MAX_TERMS), n_terms
+        integer :: i, sign_here, bare, acc
+        logical :: any_change
+
+        out = 0
+        n_terms = 0
+        call flatten_sum(p, idx, 1, terms, signs, n_terms, MAX_TERMS)
+        if (n_terms < 2 .or. n_terms > MAX_TERMS) return
+
+        any_change = .false.
+        do i = 1, n_terms
+            call strip_negation(p, terms(i), bare, sign_here)
+            if (sign_here < 0) then
+                terms(i) = bare
+                signs(i) = -signs(i)
+                any_change = .true.
+            end if
+        end do
+        if (.not. any_change) return
+        ! The sum has to start with a term that is added. Terms commute, so a
+        ! positive one is brought to the front; if there is none the sum is
+        ! negative throughout and folding would only move the minus sign.
+        if (signs(1) < 0) then
+            sign_here = 0
+            do i = 2, n_terms
+                if (signs(i) > 0) then
+                    sign_here = i
+                    exit
+                end if
+            end do
+            if (sign_here == 0) return
+            bare = terms(1)
+            terms(1) = terms(sign_here)
+            terms(sign_here) = bare
+            signs(sign_here) = signs(1)
+            signs(1) = 1
+        end if
+
+        acc = terms(1)
+        do i = 2, n_terms
+            block
+                integer :: lhs_idx
+                lhs_idx = acc
+                if (signs(i) > 0) then
+                    acc = p%add_expr(expr_binop("+", lhs_idx, terms(i)))
+                else
+                    acc = p%add_expr(expr_binop("-", lhs_idx, terms(i)))
+                end if
+            end block
+        end do
+        out = acc
+    end function signed_sum
+
+    subroutine strip_negation(p, idx, bare, sign_out)
+        !! A product term without its negations, and their combined sign.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx
+        integer, intent(out) :: bare, sign_out
+        integer, parameter :: MAX_FACTORS = 32
+        integer :: factors(MAX_FACTORS), n_factors, i, inner
+
+        bare = idx
+        sign_out = 1
+        n_factors = 0
+        call flatten_product(p, idx, factors, n_factors, MAX_FACTORS)
+        if (n_factors == 0 .or. n_factors > MAX_FACTORS) return
+
+        do i = 1, n_factors
+            if (p%exprs(factors(i))%kind /= FAD_UNOP) cycle
+            if (trim(p%exprs(factors(i))%text) /= "-") cycle
+            factors(i) = p%exprs(factors(i))%args(1)
+            sign_out = -sign_out
+        end do
+        if (sign_out > 0) return
+
+        bare = factors(1)
+        do i = 2, n_factors
+            inner = bare
+            bare = p%add_expr(expr_binop("*", inner, factors(i)))
+        end do
+    end subroutine strip_negation
 
     subroutine fold_identities(p)
         !! Remove arithmetic that does nothing: `x + 0`, `x*1`, `x**1`, `0 - x`.
