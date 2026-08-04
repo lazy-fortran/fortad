@@ -14,6 +14,16 @@ program test_forward_oracle
     implicit none
 
     character(len=1), parameter :: nl = achar(10)
+    character(len=*), parameter :: BRANCH_SOURCE = &
+        "function f(x, y) result(z)"//nl// &
+        "    real(8), intent(in) :: x, y"//nl// &
+        "    real(8) :: z"//nl// &
+        "    if (x > y) then"//nl// &
+        "        z = x*x + sin(y)"//nl// &
+        "    else"//nl// &
+        "        z = exp(y)*x"//nl// &
+        "    end if"//nl// &
+        "end function f"//nl
     integer :: failures
 
     failures = 0
@@ -73,6 +83,14 @@ program test_forward_oracle
                "    z = c*sin(x)"//nl// &
                "end function f"//nl, &
                ["x"], "1.1d0", "2.0d0", failures)
+
+    ! Both arms of the same branch, so neither is left untested. A branch is
+    ! differentiated arm by arm: the condition itself carries no tangent, and
+    ! the derivative is only valid away from the switching surface.
+    call check("branch_then_arm", BRANCH_SOURCE, ["x", "y"], "1.5d0", "0.4d0", &
+               failures)
+    call check("branch_else_arm", BRANCH_SOURCE, ["x", "y"], "0.4d0", "1.5d0", &
+               failures)
 
     if (failures == 0) then
         print *, "test_forward_oracle: all cases passed"

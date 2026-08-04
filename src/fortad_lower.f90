@@ -239,6 +239,42 @@ contains
             if (.not. status%ok) return
             ignored = proc%add_stmt(s)
 
+        type is (if_node)
+            ! Only plain if/else is lowered. `else if` chains would need the
+            ! IR to nest, and fortad refuses what it cannot represent exactly.
+            if (allocated(n%elseif_blocks)) then
+                if (size(n%elseif_blocks) > 0) then
+                    status%ok = .false.
+                    status%message = "unsupported 'else if' chain at line "// &
+                                     itoa(node_line(arena, idx))// &
+                                     "; rewrite as nested if/else"
+                    return
+                end if
+            end if
+            s%kind = FAD_IF
+            s%line = n%line
+            s%value = lower_expr(arena, n%condition_index, proc, status)
+            if (.not. status%ok) return
+            ignored = proc%add_stmt(s)
+            call lower_body(arena, n%then_body_indices, proc, status)
+            if (.not. status%ok) return
+            if (allocated(n%else_body_indices)) then
+                if (size(n%else_body_indices) > 0) then
+                    block
+                        type(fad_stmt_t) :: e
+                        e%kind = FAD_ELSE
+                        ignored = proc%add_stmt(e)
+                    end block
+                    call lower_body(arena, n%else_body_indices, proc, status)
+                    if (.not. status%ok) return
+                end if
+            end if
+            block
+                type(fad_stmt_t) :: e
+                e%kind = FAD_END_IF
+                ignored = proc%add_stmt(e)
+            end block
+
         type is (do_loop_node)
             s%kind = FAD_DO
             s%target = n%var_name
