@@ -47,6 +47,14 @@ module fortad_reverse
         character(len=:), allocatable :: suffix
         !! Name of the generated procedure. Defaults to `<primal>_vjp`.
         character(len=:), allocatable :: name
+        !! Whether the generated routine also returns the primal value.
+        !!
+        !! A caller driving an optimiser usually has the primal already, and
+        !! asking for it back forces the whole forward computation to stay
+        !! live. Dropping it lets dead-store elimination remove everything the
+        !! gradient does not need - for a linear recurrence, that is the entire
+        !! forward loop.
+        logical :: with_primal = .true.
     end type reverse_spec_t
 
     type :: reverse_status_t
@@ -84,6 +92,8 @@ module fortad_reverse
         !! SSA name the carried variable held on entry to the loop.
         character(len=64), allocatable :: carried_in(:)
         integer :: n_carried = 0
+        !! How many carried variables actually got a tape.
+        integer :: n_taped_carried = 0
     end type loop_record_t
 
     !! Marker in `body_sign` for an array-element target, distinguishing it
@@ -174,7 +184,8 @@ contains
         call build_signature(primal, adjoint, spec, dependent, suffix, active)
         call build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
                                  n_rec, loops, n_loops, branches, n_branches, &
-                                 order_kind, order_index, n_order, status)
+                                 order_kind, order_index, n_order, active, &
+                                 status)
         if (.not. status%ok) return
         call build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
                                  n_rec, loops, n_loops, branches, n_branches, &
@@ -401,6 +412,10 @@ contains
         n = 0
 
         do i = 1, size(primal%params)
+            ! A dependent passed as an `intent(out)` dummy is the primal value.
+            ! Gradient-only callers do not want it back.
+            if (.not. spec%with_primal .and. &
+                trim(primal%params(i)) == dependent) cycle
             n = n + 1
             names(n) = trim(primal%params(i))
             di = primal%decl_index(trim(primal%params(i)))
@@ -414,7 +429,7 @@ contains
         ! The dependent: value out, adjoint seed in.
         di = primal%decl_index(dependent)
         if (di > 0) then
-            if (.not. is_dummy(primal, dependent)) then
+            if (.not. is_dummy(primal, dependent) .and. spec%with_primal) then
                 n = n + 1
                 names(n) = dependent
                 d = primal%decls(di)
@@ -449,7 +464,8 @@ contains
 
     subroutine build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
                                    n_rec, loops, n_loops, branches, n_branches, &
-                                   order_kind, order_index, n_order, status)
+                                   order_kind, order_index, n_order, active, &
+                                   status)
         !! Emit the primal, renaming straight-line assignments into static
         !! single assignment and emitting reduction loops verbatim.
         !!
@@ -473,6 +489,7 @@ contains
         !! assignments, which it usually does.
         integer, allocatable, intent(out) :: order_kind(:), order_index(:)
         integer, intent(out) :: n_order
+        logical, intent(in) :: active(:)
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
         type(fad_decl_t) :: d
@@ -522,7 +539,7 @@ contains
                 i = i + 1
 
             case (FAD_DO)
-                call analyse_loop(primal, i, shape)
+                call analyse_loop(primal, i, shape, active)
                 if (shape%status /= LOOP_OK) then
                     status%ok = .false.
                     status%message = shape%message
@@ -847,8 +864,16 @@ contains
         ! division or a transcendental in the reverse sweep costs tens of
         ! cycles; a load costs a few. Tapes that turn out unused are removed by
         ! dead-array elimination, so being generous here is free.
-        rec%taped = shape%n_carried > 0
-        if (.not. rec%taped) then
+        ! The tape index is built from one loop variable, so a tape can only
+        ! address a single level. A nest would need one index per level, and
+        ! taping under a single index silently keeps just the innermost
+        ! iteration's value - a wrong gradient, not an error. Carried variables
+        ! in a nest are already refused for the same reason; temporaries have
+        ! the cheaper way out of being recomputed, so take it.
+        rec%taped = shape%n_carried > shape%n_linear
+        if (shape%n_headers > 1) then
+            rec%taped = .false.
+        else if (.not. rec%taped) then
             do k = 1, shape%n_temporaries
                 if (worth_taping(primal, shape, trim(shape%temporaries(k)))) then
                     rec%taped = .true.
@@ -885,6 +910,11 @@ contains
                     ignored = adjoint%add_decl(d)
                 end do
                 do k = 1, shape%n_carried
+                    ! A carried variable the body is linear in needs no tape:
+                    ! its adjoint coefficient is built from values that do not
+                    ! depend on it, so the reverse sweep never reads it.
+                    if (is_known_name(shape%linear, shape%n_linear, &
+                                      trim(shape%carried(k)))) cycle
                     di = primal%decl_index(trim(shape%carried(k)))
                     if (di == 0) cycle
                     d = primal%decls(di)
@@ -894,28 +924,41 @@ contains
                     d%is_array = .true.
                     d%dims = "("//hi_text//") - ("//lo_text//") + 1"
                     ignored = adjoint%add_decl(d)
-                    ! Seed the carrier from whatever the variable held before
-                    ! the loop, or the first iteration reads an undefined value.
-                    call ssa_lookup(ssa, trim(shape%carried(k)), incoming)
-                    carried_entry(k) = incoming
-                    if (incoming /= trim(shape%carried(k))) then
-                        s%kind = FAD_ASSIGN
-                        s%target = trim(shape%carried(k))
-                        s%value = adjoint%add_expr(expr_var(incoming))
-                        ignored = adjoint%add_stmt(s)
-                    end if
-                    ! The loop-entry value lives under the plain name; each
-                    ! assignment inside the body gets its own SSA version, so
-                    ! the reverse sweep can tell the pre-update value from the
-                    ! post-update one. Conflating them was the first bug here.
-                    call ssa_set(ssa, trim(shape%carried(k)), &
-                                 trim(shape%carried(k)))
-                    d = primal%decls(di)
-                    d%intent = FAD_INTENT_NONE
-                    d%is_result = .false.
-                    ignored = adjoint%add_decl(d)
                 end do
             end block
+        end if
+
+        ! Every carried variable needs its own local, its seed from before the
+        ! loop, and its SSA suspension - whether or not it is taped. Only the
+        ! tape array above depends on that.
+        if (shape%n_carried > 0) then
+            if (.not. allocated(carried_entry)) then
+                allocate (carried_entry(max(1, shape%n_carried)))
+            end if
+            do k = 1, shape%n_carried
+                di = primal%decl_index(trim(shape%carried(k)))
+                if (di == 0) cycle
+                ! Seed the carrier from whatever the variable held before the
+                ! loop, or the first iteration reads an undefined value.
+                call ssa_lookup(ssa, trim(shape%carried(k)), incoming)
+                carried_entry(k) = incoming
+                if (incoming /= trim(shape%carried(k))) then
+                    s%kind = FAD_ASSIGN
+                    s%target = trim(shape%carried(k))
+                    s%value = adjoint%add_expr(expr_var(incoming))
+                    ignored = adjoint%add_stmt(s)
+                end if
+                ! The loop-entry value lives under the plain name; each
+                ! assignment inside the body gets its own SSA version, so the
+                ! reverse sweep can tell the pre-update value from the
+                ! post-update one. Conflating them was the first bug here.
+                call ssa_set(ssa, trim(shape%carried(k)), &
+                             trim(shape%carried(k)))
+                d = primal%decls(di)
+                d%intent = FAD_INTENT_NONE
+                d%is_result = .false.
+                ignored = adjoint%add_decl(d)
+            end do
         end if
 
         ! Reproduce every level of the nest, outermost first.
@@ -957,6 +1000,7 @@ contains
         ! Store each carried value as it enters the iteration.
         if (rec%taped) then
             do k = 1, shape%n_carried
+                if (adjoint%decl_index(trim(shape%carried(k))//"_tape") == 0) cycle
                 s%kind = FAD_ASSIGN
                 s%target = trim(shape%carried(k))//"_tape("//rec%tape_index//")"
                 s%value = adjoint%add_expr(expr_var(trim(shape%carried(k))))
@@ -1091,6 +1135,9 @@ contains
             rec%carried_name(k) = trim(shape%carried(k))
             rec%carried_last(k) = current
             rec%carried_in(k) = carried_entry(k)
+            if (adjoint%decl_index(trim(shape%carried(k))//"_tape") > 0) then
+                rec%n_taped_carried = rec%n_taped_carried + 1
+            end if
             s%kind = FAD_ASSIGN
             s%target = trim(shape%carried(k))
             s%value = adjoint%add_expr(expr_var(current))
@@ -1611,9 +1658,10 @@ contains
         do i = 1, rec%n_levels
             s%kind = FAD_DO
             s%target = trim(rec%nest_var(i))
-            ! Only a carried variable forces the reverse loop to run backwards.
-            ! A tape of per-iteration temporaries is indexed, not ordered, so a
-            ! loop with no recurrence keeps the primal's memory access pattern.
+            ! Only a *taped* carried variable forces the reverse loop to run
+            ! backwards. A linear recurrence propagates its adjoint through a
+            ! constant coefficient, and a tape of per-iteration temporaries is
+            ! indexed rather than ordered, so neither constrains direction.
             if (rec%n_carried > 0) then
                 s%lo = rec%nest_hi(i)
                 s%hi = rec%nest_lo(i)
@@ -1630,6 +1678,7 @@ contains
         ! the body can be recomputed exactly as the forward sweep ran it.
         if (rec%taped) then
             do i = 1, rec%n_carried
+                if (adjoint%decl_index(trim(rec%carried_name(i))//"_tape") == 0) cycle
                 s%kind = FAD_ASSIGN
                 s%target = trim(rec%carried_name(i))
                 s%value = adjoint%add_expr(expr_var( &
@@ -1659,7 +1708,11 @@ contains
 
         ! The adjoint arriving from the next iteration belongs to this
         ! iteration's final version, so hand it over and clear the carrier.
-        if (rec%taped) then
+        ! This is what makes the recurrence's adjoint propagate, and it is
+        ! needed whether or not the variable was taped: a linear recurrence
+        ! still carries its adjoint backwards, it just does so through a
+        ! coefficient that costs nothing to rebuild.
+        if (rec%n_carried > 0) then
             do i = 1, rec%n_carried
                 s%kind = FAD_ASSIGN
                 s%target = trim(rec%carried_last(i))//suffix

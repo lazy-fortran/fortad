@@ -22,7 +22,7 @@ module fortad
                                  taylor_status_t
     use fortad_emit, only: emit_proc, emit_module
     use fortad_dce, only: eliminate_dead_stores, fold_zero_accumulations, &
-                          eliminate_dead_arrays
+                          eliminate_dead_arrays, eliminate_dead_loops
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
                                fad_clear_rules
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
@@ -140,7 +140,7 @@ contains
     end function fad_jvp
 
     function fad_vjp(source, independents, dependent, name, suffix, &
-                     module_name) result(res)
+                     module_name, with_primal) result(res)
         !! Reverse mode. Returns a subroutine computing the primal and the
         !! vector-Jacobian product: one sweep yields the gradient with respect
         !! to every independent at once, which is the cheap-gradient principle.
@@ -158,6 +158,13 @@ contains
         character(len=*), intent(in), optional :: suffix
         !! Wrap the result in a module of this name.
         character(len=*), intent(in), optional :: module_name
+        !! Also return the primal value. Default `.true.`.
+        !!
+        !! Set this `.false.` when only the gradient is wanted. Everything the
+        !! primal value alone kept alive is then dead, and is removed - which
+        !! for a recurrence whose adjoint needs no primal value is the entire
+        !! forward loop.
+        logical, intent(in), optional :: with_primal
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal, adjoint
         type(lower_status_t) :: lstat
@@ -183,6 +190,7 @@ contains
         if (present(dependent)) spec%dependent = dependent
         if (present(name)) spec%name = name
         if (present(suffix)) spec%suffix = suffix
+        if (present(with_primal)) spec%with_primal = with_primal
 
         call differentiate_reverse(primal, spec, adjoint, rstat)
         if (.not. rstat%ok) then
@@ -192,6 +200,8 @@ contains
         end if
 
         call fold_zero_accumulations(adjoint)
+        call eliminate_dead_stores(adjoint)
+        call eliminate_dead_loops(adjoint)
         call eliminate_dead_stores(adjoint)
         call eliminate_dead_arrays(adjoint)
 

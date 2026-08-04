@@ -33,7 +33,8 @@ module fortad_reverse_loop
     !! storage and belongs to the next milestone.
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
                         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
-                        FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_BINOP, FAD_CONST
+                        FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_BINOP, FAD_CONST, &
+                        FAD_UNOP
     implicit none
     private
 
@@ -60,6 +61,11 @@ module fortad_reverse_loop
         !! Loop-carried variables whose value must be stored per iteration.
         character(len=64), allocatable :: carried(:)
         integer :: n_carried = 0
+        !! Carried variables the body is **linear** in. Their adjoint
+        !! coefficient does not depend on their value, so nothing about them
+        !! needs storing or recomputing.
+        character(len=64), allocatable :: linear(:)
+        integer :: n_linear = 0
         !! Statement indices of every `do` in the nest, outermost first.
         integer :: header_stmt(8) = 0
         integer :: n_headers = 0
@@ -67,11 +73,12 @@ module fortad_reverse_loop
 
 contains
 
-    subroutine analyse_loop(p, first, shape)
+    subroutine analyse_loop(p, first, shape, active)
         !! Classify the loop starting at statement `first`.
         type(fad_proc_t), intent(in) :: p
         integer, intent(in) :: first
         type(loop_shape_t), intent(out) :: shape
+        logical, intent(in), optional :: active(:)
         character(len=:), allocatable :: target
         integer :: i, depth
         logical :: is_accum
@@ -104,7 +111,9 @@ contains
         allocate (shape%accumulators(32), shape%temporaries(32))
         shape%n_headers = 1
         shape%header_stmt(1) = first
-        allocate (shape%elements(32), shape%carried(32))
+        allocate (shape%elements(32), shape%carried(32), shape%linear(32))
+        shape%linear = ""
+        shape%n_linear = 0
         shape%accumulators = ""
         shape%temporaries = ""
         shape%elements = ""
@@ -185,6 +194,18 @@ contains
             end select
         end do
 
+        ! A carried variable the whole body is linear in needs no tape: every
+        ! partial with respect to it is built from loop-invariant values, so the
+        ! adjoint coefficient is the same whatever the variable held. This is
+        ! what lets a linear recurrence collapse to a constant-coefficient
+        ! update instead of a taped backward sweep.
+        do i = 1, shape%n_carried
+            if (.not. present(active)) exit
+            if (body_linear_in(p, shape, trim(shape%carried(i)), active)) then
+                call add_name(shape%linear, shape%n_linear, trim(shape%carried(i)))
+            end if
+        end do
+
         if (shape%n_carried > 0 .and. shape%n_headers > 1) then
             shape%status = LOOP_UNSUPPORTED
             shape%message = "reverse mode: a loop-carried recurrence inside a "// &
@@ -210,6 +231,185 @@ contains
 
         shape%status = LOOP_OK
     end subroutine analyse_loop
+
+    logical function body_linear_in(p, shape, name, active) result(yes)
+        !! Whether every statement in the loop body is linear in `name`, with
+        !! every coefficient built purely from inactive values.
+        !!
+        !! Linearity alone is not enough to drop the tape. `u = u*exp(a(i))` is
+        !! linear in `u`, but the partial with respect to `a(i)` is `u*exp(a(i))`
+        !! and needs `u` as it stood in that iteration. Only when the multiplying
+        !! factor is inactive - a constant, a loop-invariant inactive scalar like
+        !! a step size - does no partial anywhere reference the carried value,
+        !! and only then is the tape genuinely dead. Getting this wrong produces
+        !! a gradient that is quietly wrong rather than a compile error, so the
+        !! test is on the strict side.
+        !!
+        !! Linear here means each occurrence of `name`, or of anything derived
+        !! from it, appears only in additions, subtractions, negations, and
+        !! products or quotients whose *other* operand does not depend on
+        !! `name`. Under that condition every partial derivative with respect to
+        !! `name` is built from values independent of `name`, so the reverse
+        !! sweep never needs its value.
+        !!
+        !! Conservative by construction: a call, a power, or a product of two
+        !! dependent operands makes the answer no. Being wrong in that direction
+        !! costs a tape; being wrong in the other direction costs a wrong
+        !! gradient.
+        type(fad_proc_t), intent(in) :: p
+        type(loop_shape_t), intent(in) :: shape
+        character(len=*), intent(in) :: name
+        logical, intent(in) :: active(:)
+        character(len=64) :: tainted(64)
+        integer :: n_tainted, i, k
+        logical :: changed
+        character(len=:), allocatable :: lhs
+
+        n_tainted = 1
+        tainted(1) = name
+
+        ! Everything in the body derived from `name`.
+        changed = .true.
+        do while (changed)
+            changed = .false.
+            do k = shape%first + 1, shape%last - 1
+                if (p%stmts(k)%kind /= FAD_ASSIGN) cycle
+                lhs = target_base(p%stmts(k)%target)
+                if (is_known(tainted, n_tainted, lhs)) cycle
+                do i = 1, n_tainted
+                    if (reads_name(p, p%stmts(k)%value, trim(tainted(i)))) then
+                        call add_name(tainted, n_tainted, lhs)
+                        changed = .true.
+                        exit
+                    end if
+                end do
+            end do
+        end do
+
+        yes = .true.
+        do k = shape%first + 1, shape%last - 1
+            if (p%stmts(k)%kind /= FAD_ASSIGN) cycle
+            if (.not. expr_linear(p, p%stmts(k)%value, tainted, n_tainted, &
+                                  active)) then
+                yes = .false.
+                return
+            end if
+        end do
+    end function body_linear_in
+
+    recursive logical function expr_linear(p, idx, tainted, n_tainted, active) &
+        result(yes)
+        !! Whether an expression is linear in the tainted set.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx, n_tainted
+        character(len=64), intent(in) :: tainted(:)
+        logical, intent(in) :: active(:)
+        logical :: l_dep, r_dep
+
+        yes = .true.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (.not. depends(p, idx, tainted, n_tainted)) return
+
+        select case (p%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            return
+        case (FAD_UNOP)
+            yes = expr_linear(p, p%exprs(idx)%args(1), tainted, n_tainted, active)
+        case (FAD_BINOP)
+            l_dep = depends(p, p%exprs(idx)%args(1), tainted, n_tainted)
+            r_dep = depends(p, p%exprs(idx)%args(2), tainted, n_tainted)
+            select case (trim(p%exprs(idx)%text))
+            case ("+", "-")
+                yes = expr_linear(p, p%exprs(idx)%args(1), tainted, n_tainted, active) &
+                      .and. expr_linear(p, p%exprs(idx)%args(2), tainted, n_tainted, active)
+            case ("*")
+                ! A product is linear only if one side is independent.
+                if (l_dep .and. r_dep) then
+                    yes = .false.
+                else if (l_dep) then
+                    yes = expr_linear(p, p%exprs(idx)%args(1), tainted, &
+                                      n_tainted, active) .and. &
+                          .not. reads_active(p, p%exprs(idx)%args(2), active)
+                else
+                    yes = expr_linear(p, p%exprs(idx)%args(2), tainted, &
+                                      n_tainted, active) .and. &
+                          .not. reads_active(p, p%exprs(idx)%args(1), active)
+                end if
+            case ("/")
+                ! Dividing by something dependent is not linear.
+                if (r_dep) then
+                    yes = .false.
+                else
+                    yes = expr_linear(p, p%exprs(idx)%args(1), tainted, &
+                                      n_tainted, active) .and. &
+                          .not. reads_active(p, p%exprs(idx)%args(2), active)
+                end if
+            case default
+                yes = .false.
+            end select
+        case default
+            yes = .false.
+        end select
+    end function expr_linear
+
+    recursive logical function reads_active(p, idx, active) result(yes)
+        !! Whether an expression reads any active variable.
+        !!
+        !! An adjoint coefficient built only from inactive values is the same
+        !! in every iteration as far as differentiation is concerned, so it can
+        !! be rebuilt in the reverse sweep from data that is still live.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        logical, intent(in) :: active(:)
+        integer :: i, di
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            block
+                character(len=:), allocatable :: base
+                integer :: par
+                base = trim(p%exprs(idx)%text)
+                par = index(base, "(")
+                if (par > 0) base = base(:par - 1)
+                di = p%decl_index(base)
+                if (di > 0) then
+                    if (di <= size(active)) yes = active(di)
+                else
+                    ! An unresolvable name is treated as active: dropping the
+                    ! tape on a guess is the one failure mode that is silent.
+                    yes = .true.
+                end if
+            end block
+            if (yes) return
+        end select
+        if (allocated(p%exprs(idx)%args)) then
+            do i = 1, size(p%exprs(idx)%args)
+                if (reads_active(p, p%exprs(idx)%args(i), active)) then
+                    yes = .true.
+                    return
+                end if
+            end do
+        end if
+    end function reads_active
+
+    recursive logical function depends(p, idx, tainted, n_tainted) result(yes)
+        !! Whether an expression reads anything in the tainted set.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx, n_tainted
+        character(len=64), intent(in) :: tainted(:)
+        integer :: i
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        do i = 1, n_tainted
+            if (reads_name(p, idx, trim(tainted(i)))) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function depends
 
     logical function is_loop_carried(p, first, last, stmt, target) result(yes)
         !! Whether a variable assigned at `stmt` carries a value across
