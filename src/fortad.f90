@@ -16,11 +16,13 @@ module fortad
     use fortad_lower, only: lower_source, lower_status_t
     use fortad_forward, only: differentiate_forward, forward_spec_t, &
                               forward_status_t
+    use fortad_reverse, only: differentiate_reverse, reverse_spec_t, &
+                              reverse_status_t
     use fortad_emit, only: emit_proc
     implicit none
     private
 
-    public :: fad_jvp, fad_roundtrip, fad_result_t, fad_version
+    public :: fad_jvp, fad_vjp, fad_roundtrip, fad_result_t, fad_version
 
     character(len=*), parameter :: FORTAD_VERSION = "0.1.0"
 
@@ -101,6 +103,59 @@ contains
         res%ok = .true.
         res%code = emit_proc(tangent)
     end function fad_jvp
+
+    function fad_vjp(source, independents, dependent, name, suffix) result(res)
+        !! Reverse mode. Returns a subroutine computing the primal and the
+        !! vector-Jacobian product: one sweep yields the gradient with respect
+        !! to every independent at once, which is the cheap-gradient principle.
+        !!
+        !! The generated routine takes the dependent's adjoint as an incoming
+        !! seed and returns one adjoint per independent.
+        character(len=*), intent(in) :: source
+        character(len=*), intent(in) :: independents(:)
+        !! The dependent to differentiate. Defaults to the function result, or
+        !! to the sole `intent(out)` argument.
+        character(len=*), intent(in), optional :: dependent
+        !! Name of the generated procedure. Defaults to `<primal>_vjp`.
+        character(len=*), intent(in), optional :: name
+        !! Suffix for adjoint variables. Defaults to `_b`.
+        character(len=*), intent(in), optional :: suffix
+        type(fad_result_t) :: res
+        type(fad_proc_t) :: primal, adjoint
+        type(lower_status_t) :: lstat
+        type(reverse_status_t) :: rstat
+        type(reverse_spec_t) :: spec
+        integer :: i, width
+
+        call lower_source(source, primal, lstat)
+        if (.not. lstat%ok) then
+            res%ok = .false.
+            res%message = lstat%message
+            return
+        end if
+
+        width = 1
+        do i = 1, size(independents)
+            width = max(width, len_trim(independents(i)))
+        end do
+        allocate (character(len=width) :: spec%independents(size(independents)))
+        do i = 1, size(independents)
+            spec%independents(i) = trim(independents(i))
+        end do
+        if (present(dependent)) spec%dependent = dependent
+        if (present(name)) spec%name = name
+        if (present(suffix)) spec%suffix = suffix
+
+        call differentiate_reverse(primal, spec, adjoint, rstat)
+        if (.not. rstat%ok) then
+            res%ok = .false.
+            res%message = rstat%message
+            return
+        end if
+
+        res%ok = .true.
+        res%code = emit_proc(adjoint)
+    end function fad_vjp
 
     function fad_roundtrip(source) result(res)
         !! Parse and re-emit without differentiating.
