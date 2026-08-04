@@ -23,6 +23,7 @@ module fortad_opt
     !! dataflow lattice, and a wrong answer here is a wrong derivative rather
     !! than a crash.
     use fortad_affine, only: collapse_affine_loops
+    use fortad_affine, only: collapse_affine_loops
     use fortad_dce, only: eliminate_dead_stores
     use fortad_kinds, only: dp
     use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_expr_t, expr_var, &
@@ -42,148 +43,23 @@ module fortad_opt
     !! worth it for a large tree. This caps the expression a substitution may
     !! produce.
     integer, parameter :: MAX_EXPR_NODES = 96
-    !! The bold attempt needs a far larger budget: collapsing a multi-stage
-    !! integrator means substituting every stage into the carried update before
-    !! factoring can fold the result back into one coefficient. The intermediate
-    !! expression is large even though the final one is tiny.
-    integer, parameter :: MAX_EXPR_NODES_BOLD = 2048
-
-    !! Substitution normally refuses a definition read more than once unless it
-    !! is a single cheap operation. Sometimes duplicating a larger definition is
-    !! what lets factoring fold the whole chain into constants, after which the
-    !! duplicates disappear - and sometimes it just duplicates work. Which one
-    !! it is cannot be decided in advance, so `optimise` tries both and keeps
-    !! the cheaper body. This flag selects the aggressive attempt.
-    !! Which top-level loop, counted in order, the bold attempt applies to.
-    !! The decision is per loop: a kernel whose primal loop collapses under
-    !! distribution and whose adjoint loop does not needs both answers at once.
-    logical, allocatable :: bold_mask(:)
-    integer :: n_bold_loops = 0
 
 contains
 
     subroutine optimise(p)
-        !! Run the passes, choosing conservatively or boldly for each loop.
+        !! Run the passes once, in order.
         !!
-        !! Whether to duplicate a definition read more than once cannot be
-        !! decided in advance: it is right when factoring then folds the whole
-        !! chain into constants and wrong when it does not. So both are tried.
-        !! The choice is made per loop and greedily - each loop is offered the
-        !! bold form in turn and keeps it only if the total operation count in
-        !! loop bodies falls. That is `n + 1` runs of the pass sequence for `n`
-        !! loops, which is cheap next to compiling the result.
+        !! One sequence, not a search. An earlier version rewrote each loop body
+        !! two ways - one conservative, one substituting and distributing
+        !! everything - and kept whichever measured smaller. That is a search
+        !! over an expression graph, so its cost is exponential in the body: 27
+        !! seconds on a quartic Bezier edge area, and non-terminating on a
+        !! quintic Lagrange weight. What it was searching for is decided
+        !! directly by `collapse_affine_loops`, in one pass, and the three
+        !! bounds that had been put on the search went with it.
         type(fad_proc_t), intent(inout) :: p
-        type(fad_proc_t) :: original, best, trial
-        integer :: n_loops, k, best_cost, trial_cost
-        logical, allocatable :: mask(:), try(:)
-
-        n_loops = count_top_loops(p)
-        if (n_loops == 0) then
-            allocate (mask(1))
-            mask = .false.
-            call run_passes(p, mask)
-            return
-        end if
-
-        original = p
-        allocate (mask(n_loops), try(n_loops))
-        mask = .false.
-
-        best = original
-        call run_passes(best, mask)
-        best_cost = loop_cost(best)
-
-
-        do k = 1, n_loops
-            try = mask
-            try(k) = .true.
-            trial = original
-            call run_passes(trial, try)
-            trial_cost = loop_cost(trial)
-            ! Ties go to the conservative form: it has fewer duplicated
-            ! subexpressions and so fewer live values, which the cost model
-            ! cannot see.
-            if (trial_cost < best_cost) then
-                mask = try
-                best = trial
-                best_cost = trial_cost
-            end if
-        end do
-
-        p = best
-    end subroutine optimise
-
-    integer function count_top_loops(p) result(n)
-        !! Loops not nested inside another loop.
-        type(fad_proc_t), intent(in) :: p
-        integer :: i, depth
-
-        n = 0
-        depth = 0
-        do i = 1, p%n_stmts
-            select case (p%stmts(i)%kind)
-            case (FAD_DO)
-                if (depth == 0) n = n + 1
-                depth = depth + 1
-            case (FAD_END_DO)
-                depth = depth - 1
-            end select
-        end do
-    end function count_top_loops
-
-    integer function loop_ordinal(p, idx) result(k)
-        !! Which top-level loop contains statement `idx`, or zero.
-        type(fad_proc_t), intent(in) :: p
-        integer, intent(in) :: idx
-        integer :: i, depth
-
-        k = 0
-        depth = 0
-        do i = 1, min(idx, p%n_stmts)
-            select case (p%stmts(i)%kind)
-            case (FAD_DO)
-                if (depth == 0) k = k + 1
-                depth = depth + 1
-            case (FAD_END_DO)
-                depth = depth - 1
-                if (depth == 0 .and. i < idx) k = k
-            end select
-        end do
-        if (depth == 0) then
-            ! `idx` sits outside every loop, unless it is the `end do` itself.
-            if (idx <= p%n_stmts) then
-                if (p%stmts(idx)%kind /= FAD_END_DO) k = 0
-            else
-                k = 0
-            end if
-        end if
-    end function loop_ordinal
-
-    logical function bold_at(p, idx) result(yes)
-        !! Whether the bold form applies where statement `idx` sits.
-        type(fad_proc_t), intent(in) :: p
-        integer, intent(in) :: idx
-        integer :: k
-
-        yes = .false.
-        if (.not. allocated(bold_mask)) return
-        k = loop_ordinal(p, idx)
-        if (k < 1 .or. k > size(bold_mask)) return
-        yes = bold_mask(k)
-    end function bold_at
-
-    subroutine run_passes(p, mask)
-        !! One pass sequence with the given per-loop choices.
-        type(fad_proc_t), intent(inout) :: p
-        logical, intent(in) :: mask(:)
         integer :: pass
 
-        if (allocated(bold_mask)) deallocate (bold_mask)
-        allocate (bold_mask(size(mask)))
-        bold_mask = mask
-        n_bold_loops = size(mask)
-
-        call fold_identities(p)
         call propagate_loop_zeros(p)
         ! Coalescing before renaming, so that a scatter built as a chain of
         ! accumulations onto an array element becomes a chain onto a scalar.
@@ -193,13 +69,11 @@ contains
         call coalesce_element_updates(p)
         ! Renaming the body into single assignment is what lets substitution
         ! reach an accumulated variable. Without it a stage adjoint that is
-        ! written twice is opaque, and a loop body that is wholly linear in its
-        ! carried variable never collapses.
+        ! written twice is opaque.
         call rename_bodies(p)
         do pass = 1, 4
             call propagate_copies(p)
             call substitute_temps(p)
-            call distribute_products(p)
             call factor_self_update(p)
         end do
         ! With the body in single assignment and its copies propagated, the
@@ -211,42 +85,9 @@ contains
         call share_subexpressions(p)
         call rotate_carried(p)
         call fold_identities(p)
-        ! Substitution and factoring leave their inputs behind. Clearing them
-        ! here is not cosmetic: the cost model counts operations in loop
-        ! bodies, and a collapsed body that still carries the statements it
-        ! replaced scores exactly what it replaced. That is what made every
-        ! bold trial tie with its conservative twin.
+        ! Substitution and factoring leave their inputs behind.
         call eliminate_dead_stores(p)
-
-        if (allocated(bold_mask)) deallocate (bold_mask)
-    end subroutine run_passes
-
-    integer function loop_cost(p) result(cost)
-        !! Total arithmetic operations inside loops, as a stand-in for work.
-        !!
-        !! Only loop bodies are counted: a statement outside a loop runs once
-        !! and is noise beside one that runs per element. Only operator nodes
-        !! are counted: a variable or a literal is free, and counting leaves
-        !! made a form with fewer arithmetic operations but more operands look
-        !! worse. A duplicated subexpression counts twice, which is the point -
-        !! it is what tells the two attempts apart.
-        type(fad_proc_t), intent(in) :: p
-        integer :: i, depth
-
-        cost = 0
-        depth = 0
-        do i = 1, p%n_stmts
-            select case (p%stmts(i)%kind)
-            case (FAD_DO)
-                depth = depth + 1
-            case (FAD_END_DO)
-                depth = depth - 1
-            case (FAD_ASSIGN)
-                if (depth > 0 .and. p%stmts(i)%value > 0) &
-                    cost = cost + op_count(p, p%stmts(i)%value)
-            end select
-        end do
-    end function loop_cost
+    end subroutine optimise
 
     ! ------------------------------------------------------------------
     ! Straight-line reasoning
@@ -624,8 +465,7 @@ contains
                 end do
                 if (blocked .or. uses == 0 .or. last_use == 0) cycle
                 if (escapes(p, lhs, i, stop_at)) cycle
-                if (uses > 1 .and. .not. cheap(p, p%stmts(i)%value) &
-                    .and. .not. bold_at(p, i)) cycle
+                if (uses > 1 .and. .not. cheap(p, p%stmts(i)%value)) cycle
 
                 do j = i + 1, last_use
                     if (p%stmts(j)%value <= 0) cycle
@@ -639,11 +479,7 @@ contains
                         integer :: new
                         new = replace_var(p, p%stmts(j)%value, lhs, &
                                           p%stmts(i)%value)
-                        if (bold_at(p, i)) then
-                            if (expr_size(p, new) > MAX_EXPR_NODES_BOLD) cycle
-                        else
-                            if (expr_size(p, new) > MAX_EXPR_NODES) cycle
-                        end if
+                        if (expr_size(p, new) > MAX_EXPR_NODES) cycle
                         p%stmts(j)%value = new
                         changed = .true.
                     end block
@@ -760,137 +596,9 @@ contains
     ! Pass 3: factoring a self-update
     ! ------------------------------------------------------------------
 
-    subroutine distribute_products(p)
-        !! Expand `(a + b)*c` into `a*c + b*c` inside loop bodies.
-        !!
-        !! Factoring works on a sum of products. Substituting a multi-stage
-        !! recurrence flat produces nested sums instead, and every term of
-        !! `(x*p + x*q)*r` mentions `x` twice as far as the factoring pass can
-        !! tell. Distributing first puts the expression back in the shape the
-        !! factoring needs, and the factoring immediately undoes the growth by
-        !! pulling `x` out of the whole thing.
-        type(fad_proc_t), intent(inout) :: p
-        integer :: i, first, last, j, budget
 
-        i = 1
-        do while (i <= p%n_stmts)
-            if (p%stmts(i)%kind /= FAD_DO) then
-                i = i + 1
-                cycle
-            end if
-            call loop_extent(p, i, first, last)
-            if (last == 0 .or. .not. plain_body(p, first, last)) then
-                i = i + 1
-                cycle
-            end if
-            if (.not. bold_at(p, first + 1)) then
-                i = last + 1
-                cycle
-            end if
-            budget = MAX_EXPR_NODES_BOLD
-            do j = first + 1, last - 1
-                if (p%stmts(j)%value <= 0) cycle
-                block
-                    integer :: new
-                    new = distribute(p, p%stmts(j)%value, budget)
-                    if (new > 0) p%stmts(j)%value = new
-                end block
-            end do
-            i = last + 1
-        end do
-    end subroutine distribute_products
 
-    recursive integer function distribute(p, idx, budget) result(out)
-        !! Rewrite a product over a sum, or zero if the result would be too big.
-        type(fad_proc_t), intent(inout) :: p
-        integer, intent(in) :: idx, budget
-        integer, allocatable :: new_args(:)
-        type(fad_expr_t) :: e
-        character(len=:), allocatable :: text_here
-        integer :: i, kind_here, a, b
-        logical :: changed
 
-        out = idx
-        if (idx <= 0 .or. idx > p%n_exprs) return
-        if (expr_size(p, idx) > budget) then
-            out = 0
-            return
-        end if
-
-        if (p%exprs(idx)%kind == FAD_BINOP) then
-            if (trim(p%exprs(idx)%text) == "*") then
-                a = p%exprs(idx)%args(1)
-                b = p%exprs(idx)%args(2)
-                if (is_sum(p, a)) then
-                    out = expand(p, a, b, .true., budget)
-                    if (out /= 0) return
-                    out = idx
-                else if (is_sum(p, b)) then
-                    out = expand(p, b, a, .false., budget)
-                    if (out /= 0) return
-                    out = idx
-                end if
-            end if
-        end if
-
-        if (.not. allocated(p%exprs(idx)%args)) return
-        kind_here = p%exprs(idx)%kind
-        text_here = p%exprs(idx)%text
-        new_args = p%exprs(idx)%args
-        changed = .false.
-        do i = 1, size(new_args)
-            block
-                integer :: sub
-                sub = distribute(p, new_args(i), budget)
-                if (sub == 0) then
-                    out = 0
-                    return
-                end if
-                if (sub /= new_args(i)) changed = .true.
-                new_args(i) = sub
-            end block
-        end do
-        if (.not. changed) return
-        e%kind = kind_here
-        e%text = text_here
-        e%args = new_args
-        out = p%add_expr(e)
-    end function distribute
-
-    logical function is_sum(p, idx) result(yes)
-        !! Whether an expression is a top-level sum or difference.
-        type(fad_proc_t), intent(in) :: p
-        integer, intent(in) :: idx
-
-        yes = .false.
-        if (idx <= 0 .or. idx > p%n_exprs) return
-        if (p%exprs(idx)%kind /= FAD_BINOP) return
-        yes = trim(p%exprs(idx)%text) == "+" .or. trim(p%exprs(idx)%text) == "-"
-    end function is_sum
-
-    recursive integer function expand(p, sum_idx, other, sum_left, budget) &
-        result(out)
-        !! Build `(a op b)*c` as `a*c op b*c`, keeping the operand order.
-        type(fad_proc_t), intent(inout) :: p
-        integer, intent(in) :: sum_idx, other, budget
-        logical, intent(in) :: sum_left
-        character(len=:), allocatable :: op
-        integer :: a, b, left, right
-
-        out = 0
-        op = trim(p%exprs(sum_idx)%text)
-        a = p%exprs(sum_idx)%args(1)
-        b = p%exprs(sum_idx)%args(2)
-        if (sum_left) then
-            left = p%add_expr(expr_binop("*", a, other))
-            right = p%add_expr(expr_binop("*", b, other))
-        else
-            left = p%add_expr(expr_binop("*", other, a))
-            right = p%add_expr(expr_binop("*", other, b))
-        end if
-        out = p%add_expr(expr_binop(op, left, right))
-        out = distribute(p, out, budget)
-    end function expand
 
     subroutine factor_self_update(p)
         !! Rewrite `x = x*c1 + x*c2 + r` as `x = x*(c1 + c2) + r`.
