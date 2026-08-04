@@ -13,6 +13,11 @@ module fortad_ir
     implicit none
     private
 
+    !! Hash buckets for expression sharing. A power of two so the modulo is
+    !! cheap, and large enough that a kernel's expression count stays well
+    !! under it.
+    integer, parameter :: BUCKETS = 4096
+
     ! Expression kinds.
     integer, parameter, public :: FAD_CONST = 1     !! literal, text in `text`
     integer, parameter, public :: FAD_VAR = 2       !! variable reference by name
@@ -96,6 +101,13 @@ module fortad_ir
         integer :: n_exprs = 0
         integer :: n_stmts = 0
         integer :: n_decls = 0
+        !! Hash buckets over the expression arena, so an identical subtree is
+        !! built once and shared. Children are already shared, so structural
+        !! equality reduces to shallow equality on (kind, text, args) - which
+        !! is what makes common-subexpression detection a lookup rather than a
+        !! tree comparison.
+        integer, allocatable :: bucket_head(:)
+        integer, allocatable :: bucket_next(:)
     contains
         procedure :: add_expr => proc_add_expr
         procedure :: add_stmt => proc_add_stmt
@@ -109,23 +121,74 @@ module fortad_ir
 contains
 
     integer function proc_add_expr(self, e) result(idx)
-        !! Append an expression, growing the arena geometrically.
+        !! Append an expression, sharing it with an identical existing one.
+        !!
+        !! Hash-consing here is what later lets the emitter notice that
+        !! `exp(0.01*a(i))` appears three times in a generated loop body: the
+        !! three uses carry the same index, so counting uses is counting
+        !! integers rather than comparing trees.
         class(fad_proc_t), intent(inout) :: self
         type(fad_expr_t), intent(in) :: e
         type(fad_expr_t), allocatable :: tmp(:)
-        integer :: cap
+        integer, allocatable :: itmp(:)
+        integer :: cap, h, probe
 
         if (.not. allocated(self%exprs)) allocate (self%exprs(64))
+        if (.not. allocated(self%bucket_head)) then
+            allocate (self%bucket_head(0:BUCKETS - 1))
+            self%bucket_head = 0
+        end if
+        if (.not. allocated(self%bucket_next)) then
+            allocate (self%bucket_next(size(self%exprs)))
+            self%bucket_next = 0
+        end if
+
+        h = expr_hash(e)
+        probe = self%bucket_head(h)
+        do while (probe /= 0)
+            if (fad_expr_equal(self%exprs(probe), e)) then
+                idx = probe
+                return
+            end if
+            probe = self%bucket_next(probe)
+        end do
+
         cap = size(self%exprs)
         if (self%n_exprs >= cap) then
             allocate (tmp(2*cap))
             tmp(1:cap) = self%exprs
             call move_alloc(tmp, self%exprs)
+            allocate (itmp(2*cap))
+            itmp = 0
+            itmp(1:cap) = self%bucket_next(1:cap)
+            call move_alloc(itmp, self%bucket_next)
         end if
         self%n_exprs = self%n_exprs + 1
         self%exprs(self%n_exprs) = e
+        self%bucket_next(self%n_exprs) = self%bucket_head(h)
+        self%bucket_head(h) = self%n_exprs
         idx = self%n_exprs
     end function proc_add_expr
+
+    integer function expr_hash(e) result(h)
+        !! Hash of (kind, text, args). Only shallow data is read, because
+        !! children are already shared.
+        type(fad_expr_t), intent(in) :: e
+        integer :: i
+
+        h = e%kind*31
+        if (allocated(e%text)) then
+            do i = 1, len(e%text)
+                h = modulo(h*31 + iachar(e%text(i:i)), 1048576)
+            end do
+        end if
+        if (allocated(e%args)) then
+            do i = 1, size(e%args)
+                h = modulo(h*31 + e%args(i), 1048576)
+            end do
+        end if
+        h = modulo(abs(h), BUCKETS)
+    end function expr_hash
 
     integer function proc_add_stmt(self, s) result(idx)
         !! Append a statement.
