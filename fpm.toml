@@ -1,0 +1,16 @@
+name = "fortad"
+version = "0.1.0"
+description = "Source-transformation automatic differentiation for Fortran"
+author = "krystophny"
+license = "MIT"
+
+[dependencies]
+fortfront = { path = "../fortfront" }
+
+[build]
+auto-examples = false
+
+[fortran]
+implicit-external = false
+implicit-typing = false
+source-form = "free"
