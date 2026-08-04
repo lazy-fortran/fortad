@@ -44,6 +44,12 @@ module fortad_opt
     !! produce.
     integer, parameter :: MAX_EXPR_NODES = 96
 
+    !! Rough relative costs, in multiplies. A divide is around four times a
+    !! multiply on current hardware and a transcendental an order more; the
+    !! numbers only have to order the candidates, not predict a cycle count.
+    integer, parameter :: DIVIDE_COST = 4
+    integer, parameter :: CALL_COST = 10
+
     !! Names the span table holds. A procedure with more distinct names than
     !! this loses the shortcut and substitution declines rather than guessing.
     integer, parameter :: MAX_SPAN = 4096
@@ -189,7 +195,14 @@ contains
     end function expr_size
 
     recursive integer function op_count(p, idx) result(n)
-        !! Arithmetic operations in an expression tree.
+        !! What an expression tree costs to evaluate.
+        !!
+        !! Not a count of operations: a divide is several times a multiply and
+        !! a transcendental is more again, and treating them alike made
+        !! subexpression sharing skip the one case worth it most. A reciprocal
+        !! `1/d` is a single node, so an operation count said it was not worth
+        !! naming, and every use of it emitted its own divide - fortfem's
+        !! quintic Lagrange adjoint went to eighty of them.
         type(fad_proc_t), intent(in) :: p
         integer, intent(in) :: idx
         integer :: i
@@ -197,8 +210,18 @@ contains
         n = 0
         if (idx <= 0 .or. idx > p%n_exprs) return
         select case (p%exprs(idx)%kind)
-        case (FAD_BINOP, FAD_UNOP, FAD_CALL)
+        case (FAD_BINOP)
+            if (trim(p%exprs(idx)%text) == "/") then
+                n = DIVIDE_COST
+            else if (trim(p%exprs(idx)%text) == "**") then
+                n = CALL_COST
+            else
+                n = 1
+            end if
+        case (FAD_UNOP)
             n = 1
+        case (FAD_CALL)
+            n = CALL_COST
         end select
         if (.not. allocated(p%exprs(idx)%args)) return
         do i = 1, size(p%exprs(idx)%args)
@@ -1898,9 +1921,17 @@ contains
         !! last bit. An AD tool may, on the same grounds as the reassociations
         !! around it - the derivative is an approximation of a limit either way.
         !!
-        !! Only invariant divisors qualify. Dividing by something that changes
-        !! per iteration would trade one divide for a divide and a multiply.
+        !! A divisor that is not invariant still qualifies if it divides more
+        !! than one thing: `k` divisions by the same value become one reciprocal
+        !! and `k` multiplies, and subexpression sharing then computes that
+        !! reciprocal once. fortfem's quintic Lagrange weights divide by the
+        !! same node differences throughout - seventy scalar divides in the
+        !! adjoint, where Enzyme has none.
+        !!
+        !! A divisor used once is left alone: reciprocating it would trade one
+        !! divide for a divide and a multiply.
         type(fad_proc_t), intent(inout) :: p
+        integer, allocatable :: divisors(:)
         integer :: i, first, last, j
 
         i = 1
@@ -1914,18 +1945,60 @@ contains
                 i = i + 1
                 cycle
             end if
+            call count_divisors(p, first, last, divisors)
             do j = first + 1, last - 1
                 if (p%stmts(j)%value <= 0) cycle
-                p%stmts(j)%value = reciprocate(p, first, last, p%stmts(j)%value)
+                p%stmts(j)%value = reciprocate(p, first, last, &
+                                               p%stmts(j)%value, divisors)
             end do
             i = last + 1
         end do
     end subroutine reciprocate_divisions
 
-    recursive integer function reciprocate(p, first, last, idx) result(out)
-        !! Rebuild an expression with invariant divisions turned into products.
+    subroutine count_divisors(p, first, last, divisors)
+        !! How often each arena node appears as a denominator in the body.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        integer, allocatable, intent(out) :: divisors(:)
+        integer :: j
+
+        if (allocated(divisors)) deallocate (divisors)
+        allocate (divisors(max(1, p%n_exprs)))
+        divisors = 0
+        do j = first + 1, last - 1
+            if (p%stmts(j)%value <= 0) cycle
+            call tally_divisors(p, p%stmts(j)%value, divisors)
+        end do
+    end subroutine count_divisors
+
+    recursive subroutine tally_divisors(p, idx, divisors)
+        !! Count denominators in an expression tree.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer, intent(inout) :: divisors(:)
+        integer :: i, d
+
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (p%exprs(idx)%kind == FAD_BINOP) then
+            if (trim(p%exprs(idx)%text) == "/") then
+                d = p%exprs(idx)%args(2)
+                if (d >= 1 .and. d <= size(divisors)) &
+                    divisors(d) = divisors(d) + 1
+            end if
+        end if
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            call tally_divisors(p, p%exprs(idx)%args(i), divisors)
+        end do
+    end subroutine tally_divisors
+
+    recursive integer function reciprocate(p, first, last, idx, divisors) &
+        result(out)
+        !! Rebuild an expression with repeated or invariant divisions turned
+        !! into products.
         type(fad_proc_t), intent(inout) :: p
         integer, intent(in) :: first, last, idx
+        integer, intent(in) :: divisors(:)
         integer, allocatable :: new_args(:)
         type(fad_expr_t) :: e
         character(len=:), allocatable :: text_here
@@ -1943,7 +2016,7 @@ contains
         do i = 1, size(new_args)
             block
                 integer :: sub
-                sub = reciprocate(p, first, last, new_args(i))
+                sub = reciprocate(p, first, last, new_args(i), divisors)
                 if (sub /= new_args(i)) changed = .true.
                 new_args(i) = sub
             end block
@@ -1951,7 +2024,12 @@ contains
 
         if (kind_here == FAD_BINOP) then
             if (trim(text_here) == "/") then
-                if (loop_invariant(p, first, last, new_args(2))) then
+                ! Counted against the original divisor, not the rebuilt one:
+                ! rewriting happens bottom-up, so by the time a division is
+                ! reached its divisor may be a node created moments ago, which
+                ! the tally taken before the pass has never seen.
+                if (worth_reciprocating(p, first, last, p%exprs(idx)%args(2), &
+                                        new_args(2), divisors)) then
                     one = p%add_expr(expr_const("1.0"//suffix_of(p)))
                     recip = p%add_expr(expr_binop("/", one, new_args(2)))
                     out = p%add_expr(expr_binop("*", new_args(1), recip))
@@ -1966,6 +2044,24 @@ contains
         e%args = new_args
         out = p%add_expr(e)
     end function reciprocate
+
+    logical function worth_reciprocating(p, first, last, original, current, &
+                                         divisors) result(yes)
+        !! Whether turning division by this divisor into multiplication pays.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last, original, current
+        integer, intent(in) :: divisors(:)
+
+        yes = .false.
+        ! Invariant: the reciprocal leaves the loop entirely.
+        if (loop_invariant(p, first, last, current)) then
+            yes = .true.
+            return
+        end if
+        ! Repeated: one reciprocal serves every division by it.
+        if (original < 1 .or. original > size(divisors)) return
+        yes = divisors(original) > 1
+    end function worth_reciprocating
 
     function suffix_of(p) result(text)
         !! The kind suffix for literals fortad emits into this procedure.
