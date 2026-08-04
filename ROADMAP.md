@@ -339,6 +339,7 @@ An AD tool may: the forms agree in exact arithmetic.
 | `factor_self_update` | `x = x*c1 + x*c2` becomes `x = x*(c1 + c2)`, around the target or around any variable the terms share |
 | `rotate_carried` | issue the loop-carried update first, behind a snapshot |
 | `distribute_products` | expand `(a + b)*c` so factoring sees a sum of products |
+| `balance_sums` | a long sum becomes a balanced tree, not a left-leaning chain |
 | `regroup_products` | reassociate so invariant factors group together |
 | `hoist_invariants` | lift a wholly invariant statement out of the loop |
 | `hoist_subexpressions` | name the invariant coefficient, compute it once |

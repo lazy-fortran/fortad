@@ -126,6 +126,7 @@ contains
         call share_subexpressions(p)
         call rotate_carried(p)
         call fold_identities(p)
+        call balance_sums(p)
         call fold_negations(p)
         ! Substitution and factoring leave their inputs behind.
         call eliminate_dead_stores(p)
@@ -1439,6 +1440,112 @@ contains
         end do
         text = head//text
     end function rename_in_text
+
+    subroutine balance_sums(p)
+        !! Rebuild a long sum as a balanced tree rather than a left-leaning
+        !! chain.
+        !!
+        !! `((a + b) + c) + d` makes each addition wait for the one before it,
+        !! and gives a vectoriser nothing to pair. `(a + b) + (c + d)` halves
+        !! the dependence chain and puts two independent additions side by
+        !! side. On fortfem's degree-eleven Bezier adjoint, compiling fortad's
+        !! own output with `-ffast-math` - which lets the compiler do this
+        !! itself - takes it from ninety-five packed multiplies to four hundred,
+        !! past what Enzyme achieves. The code was always vectorisable; the
+        !! chain shape was withholding it.
+        !!
+        !! Reassociating a sum changes rounding, so no Fortran compiler will do
+        !! it unasked. fortad may, on the same grounds as the factoring and
+        !! distribution around it.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i
+
+        do i = 1, p%n_stmts
+            if (p%stmts(i)%value <= 0) cycle
+            p%stmts(i)%value = balance(p, p%stmts(i)%value)
+        end do
+    end subroutine balance_sums
+
+    recursive integer function balance(p, idx) result(out)
+        !! Rebuild every sum in an expression as a balanced tree.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: idx
+        integer, parameter :: MAX_TERMS = 128
+        integer :: terms(MAX_TERMS), signs(MAX_TERMS), n_terms
+        integer, allocatable :: new_args(:)
+        type(fad_expr_t) :: e
+        character(len=:), allocatable :: text_here
+        integer :: i, kind_here
+        logical :: changed
+
+        out = idx
+        if (idx <= 0 .or. idx > p%n_exprs) return
+
+        ! Children first, so a nested sum is balanced before its parent groups
+        ! it.
+        if (allocated(p%exprs(idx)%args)) then
+            kind_here = p%exprs(idx)%kind
+            text_here = p%exprs(idx)%text
+            new_args = p%exprs(idx)%args
+            changed = .false.
+            do i = 1, size(new_args)
+                block
+                    integer :: sub
+                    sub = balance(p, new_args(i))
+                    if (sub /= new_args(i)) changed = .true.
+                    new_args(i) = sub
+                end block
+            end do
+            if (changed) then
+                e%kind = kind_here
+                e%text = text_here
+                e%args = new_args
+                out = p%add_expr(e)
+            end if
+        end if
+
+        if (p%exprs(out)%kind /= FAD_BINOP) return
+        if (trim(p%exprs(out)%text) /= "+" .and. &
+            trim(p%exprs(out)%text) /= "-") return
+
+        n_terms = 0
+        call flatten_sum(p, out, 1, terms, signs, n_terms, MAX_TERMS)
+        if (n_terms < 4 .or. n_terms > MAX_TERMS) return
+        out = tree_of(p, terms, signs, 1, n_terms)
+    end function balance
+
+    recursive integer function tree_of(p, terms, signs, lo, hi) result(out)
+        !! A balanced tree over signed terms `lo..hi`.
+        !!
+        !! Every join is an addition and every term carries its own sign, so a
+        !! subtracted term becomes a negation here and `fold_negations`, which
+        !! runs next, turns it back into a subtraction. Trying to place the
+        !! subtractions during the split instead applies the sign twice - once
+        !! at the join and once at the leaf - which is a wrong derivative, and
+        !! five oracles said so.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(in) :: terms(:), signs(:), lo, hi
+        integer :: mid, left, right
+
+        if (lo == hi) then
+            out = terms(lo)
+            if (signs(lo) < 0) then
+                block
+                    type(fad_expr_t) :: e
+                    e%kind = FAD_UNOP
+                    e%text = "-"
+                    e%args = [terms(lo)]
+                    out = p%add_expr(e)
+                end block
+            end if
+            return
+        end if
+
+        mid = lo + (hi - lo)/2
+        left = tree_of(p, terms, signs, lo, mid)
+        right = tree_of(p, terms, signs, mid + 1, hi)
+        out = p%add_expr(expr_binop("+", left, right))
+    end function tree_of
 
     subroutine fold_negations(p)
         !! Move a negated term's sign into the sum around it.
