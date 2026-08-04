@@ -628,3 +628,26 @@ not move - so this loop is bound by its loads and shuffles, not by its
 arithmetic. It also unbalanced sums whose signs are lopsided and cost
 the degree-eleven Bezier adjoint eleven points. Both results are worth
 keeping in mind before anyone tries the same thing again.
+
+## hoist_subexpressions does not terminate on a large inlined body
+
+Differentiating fortnum's `fixed_newton_solve` after inlining its two
+residuals runs for over two minutes and was killed. Sampling the stack
+puts it in
+
+    hoist_subexpressions -> maximal_invariant -> loop_invariant
+    -> ensure_invariance -> node_invariant -> text_touches
+
+Inlining is not the problem: `--roundtrip --proc fixed_newton_solve`
+lowers the same body in well under a second, so lowering and inlining
+both finish. Everything after that is differentiation and optimisation.
+
+The invariance cache is keyed on the set of names a loop writes. When
+that set changes the whole arena is re-swept, and hoisting itself adds
+nodes to the arena as it goes. On the small kernels the corpus had
+before inlining this never showed; a body with several inlined callees
+is the first thing large enough to expose it.
+
+What this blocks: three of fortnum's vector-Newton routines, which are
+the last of Enzyme's corpus that fortad cannot yet do for a reason that
+is fortad's own rather than a missing rule.
