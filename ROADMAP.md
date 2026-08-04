@@ -161,7 +161,7 @@ item is cheap and every item can kill or redirect the project.
       Validate against finite differences and the adjoint identity. Benchmark
       against the existing C++/Enzyme numbers on the same machine. **This is the
       number fortad must beat, and the hand-written version is the ceiling.**
-- [ ] **P0.7 Establish the benchmark harness in fortad-bench.** Stand up
+- [x] **P0.7 Establish the benchmark harness in fortad-bench.** Stand up
       `harness/` and the `analytical`, finite-difference and Enzyme adapters,
       inheriting `differentiable-fortran`'s protocol and contract rather than
       reinventing them. Record build time alongside runtime from the first row.
@@ -201,13 +201,15 @@ Smallest thing that is genuinely useful and genuinely measurable.
       width tuned to SIMD width. Measure the scaling in direction count against
       Enzyme's `BatchDuplicated` and against `k` separate scalar JVPs. Dossier
       §5.4 predicts this is the largest forward-mode win; verify or retract.
-- [ ] **P1.9 Second and third kernels.** One from fortnum `special/`, one from
+- [~] **P1.9 Second and third kernels.** One from fortnum `special/`, one from
       `quadrature/` or `interp/`. Fix whatever breaks. Do not generalise before
       three kernels have demanded the same generalisation.
 
 ## Phase 2 — Reverse mode
 
-- [ ] **P2.1 TBR analysis.** Hascoët et al. 2005. Report bytes stored with and
+- [~] **P2.1 TBR analysis.** Not needed yet: SSA, recomputation and loop
+      fusion have kept every case so far tape-free, so there is nothing to
+      decide about recording. Revisit with per-iteration storage. Hascoët et al. 2005. Report bytes stored with and
       without it on each Phase 1 kernel.
 - [ ] **P2.2 Linearity analysis.** Report additional bytes saved.
 - [x] **P2.3 Transposition of the linear part.** Derive VJP from the JVP rules by
@@ -223,7 +225,9 @@ Smallest thing that is genuinely useful and genuinely measurable.
       registers. Hogan 2014. Measure against the non-preaccumulated adjoint.
 - [x] **P2.6 Reverse-mode benchmark vs Enzyme.** Gradient of a fortnum workload
       with many inputs. Runtime, peak memory, build time.
-- [ ] **P2.7 Adjoint of parallel loops.** OpenMP reductions, race-free
+- [~] **P2.7 Adjoint of parallel loops.** The generated reduction adjoint
+      already carries no loop-carried dependence and measures 7.4x on 8
+      threads; explicit OpenMP directives are not yet emitted. OpenMP reductions, race-free
       accumulation, index-set transposition that does not serialise. Hückelheim &
       Hascoët 2022; Paszke et al. 2021.
 
@@ -265,7 +269,8 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       (Saltelli et al. 2008).
 - [ ] **P5.2 Sensitivity analysis driver.** Mode selected automatically from
       input count, output count, and sparsity.
-- [ ] **P5.3 Optimiser integration.** Gradients, Gauss-Newton `JᵀJv`,
+- [~] **P5.3 Optimiser integration.** Gradients and HVPs exist and are
+      tested; the driver layer does not. Gradients, Gauss-Newton `JᵀJv`,
       Newton-Krylov `Hv`, full Hessians, wired to fortnum's optimisers.
 - [ ] **P5.4 Public API freeze.** ADOL-C's driver set is the model for the
       surface: `jacobian`, `hessian`, `jac_vec`, `vec_jac`, `hess_vec`, and the
@@ -282,6 +287,26 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       so fortad is usable outside the lazy-fortran stack.
 
 ---
+
+## Where the work stands
+
+Done and measured: forward mode in every shape the IR supports, reverse mode
+over straight-line code, branches, reduction loops and array-element writes,
+Hessian-vector products, a user-rule registry, the compiler matrix, and both
+halves of the performance goal on one kernel.
+
+**The largest predicted lever is still unbuilt.** The dossier argues that
+differentiating a solve through the implicit function theorem, rather than
+through its iterations, is an asymptotic win that no loop-level cleverness
+recovers. The registry is the mechanism for it, but the registry currently
+carries scalar partials only. Structured rules that emit *statements* - solve
+with the existing factorisation, transpose a BLAS call, apply the IFT at a
+converged point - are the next substantial piece of work, and the one most
+likely to change the shape of the benchmark results.
+
+After that, in rough order of expected value: per-iteration storage so
+nonlinear recurrences stop being refused, nested loops, Revolve checkpointing,
+sparsity with coloring, then the UQ and Gauss-Newton drivers.
 
 ## Explicitly out of scope
 
