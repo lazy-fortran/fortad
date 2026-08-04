@@ -21,6 +21,7 @@ module fortad
     use fortad_taylor_gen, only: differentiate_taylor, taylor_spec_t, &
                                  taylor_status_t
     use fortad_emit, only: emit_proc, emit_module
+    use fortad_dce, only: eliminate_dead_stores, fold_zero_accumulations
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
                                fad_clear_rules
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
@@ -125,6 +126,9 @@ contains
             return
         end if
 
+        call fold_zero_accumulations(tangent)
+        call eliminate_dead_stores(tangent)
+
         res%ok = .true.
         if (present(module_name)) then
             res%code = emit_module(tangent, module_name, "fortad "//FORTAD_VERSION)
@@ -184,6 +188,9 @@ contains
             res%message = rstat%message
             return
         end if
+
+        call fold_zero_accumulations(adjoint)
+        call eliminate_dead_stores(adjoint)
 
         res%ok = .true.
         if (present(module_name)) then
