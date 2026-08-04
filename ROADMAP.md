@@ -474,6 +474,14 @@ caller's `intent(in)` argument.
     result is packed. It measures 0.365 ns/input against 0.373 unvectorised,
     with Enzyme at 0.271. Marginal, nowhere near.
 
+  A seventh measurement bounds what is left. Enzyme processes two batch
+  elements per iteration with packed loads where fortad processes one scalar.
+  Hand-writing that - two partial accumulators, two elements an iteration -
+  measures 0.347 ns/input against fortad's 0.380, with Enzyme at 0.284. So
+  reduction strip-mining is worth about 9% here and would leave this kernel at
+  roughly 1.22x, still outside the target: it is part of the answer and not the
+  whole of it.
+
   So the scalar code is a real difference and is not the reason Enzyme is
   faster here. Six explanations have now been tested on this kernel -
   reassociation cost, instruction scheduling, accumulator pairing, compile
