@@ -18,6 +18,8 @@ module fortad
                               forward_status_t
     use fortad_reverse, only: differentiate_reverse, reverse_spec_t, &
                               reverse_status_t
+    use fortad_taylor_gen, only: differentiate_taylor, taylor_spec_t, &
+                                 taylor_status_t
     use fortad_emit, only: emit_proc, emit_module
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
                                fad_clear_rules
@@ -32,7 +34,8 @@ module fortad
     implicit none
     private
 
-    public :: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, fad_result_t, &
+    public :: fad_jvp, fad_vjp, fad_hvp, fad_taylor, fad_roundtrip, &
+              fad_result_t, &
               fad_version, fad_add_rule, fad_add_call_rule, fad_clear_rules
     public :: sparsity_t, colour_columns, seed_matrix, recover_entries
     public :: star_colour_columns, recover_symmetric
@@ -244,6 +247,65 @@ contains
                           res%message
         end if
     end function fad_hvp
+
+    function fad_taylor(source, independents, order_name, name, module_name) &
+        result(res)
+        !! Taylor mode: every derivative up to order `d` in one sweep.
+        !!
+        !! The generated routine takes the order as an argument, so the caller
+        !! chooses it at the call site. Each variable becomes a coefficient
+        !! array `(0:order)`, and each operation a call into `fortad_taylor`.
+        !!
+        !! Cost is `O(d^2)` per operation, against the `O(2^d)` of nesting a
+        !! first-order tool `d` times. Straight-line scalar kernels only;
+        !! anything else is refused by name.
+        character(len=*), intent(in) :: source
+        character(len=*), intent(in) :: independents(:)
+        !! Name of the order dummy argument. Defaults to `order`.
+        character(len=*), intent(in), optional :: order_name
+        !! Name of the generated procedure. Defaults to `<primal>_taylor`.
+        character(len=*), intent(in), optional :: name
+        !! Wrap the result in a module of this name.
+        character(len=*), intent(in), optional :: module_name
+        type(fad_result_t) :: res
+        type(fad_proc_t) :: primal, taylor
+        type(lower_status_t) :: lstat
+        type(taylor_status_t) :: tstat
+        type(taylor_spec_t) :: spec
+        integer :: i, width
+
+        call lower_source(source, primal, lstat)
+        if (.not. lstat%ok) then
+            res%ok = .false.
+            res%message = lstat%message
+            return
+        end if
+
+        width = 1
+        do i = 1, size(independents)
+            width = max(width, len_trim(independents(i)))
+        end do
+        allocate (character(len=width) :: spec%independents(size(independents)))
+        do i = 1, size(independents)
+            spec%independents(i) = trim(independents(i))
+        end do
+        if (present(order_name)) spec%order_name = order_name
+        if (present(name)) spec%name = name
+
+        call differentiate_taylor(primal, spec, taylor, tstat)
+        if (.not. tstat%ok) then
+            res%ok = .false.
+            res%message = tstat%message
+            return
+        end if
+
+        res%ok = .true.
+        if (present(module_name)) then
+            res%code = emit_module(taylor, module_name, "fortad "//FORTAD_VERSION)
+        else
+            res%code = emit_proc(taylor)
+        end if
+    end function fad_taylor
 
     function fad_roundtrip(source) result(res)
         !! Parse and re-emit without differentiating.
