@@ -418,12 +418,17 @@ document. Currently open:
   single expression before factoring is the remaining step. Gradient-only rk4
   already leads Tapenade, 7.68 against 8.71.
 
-- **The bold/conservative choice is made per procedure, not per loop.** A
-  kernel whose primal loop collapses under distribution but whose adjoint loop
-  does not gets whichever effect is larger. Forcing the bold form on euler
-  measures 1.96 ns/input against the 3.17 the cost model chooses - a 38% win
-  left on the table because the same decision has to serve both loops.
-  Deciding per loop is the fix.
+- **The per-loop bold selection does not fire where forcing it wins.** The
+  choice is now made per loop, greedily: each loop is offered the bold form in
+  turn and keeps it if the total operation count in loop bodies falls. On
+  euler's forward loop that ought to be decisive - forcing the bold form
+  everywhere emits `state = state*fad_c1 + z(i)*fad_c2`, three operations
+  against five, and measures 1.96 ns/input against 3.16 - but the greedy trial
+  scores the same 17 operations with and without it. Tracing confirms
+  distribution does run on that loop during the trial, so the collapse depends
+  on something the single-loop trial does not reproduce. Reproduce by setting
+  the initial mask to `.true.` in `optimise`; that form is not shipped because
+  applied blanket it regressed rk4 and ba by 10-20%.
 
 - **The CSE pass is written but disabled.** `fortad_cse` produces wrong
   Hessians through the `fad_hvp` composition path, silently - a plausible but

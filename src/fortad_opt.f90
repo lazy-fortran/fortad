@@ -51,42 +51,134 @@ module fortad_opt
     !! duplicates disappear - and sometimes it just duplicates work. Which one
     !! it is cannot be decided in advance, so `optimise` tries both and keeps
     !! the cheaper body. This flag selects the aggressive attempt.
-    logical :: aggressive = .false.
+    !! Which top-level loop, counted in order, the bold attempt applies to.
+    !! The decision is per loop: a kernel whose primal loop collapses under
+    !! distribution and whose adjoint loop does not needs both answers at once.
+    logical, allocatable :: bold_mask(:)
+    integer :: n_bold_loops = 0
 
 contains
 
     subroutine optimise(p)
-        !! Run the passes, twice, and keep the cheaper result.
+        !! Run the passes, choosing conservatively or boldly for each loop.
+        !!
+        !! Whether to duplicate a definition read more than once cannot be
+        !! decided in advance: it is right when factoring then folds the whole
+        !! chain into constants and wrong when it does not. So both are tried.
+        !! The choice is made per loop and greedily - each loop is offered the
+        !! bold form in turn and keeps it only if the total operation count in
+        !! loop bodies falls. That is `n + 1` runs of the pass sequence for `n`
+        !! loops, which is cheap next to compiling the result.
         type(fad_proc_t), intent(inout) :: p
-        type(fad_proc_t) :: bold
-        integer :: base_cost, bold_cost
+        type(fad_proc_t) :: original, best, trial
+        integer :: n_loops, k, best_cost, trial_cost
+        logical, allocatable :: mask(:), try(:)
 
-        bold = p
-        call run_passes(p, .false.)
-        base_cost = loop_cost(p)
+        n_loops = count_top_loops(p)
+        if (n_loops == 0) then
+            allocate (mask(1))
+            mask = .false.
+            call run_passes(p, mask)
+            return
+        end if
 
-        call run_passes(bold, .true.)
-        bold_cost = loop_cost(bold)
+        original = p
+        allocate (mask(n_loops), try(n_loops))
+        mask = .false.
 
-        ! Ties go to the conservative result: it has fewer duplicated
-        ! subexpressions and so fewer live values, which the cost model cannot
-        ! see.
-        !
-        ! The choice is made for the whole procedure, and that is its weakness.
-        ! A kernel whose primal loop collapses under distribution but whose
-        ! adjoint loop does not gets whichever effect is larger; forcing the
-        ! bold form on euler measured 1.96 ns/input against the 3.17 chosen
-        ! here. Deciding per loop is the fix and is not done.
-        if (bold_cost < base_cost) p = bold
+        best = original
+        call run_passes(best, mask)
+        best_cost = loop_cost(best)
+
+        do k = 1, n_loops
+            try = mask
+            try(k) = .true.
+            trial = original
+            call run_passes(trial, try)
+            trial_cost = loop_cost(trial)
+            ! Ties go to the conservative form: it has fewer duplicated
+            ! subexpressions and so fewer live values, which the cost model
+            ! cannot see.
+            if (trial_cost < best_cost) then
+                mask = try
+                best = trial
+                best_cost = trial_cost
+            end if
+        end do
+
+        p = best
     end subroutine optimise
 
-    subroutine run_passes(p, bold) 
-        !! One pass sequence at the given substitution aggressiveness.
+    integer function count_top_loops(p) result(n)
+        !! Loops not nested inside another loop.
+        type(fad_proc_t), intent(in) :: p
+        integer :: i, depth
+
+        n = 0
+        depth = 0
+        do i = 1, p%n_stmts
+            select case (p%stmts(i)%kind)
+            case (FAD_DO)
+                if (depth == 0) n = n + 1
+                depth = depth + 1
+            case (FAD_END_DO)
+                depth = depth - 1
+            end select
+        end do
+    end function count_top_loops
+
+    integer function loop_ordinal(p, idx) result(k)
+        !! Which top-level loop contains statement `idx`, or zero.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer :: i, depth
+
+        k = 0
+        depth = 0
+        do i = 1, min(idx, p%n_stmts)
+            select case (p%stmts(i)%kind)
+            case (FAD_DO)
+                if (depth == 0) k = k + 1
+                depth = depth + 1
+            case (FAD_END_DO)
+                depth = depth - 1
+                if (depth == 0 .and. i < idx) k = k
+            end select
+        end do
+        if (depth == 0) then
+            ! `idx` sits outside every loop, unless it is the `end do` itself.
+            if (idx <= p%n_stmts) then
+                if (p%stmts(idx)%kind /= FAD_END_DO) k = 0
+            else
+                k = 0
+            end if
+        end if
+    end function loop_ordinal
+
+    logical function bold_at(p, idx) result(yes)
+        !! Whether the bold form applies where statement `idx` sits.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer :: k
+
+        yes = .false.
+        if (.not. allocated(bold_mask)) return
+        k = loop_ordinal(p, idx)
+        if (k < 1 .or. k > size(bold_mask)) return
+        yes = bold_mask(k)
+    end function bold_at
+
+    subroutine run_passes(p, mask)
+        !! One pass sequence with the given per-loop choices.
         type(fad_proc_t), intent(inout) :: p
-        logical, intent(in) :: bold
+        logical, intent(in) :: mask(:)
         integer :: pass
 
-        aggressive = bold
+        if (allocated(bold_mask)) deallocate (bold_mask)
+        allocate (bold_mask(size(mask)))
+        bold_mask = mask
+        n_bold_loops = size(mask)
+
         call propagate_loop_zeros(p)
         ! Coalescing before renaming, so that a scatter built as a chain of
         ! accumulations onto an array element becomes a chain onto a scalar.
@@ -94,26 +186,27 @@ contains
         ! flattens it into one expression, and factoring can pull the carried
         ! adjoint out of it. Coalescing afterwards leaves the chain opaque.
         call coalesce_element_updates(p)
-        ! Renaming the body into single assignment first is what lets
-        ! substitution reach an accumulated variable. Without it a stage adjoint
-        ! that is written twice is opaque, and a loop body that is wholly linear
-        ! in its carried variable never collapses.
+        ! Renaming the body into single assignment is what lets substitution
+        ! reach an accumulated variable. Without it a stage adjoint that is
+        ! written twice is opaque, and a loop body that is wholly linear in its
+        ! carried variable never collapses.
         call rename_bodies(p)
         do pass = 1, 4
             call propagate_copies(p)
             call substitute_temps(p)
-            if (bold) call distribute_products(p)
+            call distribute_products(p)
             call factor_self_update(p)
         end do
         call regroup_products(p)
         call hoist_invariants(p)
         call hoist_subexpressions(p)
         call rotate_carried(p)
-        aggressive = .false.
+
+        if (allocated(bold_mask)) deallocate (bold_mask)
     end subroutine run_passes
 
     integer function loop_cost(p) result(cost)
-        !! Total expression size inside loops, as a stand-in for work done.
+        !! Total arithmetic operations inside loops, as a stand-in for work.
         !!
         !! Only loop bodies are counted: a statement outside a loop runs once
         !! and is noise beside one that runs per element. Only operator nodes
@@ -516,7 +609,7 @@ contains
                 if (blocked .or. uses == 0 .or. last_use == 0) cycle
                 if (escapes(p, lhs, i, stop_at)) cycle
                 if (uses > 1 .and. .not. cheap(p, p%stmts(i)%value) &
-                    .and. .not. aggressive) cycle
+                    .and. .not. bold_at(p, i)) cycle
 
                 do j = i + 1, last_use
                     if (p%stmts(j)%value <= 0) cycle
@@ -530,7 +623,7 @@ contains
                         integer :: new
                         new = replace_var(p, p%stmts(j)%value, lhs, &
                                           p%stmts(i)%value)
-                        if (aggressive) then
+                        if (bold_at(p, i)) then
                             if (expr_size(p, new) > MAX_EXPR_NODES_BOLD) cycle
                         else
                             if (expr_size(p, new) > MAX_EXPR_NODES) cycle
@@ -663,8 +756,6 @@ contains
         type(fad_proc_t), intent(inout) :: p
         integer :: i, first, last, j, budget
 
-        budget = MAX_EXPR_NODES
-        if (aggressive) budget = MAX_EXPR_NODES_BOLD
         i = 1
         do while (i <= p%n_stmts)
             if (p%stmts(i)%kind /= FAD_DO) then
@@ -676,6 +767,11 @@ contains
                 i = i + 1
                 cycle
             end if
+            if (.not. bold_at(p, first + 1)) then
+                i = last + 1
+                cycle
+            end if
+            budget = MAX_EXPR_NODES_BOLD
             do j = first + 1, last - 1
                 if (p%stmts(j)%value <= 0) cycle
                 block
@@ -1761,7 +1857,9 @@ contains
                     call insert_before(p, first, s)
                     first = first + 1
                     last = last + 1
-                    j = j + 1
+                    ! Deliberately not advancing: a statement can contain more
+                    ! than one invariant subexpression, and after factoring it
+                    ! usually does - the coefficient and the scatter's scale.
                 end block
             end do
             i = last + 1
