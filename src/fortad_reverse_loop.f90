@@ -415,10 +415,25 @@ contains
         !! Whether a variable assigned at `stmt` carries a value across
         !! iterations.
         !!
-        !! Two ways that happens, and only the first is obvious. The statement
-        !! may read the variable it assigns, `u = f(u)`. Or the variable may be
-        !! **read earlier in the body than it is assigned** - which means the
-        !! read sees the previous iteration's value:
+        !! The test is on the **first** event in the body that involves the
+        !! variable. If that is a read, the value read came from the previous
+        !! iteration and the variable is carried. If it is an assignment whose
+        !! own right-hand side does not read it, the variable starts fresh each
+        !! iteration and is not carried, however many times it is read after
+        !! that.
+        !!
+        !! Reading the variable it assigns, `u = f(u)`, is the obvious carried
+        !! case, but only when nothing earlier in the body assigned it:
+        !!
+        !!     value = sin(x)          ! starts fresh
+        !!     value = value + w       ! reads this iteration's value
+        !!
+        !! is not a recurrence. Treating it as one taped a variable that needed
+        !! no tape and then refused the loop outright.
+        !!
+        !! The other case is the variable being **read earlier in the body than
+        !! it is assigned** - which means the read sees the previous iteration's
+        !! value:
         !!
         !!     do i = 1, n
         !!         a = g(h)          ! reads last iteration's h
@@ -436,14 +451,34 @@ contains
         integer :: k
 
         yes = .true.
-        if (reads_name(p, p%stmts(stmt)%value, target)) return
-
-        do k = first + 1, stmt - 1
+        do k = first + 1, last - 1
             if (p%stmts(k)%kind /= FAD_ASSIGN) cycle
+            ! The right-hand side is evaluated before the assignment takes
+            ! effect, so a read in the statement that assigns the variable still
+            ! counts as happening first.
             if (reads_name(p, p%stmts(k)%value, target)) return
+            if (.not. allocated(p%stmts(k)%target)) cycle
+            if (base_name(p%stmts(k)%target) == target) then
+                yes = .false.
+                return
+            end if
         end do
         yes = .false.
     end function is_loop_carried
+
+    function base_name(target) result(base)
+        !! An assignment target without its subscript.
+        character(len=*), intent(in) :: target
+        character(len=:), allocatable :: base
+        integer :: pos
+
+        pos = index(target, "(")
+        if (pos > 0) then
+            base = trim(target(1:pos - 1))
+        else
+            base = trim(target)
+        end if
+    end function base_name
 
     logical function is_linear_accumulation(p, first, stmt, target) result(yes)
         !! True when the statement adds to `target` a sum of terms that do not

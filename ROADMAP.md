@@ -429,6 +429,21 @@ document. Currently open:
   single expression before factoring is the remaining step. Gradient-only rk4
   already leads Tapenade, 7.68 against 8.71.
 
+- **A scalar assigned twice in a loop body is refused.** `value = sin(x)`
+  followed by `value = value + w` is not a recurrence, but the second statement
+  is read as an accumulation and the split fails. The optimiser already renames
+  a body into single assignment; the analysis that runs before differentiation
+  does not, and should. Found writing fortnum's multi-input kernel, which is
+  written exactly this way.
+
+- **An assumed-size dummy silently becomes assumed-shape.** A primal declaring
+  `real(dp), intent(in) :: z(*)` produces a derivative declaring
+  `dimension(:)`. The generated routine then no longer matches the caller's
+  explicit interface, which is undefined behaviour rather than an error - it
+  segfaulted the fortnum benchmark driver. fortad needs a shape to emit
+  `z_b = 0`, so the fix is either to carry `(*)` through and zero it by
+  element, or to refuse the declaration and say why.
+
 - **The CSE pass is written but disabled.** `fortad_cse` produces wrong
   Hessians through the `fad_hvp` composition path, silently - a plausible but
   non-symmetric result. It also did not pay for itself when it worked, because
