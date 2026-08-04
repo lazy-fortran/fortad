@@ -1800,6 +1800,18 @@ contains
                 else if (is_literal(p, a, 1.0_dp)) then
                     out = b
                     return
+                ! A product with zero is zero, and the zero operand is already
+                ! a literal of the right kind, so it stands in for the whole
+                ! product. A primal that writes `0.0*t` to keep an argument
+                ! referenced hands its derivative the same term, and carrying
+                ! it to the emitted source costs a multiply and an add per
+                ! iteration for nothing.
+                else if (is_literal(p, b, 0.0_dp)) then
+                    out = b
+                    return
+                else if (is_literal(p, a, 0.0_dp)) then
+                    out = a
+                    return
                 end if
             case ("/")
                 if (is_literal(p, b, 1.0_dp)) then
