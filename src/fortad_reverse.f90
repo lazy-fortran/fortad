@@ -176,6 +176,12 @@ contains
         adjoint%is_function = .false.
         adjoint%real_suffix = "d0"
         if (allocated(primal%real_suffix)) adjoint%real_suffix = primal%real_suffix
+        ! The derivative names the same kinds as the primal, so it needs the
+        ! same imports.
+        if (allocated(primal%uses)) then
+            adjoint%uses = primal%uses
+            adjoint%n_uses = primal%n_uses
+        end if
         adjoint%is_pure = .true.
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind == FAD_CALL_STMT) adjoint%is_pure = .false.

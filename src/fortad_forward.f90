@@ -38,6 +38,12 @@ module fortad_forward
         logical :: vector = .false.
         !! Name of the direction-count dummy argument in vector mode.
         character(len=:), allocatable :: ndir_name
+        !! Whether the generated routine also returns the primal value.
+        !!
+        !! A consumer that already has the value, or that wants a routine
+        !! matching a tangent-only contract, does not want it back - and asking
+        !! for it keeps the whole primal computation live.
+        logical :: with_primal = .true.
     end type forward_spec_t
 
     type :: forward_status_t
@@ -77,9 +83,16 @@ contains
         tangent%is_function = .false.
         tangent%real_suffix = "d0"
         if (allocated(primal%real_suffix)) tangent%real_suffix = primal%real_suffix
+        ! The derivative names the same kinds as the primal, so it needs the
+        ! same imports.
+        if (allocated(primal%uses)) then
+            tangent%uses = primal%uses
+            tangent%n_uses = primal%n_uses
+        end if
         tangent%is_pure = .not. has_calls(primal)
 
-        call build_signature(primal, tangent, active, suffix, spec%vector, ndir)
+        call build_signature(primal, tangent, active, suffix, spec%vector, ndir, &
+                             spec%with_primal)
         call build_body(primal, tangent, active, suffix, spec%vector, status)
         if (.not. status%ok) return
 
@@ -242,7 +255,8 @@ contains
         end associate
     end function expr_reads_active
 
-    subroutine build_signature(primal, tangent, active, suffix, vector, ndir)
+    subroutine build_signature(primal, tangent, active, suffix, vector, ndir, &
+                               with_primal)
         !! Dummy arguments: every primal argument, each active one followed by
         !! its tangent, then the result and its tangent for a function. In
         !! vector mode the direction count leads the list.
@@ -252,6 +266,7 @@ contains
         character(len=*), intent(in) :: suffix
         logical, intent(in) :: vector
         character(len=*), intent(in) :: ndir
+        logical, intent(in) :: with_primal
         character(len=64), allocatable :: names(:)
         integer :: i, n, di, ignored
         type(fad_decl_t) :: d
@@ -268,9 +283,21 @@ contains
             d = fad_decl_t()
         end if
         do i = 1, size(primal%params)
+            di = primal%decl_index(trim(primal%params(i)))
+            ! An active `intent(out)` dummy is a primal value the caller asked
+            ! not to be given back. Inactive ones stay: a status flag is not a
+            ! derivative output and dropping it would change the contract.
+            if (di > 0 .and. .not. with_primal) then
+                if (active(di) .and. primal%decls(di)%intent == FAD_INTENT_OUT) then
+                    n = n + 1
+                    names(n) = trim(primal%params(i))//suffix
+                    call add_tangent_decl(tangent, primal%decls(di), suffix, &
+                                          FAD_INTENT_OUT, vector, ndir)
+                    cycle
+                end if
+            end if
             n = n + 1
             names(n) = trim(primal%params(i))
-            di = primal%decl_index(trim(primal%params(i)))
             if (di == 0) cycle
             ignored = tangent%add_decl(primal%decls(di))
             if (.not. active(di)) cycle
@@ -282,13 +309,15 @@ contains
         end do
 
         if (primal%is_function) then
-            n = n + 1
-            names(n) = primal%result_name
             di = primal%decl_index(primal%result_name)
+            if (with_primal) then
+                n = n + 1
+                names(n) = primal%result_name
+            end if
             if (di > 0) then
                 d = primal%decls(di)
                 d%intent = FAD_INTENT_OUT
-                ignored = tangent%add_decl(d)
+                if (with_primal) ignored = tangent%add_decl(d)
                 n = n + 1
                 names(n) = primal%result_name//suffix
                 call add_tangent_decl(tangent, d, suffix, FAD_INTENT_OUT, &
