@@ -85,7 +85,7 @@ contains
     end function fad_version
 
     function fad_jvp(source, independents, name, suffix, n_directions, &
-                     module_name, with_primal) result(res)
+                     module_name, with_primal, from) result(res)
         !! Forward mode. Returns a subroutine computing the primal and its
         !! Jacobian-vector product in one sweep.
         !!
@@ -113,6 +113,9 @@ contains
         !! Set this `.false.` for a tangent-only contract. Everything the primal
         !! value alone kept alive is then dead and is removed.
         logical, intent(in), optional :: with_primal
+        !! Which procedure of a multi-procedure source to differentiate.
+        !! Without it, the first one; the others stay available for inlining.
+        character(len=*), intent(in), optional :: from
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal, tangent
         type(lower_status_t) :: lstat
@@ -120,7 +123,7 @@ contains
         type(forward_spec_t) :: spec
         integer :: i, width
 
-        call lower_source(source, primal, lstat)
+        call lower_source(source, primal, lstat, from)
         if (.not. lstat%ok) then
             res%ok = .false.
             res%message = lstat%message
@@ -169,7 +172,7 @@ contains
     end function fad_jvp
 
     function fad_vjp(source, independents, dependent, name, suffix, &
-                     module_name, with_primal) result(res)
+                     module_name, with_primal, from) result(res)
         !! Reverse mode. Returns a subroutine computing the primal and the
         !! vector-Jacobian product: one sweep yields the gradient with respect
         !! to every independent at once, which is the cheap-gradient principle.
@@ -194,6 +197,9 @@ contains
         !! for a recurrence whose adjoint needs no primal value is the entire
         !! forward loop.
         logical, intent(in), optional :: with_primal
+        !! Which procedure of a multi-procedure source to differentiate.
+        !! Without it, the first one; the others stay available for inlining.
+        character(len=*), intent(in), optional :: from
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal, adjoint
         type(lower_status_t) :: lstat
@@ -201,7 +207,7 @@ contains
         type(reverse_spec_t) :: spec
         integer :: i, width
 
-        call lower_source(source, primal, lstat)
+        call lower_source(source, primal, lstat, from)
         if (.not. lstat%ok) then
             res%ok = .false.
             res%message = lstat%message
@@ -246,7 +252,8 @@ contains
         end if
     end function fad_vjp
 
-    function fad_hvp(source, independents, dependent, name, module_name) result(res)
+    function fad_hvp(source, independents, dependent, name, module_name, &
+                     from) result(res)
         !! Second order: forward mode applied to the generated adjoint.
         !!
         !! This is **forward-over-reverse**, the standard route to a
@@ -269,6 +276,9 @@ contains
         character(len=*), intent(in), optional :: name
         !! Wrap the result in a module of this name.
         character(len=*), intent(in), optional :: module_name
+        !! Which procedure of a multi-procedure source to differentiate.
+        !! Without it, the first one; the others stay available for inlining.
+        character(len=*), intent(in), optional :: from
         type(fad_result_t) :: res
         type(fad_result_t) :: adjoint
         character(len=:), allocatable :: inner_name, outer_name
@@ -301,7 +311,8 @@ contains
         end if
     end function fad_hvp
 
-    function fad_taylor(source, independents, order_name, name, module_name) &
+    function fad_taylor(source, independents, order_name, name, module_name, &
+                        from) &
         result(res)
         !! Taylor mode: every derivative up to order `d` in one sweep.
         !!
@@ -320,6 +331,9 @@ contains
         character(len=*), intent(in), optional :: name
         !! Wrap the result in a module of this name.
         character(len=*), intent(in), optional :: module_name
+        !! Which procedure of a multi-procedure source to differentiate.
+        !! Without it, the first one; the others stay available for inlining.
+        character(len=*), intent(in), optional :: from
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal, taylor
         type(lower_status_t) :: lstat
@@ -327,7 +341,7 @@ contains
         type(taylor_spec_t) :: spec
         integer :: i, width
 
-        call lower_source(source, primal, lstat)
+        call lower_source(source, primal, lstat, from)
         if (.not. lstat%ok) then
             res%ok = .false.
             res%message = lstat%message
@@ -360,18 +374,20 @@ contains
         end if
     end function fad_taylor
 
-    function fad_roundtrip(source) result(res)
+    function fad_roundtrip(source, from) result(res)
         !! Parse and re-emit without differentiating.
         !!
         !! This is the semantics check that gates everything else: if the
         !! round-tripped primal does not compute what the original computed,
         !! no derivative of it can be trusted.
         character(len=*), intent(in) :: source
+        !! Which procedure of a multi-procedure source to re-emit.
+        character(len=*), intent(in), optional :: from
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal
         type(lower_status_t) :: lstat
 
-        call lower_source(source, primal, lstat)
+        call lower_source(source, primal, lstat, from)
         if (.not. lstat%ok) then
             res%ok = .false.
             res%message = lstat%message

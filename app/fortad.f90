@@ -13,6 +13,7 @@ program fortad_cli
     implicit none
 
     character(len=:), allocatable :: input_path, output_path, indep_list, dep_name
+    character(len=:), allocatable :: from_name
     character(len=:), allocatable :: directions, proc_name, source, mode
     character(len=:), allocatable :: module_name
     character(len=32), allocatable :: independents(:)
@@ -22,7 +23,7 @@ program fortad_cli
 
     call parse_arguments(input_path, output_path, indep_list, directions, &
                          proc_name, mode, module_name, roundtrip_only, &
-                         with_primal, dep_name, stat)
+                         with_primal, dep_name, from_name, stat)
     if (stat /= 0) then
         call usage()
         error stop 2
@@ -35,17 +36,17 @@ program fortad_cli
     end if
 
     if (roundtrip_only) then
-        res = fad_roundtrip(source)
+        res = fad_roundtrip(source, from=from_name)
     else if (mode == "reverse") then
         independents = split_commas(indep_list)
         res = run_reverse(source, independents, proc_name, module_name, &
-                          with_primal, dep_name)
+                          with_primal, dep_name, from_name)
     else if (mode == "hessian") then
         independents = split_commas(indep_list)
-        res = run_hessian(source, independents, proc_name, module_name)
+        res = run_hessian(source, independents, proc_name, module_name, from_name)
     else
         independents = split_commas(indep_list)
-        res = fad_jvp(source, independents, name=proc_name, &
+        res = fad_jvp(source, independents, name=proc_name, from=from_name, &
                       module_name=module_name, n_directions=directions, &
                       with_primal=with_primal)
     end if
@@ -110,10 +111,11 @@ contains
     end subroutine register_rule
 
     function run_reverse(source, independents, proc_name, module_name, &
-                         with_primal, dep_name) result(res)
+                         with_primal, dep_name, from_name) result(res)
         !! Reverse mode. A blank name, module or dependent means "the default".
         character(len=*), intent(in) :: source, independents(:)
         character(len=*), intent(in) :: proc_name, module_name, dep_name
+        character(len=*), intent(in) :: from_name
         logical, intent(in) :: with_primal
         type(fad_result_t) :: res
 
@@ -121,10 +123,12 @@ contains
                       module_name=module_name, with_primal=with_primal)
     end function run_reverse
 
-    function run_hessian(source, independents, proc_name, module_name) result(res)
+    function run_hessian(source, independents, proc_name, module_name, &
+                         from_name) result(res)
         !! Forward-over-reverse Hessian-vector product.
         character(len=*), intent(in) :: source, independents(:)
         character(len=*), intent(in) :: proc_name, module_name
+        character(len=*), intent(in) :: from_name
         type(fad_result_t) :: res
 
         res = fad_hvp(source, independents, name=proc_name, &
@@ -133,7 +137,7 @@ contains
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
                                proc_name, mode, module_name, roundtrip_only, &
-                               with_primal, dep_name, stat)
+                               with_primal, dep_name, from_name, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
         character(len=:), allocatable, intent(out) :: indep_list, directions
@@ -141,6 +145,7 @@ contains
         character(len=:), allocatable, intent(out) :: module_name
         logical, intent(out) :: roundtrip_only, with_primal
         character(len=:), allocatable, intent(out) :: dep_name
+        character(len=:), allocatable, intent(out) :: from_name
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
@@ -155,6 +160,7 @@ contains
         roundtrip_only = .false.
         with_primal = .true.
         dep_name = ""
+        from_name = ""
         stat = 0
 
         n = command_argument_count()
@@ -230,6 +236,19 @@ contains
                 if (allocated(dep_name)) deallocate (dep_name)
                 allocate (character(len=length) :: dep_name)
                 call get_command_argument(i, dep_name)
+            case ("--proc")
+                ! Which procedure of a module to differentiate. The rest of
+                ! the file stays available, so a call to a sibling is inlined
+                ! rather than needing a rule.
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, length=length)
+                if (allocated(from_name)) deallocate (from_name)
+                allocate (character(len=length) :: from_name)
+                call get_command_argument(i, from_name)
             case ("--rule")
                 ! The derivative of a routine fortad cannot see inside: a
                 ! kernel behind a C binding, a table lookup, a library call.

@@ -18,6 +18,7 @@ module fortad_lower
                         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
                         FAD_END_IF, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
                         FAD_INTENT_IN, FAD_INTENT_OUT, FAD_INTENT_INOUT
+    use fortad_inline, only: inline_calls, inline_status_t
     implicit none
     private
 
@@ -31,14 +32,102 @@ module fortad_lower
 
 contains
 
-    subroutine lower_source(source, proc, status)
-        !! Parse `source` through fortfront and lower its first procedure.
+    logical function wanted(name, proc_name, chosen) result(yes)
+        !! Whether this is the procedure to differentiate.
+        character(len=*), intent(in) :: name
+        character(len=*), intent(in), optional :: proc_name
+        integer, intent(in) :: chosen
+
+        yes = .false.
+        if (chosen > 0) return
+        if (.not. present(proc_name)) then
+            yes = .true.
+            return
+        end if
+        if (len_trim(proc_name) == 0) then
+            yes = .true.
+            return
+        end if
+        yes = matches(name, proc_name)
+    end function wanted
+
+    logical function needed(proc, others, n_others, name) result(yes)
+        !! Whether the target, or something already pulled in, calls `name`.
+        use fortad_inline, only: references
+        type(fad_proc_t), intent(in) :: proc
+        type(fad_proc_t), intent(in) :: others(:)
+        integer, intent(in) :: n_others
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        yes = .false.
+        do i = 1, n_others
+            if (.not. allocated(others(i)%name)) cycle
+            if (matches(others(i)%name, name)) return
+        end do
+        if (references(proc, name)) then
+            yes = .true.
+            return
+        end if
+        do i = 1, n_others
+            if (references(others(i), name)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function needed
+
+    function reason(s) result(text)
+        !! A lowering status's message, which is unset when it succeeded.
+        type(lower_status_t), intent(in) :: s
+        character(len=:), allocatable :: text
+
+        text = ""
+        if (allocated(s%message)) text = trim(s%message)
+    end function reason
+
+    logical function matches(a, b) result(yes)
+        !! Fortran names do not distinguish case.
+        character(len=*), intent(in) :: a, b
+        integer :: i
+        character(len=:), allocatable :: la, lb
+
+        la = trim(a)
+        lb = trim(b)
+        yes = .false.
+        if (len(la) /= len(lb)) return
+        do i = 1, len(la)
+            if (down(la(i:i)) /= down(lb(i:i))) return
+        end do
+        yes = .true.
+    end function matches
+
+    character function down(c)
+        character, intent(in) :: c
+
+        down = c
+        if (c >= "A" .and. c <= "Z") down = achar(iachar(c) + 32)
+    end function down
+
+    subroutine lower_source(source, proc, status, proc_name)
+        !! Parse `source` through fortfront and lower one of its procedures.
+        !!
+        !! Without `proc_name` that is the first one, which is what a
+        !! single-procedure file means. Naming one picks it out of a module and
+        !! leaves the rest available to inline calls from.
         character(len=*), intent(in) :: source
         type(fad_proc_t), intent(out) :: proc
         type(lower_status_t), intent(out) :: status
+        character(len=*), intent(in), optional :: proc_name
         type(compiler_frontend_options_t) :: opts
         type(compiler_frontend_result_t) :: res
-        integer :: i
+        integer, parameter :: MAX_PROCS = 64
+        integer, parameter :: MAX_ROUNDS = 8
+        type(fad_proc_t) :: others(MAX_PROCS), one_proc
+        type(inline_status_t) :: ist
+        type(lower_status_t) :: one
+        integer :: round, added
+        integer :: i, chosen, n_others
 
         opts%input_mode = INPUT_MODE_STANDARD
         opts%standardize = .false.
@@ -55,20 +144,83 @@ contains
             return
         end if
 
+        ! Lower the procedure asked for, then only those it calls.
+        !
+        ! Lowering everything in the file would drag in whatever else lives
+        ! there - a benchmark driver, a command line parser - and fail or crash
+        ! on constructs that have nothing to do with the kernel. Following the
+        ! calls reaches exactly what inlining needs.
+        chosen = 0
         do i = 1, res%arena%size
             if (.not. allocated(res%arena%entries(i)%node)) cycle
             select type (n => res%arena%entries(i)%node)
             type is (function_def_node)
-                call lower_function(res%arena, n, proc, status)
-                return
+                if (wanted(n%name, proc_name, chosen)) then
+                    call lower_function(res%arena, n, proc, status)
+                    chosen = i
+                end if
             type is (subroutine_def_node)
-                call lower_subroutine(res%arena, n, proc, status)
-                return
+                if (wanted(n%name, proc_name, chosen)) then
+                    call lower_subroutine(res%arena, n, proc, status)
+                    chosen = i
+                end if
             end select
+            if (chosen > 0) exit
         end do
 
-        status%ok = .false.
-        status%message = "no function or subroutine found in source"
+        if (chosen == 0) then
+            status%ok = .false.
+            if (present(proc_name)) then
+                if (len_trim(proc_name) > 0) then
+                    status%message = "no procedure named '"//trim(proc_name)// &
+                                     "' in this source"
+                    return
+                end if
+            end if
+            status%message = "no function or subroutine found in source"
+            return
+        end if
+        if (.not. status%ok) return
+
+        ! Pull in the callees, and the callees of those, until nothing new is
+        ! named. A procedure that fails to lower is simply not available to
+        ! inline from; differentiation then reports the missing rule as usual.
+        n_others = 0
+        do round = 1, MAX_ROUNDS
+            added = 0
+            do i = 1, res%arena%size
+                if (i == chosen) cycle
+                if (n_others >= MAX_PROCS) exit
+                if (.not. allocated(res%arena%entries(i)%node)) cycle
+                select type (n => res%arena%entries(i)%node)
+                type is (function_def_node)
+                    if (.not. needed(proc, others, n_others, n%name)) cycle
+                    call lower_function(res%arena, n, one_proc, one)
+                type is (subroutine_def_node)
+                    if (.not. needed(proc, others, n_others, n%name)) cycle
+                    call lower_subroutine(res%arena, n, one_proc, one)
+                class default
+                    cycle
+                end select
+                if (.not. one%ok) cycle
+                n_others = n_others + 1
+                others(n_others) = one_proc
+                added = added + 1
+            end do
+            if (added == 0) exit
+        end do
+
+        if (n_others > 0) then
+            call inline_calls(proc, others(:n_others), n_others, ist)
+            if (.not. ist%ok) then
+                status%ok = .false.
+                status%message = ist%message
+                return
+            end if
+        end if
+
+        status%ok = .true.
+        status%message = ""
     end subroutine lower_source
 
     subroutine infer_real_suffix(proc)
