@@ -4,9 +4,14 @@ Source-transformation automatic differentiation for Fortran. Reads Fortran,
 emits **standard Fortran** derivative code that any conforming compiler builds —
 no plugin, no LLVM version lock, no constraint on how the primal is written.
 
-This repository is currently **research and design**. There is no implementation
-yet. What exists is the dossier, the roadmap, and the tooling to study the field
-without redistributing anyone else's work.
+```console
+$ fortad --mode reverse --indep a,b --module k_adjoint kernel.f90
+```
+
+Working today: forward mode (scalar, array, loop, branch, and vector/batched),
+reverse mode (straight-line and reduction loops), and Hessian-vector products.
+27 oracle cases pass locally, each checked against finite differences, the
+adjoint identity, or Hessian symmetry - never against another AD tool.
 
 ## Why
 
@@ -43,17 +48,53 @@ differentiating the *mathematics* of a solve rather than its iterations.
 The full argument, the algorithm catalogue, and the honest accounting of where
 Enzyme wins are in **[docs/dossier.md](docs/dossier.md)**.
 
-## What it will provide
+## Measured against Enzyme
 
-| Product | Object | Mode |
+On the `dot_sin` reduction kernel, this machine, all Fortran compiled with the
+same flang, correctness gating every timing. Full method and raw data in
+[fortad-bench](https://github.com/lazy-fortran/fortad-bench).
+
+| Mode | fortad vs Enzyme |
+|---|---|
+| Forward, one direction | ~8% faster, and matches a hand-written tangent |
+| Forward, 16 directions | ~10x faster per direction |
+| Reverse (gradient) | 1.7-1.8x faster, within 5-9% of a hand-written adjoint |
+| Threads | bit-identical results, 7.4x on 8 cores |
+
+The reverse-mode margin comes from fusing the adjoint into the primal loop, so
+the arrays are streamed once rather than twice. Enzyme differentiates a program
+it must run forward and then reverse; a source-level tool can restructure the
+derivative program itself.
+
+These are numbers from one machine on one kernel, not a promise about another.
+
+## Status by capability
+
+| Capability | Forward | Reverse |
 |---|---|---|
-| Linear UQ | `cov(y) = J cov(x) Jᵀ` | vector forward |
-| Sensitivity analysis | rows or columns of `J`, sparse-compressed | forward, reverse, or compressed |
-| Optimiser gradients | `∇f` | reverse |
-| Gauss-Newton | `J`, `JᵀJ v` | vector forward + reverse |
-| Newton-Krylov | `H v` | forward-over-reverse |
-| Hessians | `H`, dense or sparse | HVPs, star coloring, or edge_pushing |
-| Higher order | Taylor coefficients to order `d` | generated Taylor kernels |
+| Straight-line expressions | yes | yes |
+| Arrays and subscripts | yes | reads yes, element assignment no |
+| `do` loops | yes | reduction loops only |
+| `if`/`else` | yes | no |
+| Nonlinear loop-carried recurrence | yes | no |
+| Vector / batched directions | yes | no |
+| Hessian-vector products | forward-over-reverse | - |
+
+What reverse mode cannot do it **refuses by name**, with a message saying which
+mode does handle it. A named refusal is a bug report; a silent fallback is a
+wrong derivative.
+
+## Products
+
+| Product | Object | Mode | State |
+|---|---|---|---|
+| Optimiser gradients | grad f | reverse | working |
+| Newton-Krylov | H v | forward-over-reverse | working |
+| Sensitivity analysis | rows or columns of J | forward or reverse | working, no driver yet |
+| Linear UQ | cov(y) = J cov(x) J^T | vector forward | vector mode works, no driver yet |
+| Gauss-Newton | J, J^T J v | vector forward + reverse | planned |
+| Sparse Jacobians and Hessians | compressed | coloring | planned |
+| Higher order | Taylor coefficients | generated kernels | planned |
 
 ## Where it fits
 
@@ -91,12 +132,36 @@ Read **[LEGAL.md](LEGAL.md)** before adapting anything from the study corpus —
 for most entries the answer is that you may not. **[PROVENANCE.md](PROVENANCE.md)**
 records the publication behind every algorithm fortad implements.
 
-## Status
+## Using it
 
-See **[ROADMAP.md](ROADMAP.md)**. The next action is not writing an AD engine —
-it is measuring whether fortfront can parse fortnum's real kernels, and porting
-the VMEC++ Jacobian kernel to Fortran so there is a head-to-head Enzyme number
-to beat before any general machinery is built.
+```fortran
+use fortad, only: fad_vjp, fad_result_t
+
+type(fad_result_t) :: res
+
+res = fad_vjp(source, independents=["x", "y"], module_name="my_adjoint")
+if (res%ok) then
+    write (unit, '(a)') res%code
+else
+    write (error_unit, '(a)') res%message
+end if
+```
+
+`fad_jvp`, `fad_vjp`, and `fad_hvp` all take Fortran source and return Fortran
+source. Passing `module_name` is recommended: the consumer then gets a
+compiler-checked interface rather than an external declaration nobody verifies.
+
+Generated procedures are `pure` and hold no state, so they are thread-safe by
+construction, and the reduction adjoint loop carries no loop-carried dependence
+and parallelises directly.
+
+## Next
+
+See **[ROADMAP.md](ROADMAP.md)**, which also records what building the engine
+established. Next up: per-iteration storage for nonlinear recurrences in
+reverse mode, branches in reverse mode, and a custom-rule registry so a
+BLAS call or an implicit solve is differentiated as the operation it is rather
+than as the loop that implements it.
 
 ## Licence
 
