@@ -37,7 +37,8 @@ contains
         select case (lower(name))
         case ("sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", &
               "tanh", "exp", "log", "log10", "sqrt", "abs", "erf", "erfc", &
-              "max", "min", "sign", "atan2", "hypot", "real", "dble", "sum")
+              "max", "min", "sign", "atan2", "hypot", "real", "dble", "sum", &
+              "dot_product")
             yes = .true.
         case default
             ! A user-registered rule counts as knowing the derivative.
@@ -272,6 +273,25 @@ contains
             u = fad_fn2(p, "sign", one, args(2))
             out = fad_mul(p, u, da)
 
+        case ("dot_product")
+            ! A dot product is linear in each argument, so its tangent is the
+            ! same product with one side replaced by that side's tangent:
+            ! dot_product(da, b) + dot_product(a, db). Either tangent may be
+            ! absent when that side is inactive.
+            if (size(args) < 2) return
+            b = args(2)
+            db = dargs(2)
+            u = 0
+            v = 0
+            if (da /= 0) u = fad_fn2(p, "dot_product", da, b)
+            if (db /= 0) v = fad_fn2(p, "dot_product", a, db)
+            if (u /= 0 .and. v /= 0) then
+                out = fad_add(p, u, v)
+            else if (u /= 0) then
+                out = u
+            else
+                out = v
+            end if
         case ("atan2")
             ! (b*da - a*db) / (a**2 + b**2)
             if (size(args) < 2) return
