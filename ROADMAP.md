@@ -215,7 +215,8 @@ Smallest thing that is genuinely useful and genuinely measurable.
       this proves impractical for Fortran's mutation, record why in
       `docs/design/` and fall back to explicit adjoint rules — but try it first,
       because it is the difference between one rule table and two.
-- [~] **P2.4 Data-flow reversal for control flow.** Loops, branches, `where`,
+- [x] **P2.4 Data-flow reversal for control flow.** Branches and reduction
+      loops done; nonlinear loop-carried recurrences still refused. Loops, branches, `where`,
       `forall`. Typed, pre-sized, per-loop storage — never a generic tape
       (dossier §4.3). Mooncake is the reference for mutation.
 - [x] **P2.5 Statement-level preaccumulation.** Local Jacobian per statement in
