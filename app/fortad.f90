@@ -44,21 +44,9 @@ program fortad_cli
         res = run_hessian(source, independents, proc_name, module_name)
     else
         independents = split_commas(indep_list)
-        ! An absent --name means "let fortad choose", so the optional argument
-        ! must be absent too, not present and empty.
-        if (len_trim(proc_name) > 0 .and. len(directions) > 0) then
-            res = fad_jvp(source, independents, name=trim(proc_name), &
-                          with_primal=with_primal, &
-                          n_directions=directions)
-        else if (len_trim(proc_name) > 0) then
-            res = fad_jvp(source, independents, name=trim(proc_name), &
-                          with_primal=with_primal)
-        else if (len(directions) > 0) then
-            res = fad_jvp(source, independents, n_directions=directions, &
-                          with_primal=with_primal)
-        else
-            res = fad_jvp(source, independents, with_primal=with_primal)
-        end if
+        res = fad_jvp(source, independents, name=proc_name, &
+                      module_name=module_name, n_directions=directions, &
+                      with_primal=with_primal)
     end if
 
     if (.not. res%ok) then
@@ -78,25 +66,14 @@ contains
 
     function run_reverse(source, independents, proc_name, module_name, &
                          with_primal) result(res)
-        !! Reverse mode, with the optional arguments genuinely absent when the
-        !! user did not supply them.
+        !! Reverse mode. A blank name or module means "use the default".
         character(len=*), intent(in) :: source, independents(:)
         character(len=*), intent(in) :: proc_name, module_name
         logical, intent(in) :: with_primal
         type(fad_result_t) :: res
 
-        if (len_trim(proc_name) > 0 .and. len_trim(module_name) > 0) then
-            res = fad_vjp(source, independents, name=trim(proc_name), &
-                          module_name=trim(module_name), with_primal=with_primal)
-        else if (len_trim(proc_name) > 0) then
-            res = fad_vjp(source, independents, name=trim(proc_name), &
-                          with_primal=with_primal)
-        else if (len_trim(module_name) > 0) then
-            res = fad_vjp(source, independents, module_name=trim(module_name), &
-                          with_primal=with_primal)
-        else
-            res = fad_vjp(source, independents, with_primal=with_primal)
-        end if
+        res = fad_vjp(source, independents, name=proc_name, &
+                      module_name=module_name, with_primal=with_primal)
     end function run_reverse
 
     function run_hessian(source, independents, proc_name, module_name) result(res)
@@ -105,16 +82,8 @@ contains
         character(len=*), intent(in) :: proc_name, module_name
         type(fad_result_t) :: res
 
-        if (len_trim(proc_name) > 0 .and. len_trim(module_name) > 0) then
-            res = fad_hvp(source, independents, name=trim(proc_name), &
-                          module_name=trim(module_name))
-        else if (len_trim(proc_name) > 0) then
-            res = fad_hvp(source, independents, name=trim(proc_name))
-        else if (len_trim(module_name) > 0) then
-            res = fad_hvp(source, independents, module_name=trim(module_name))
-        else
-            res = fad_hvp(source, independents)
-        end if
+        res = fad_hvp(source, independents, name=proc_name, &
+                      module_name=module_name)
     end function run_hessian
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
