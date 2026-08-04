@@ -416,6 +416,24 @@ caller's `intent(in)` argument.
 
 ## Open defects
 
+- **Forward mode does not vectorise where Enzyme's does.** Measured rather than
+  guessed: disassembling both entry points for fortfem's polygon edge area,
+  Enzyme's loop is four `mulpd` and two `addpd` - packed double throughout -
+  and fortad's is four `mulsd`, three `subsd` and two `mulpd`, mostly scalar.
+  Same operation count, 35% slower.
+
+  Enzyme computes the value and the tangent as a two-lane vector. fortad emits
+  them as two independent scalar chains - `y_d = y_d + ...` and
+  `y = y + ...` - which the compiler does not fuse. That is the shape of the
+  emitted code rather than anything about the derivative, and it is the best
+  explanation on hand for why fortad's reverse numbers lead Enzyme's while its
+  forward numbers sit at parity: reverse has one accumulation to make, forward
+  has two that want to be one vector.
+
+  What to try: emit the value and its tangent into adjacent storage so the pair
+  is a candidate for one packed operation. That is a change to the forward
+  emitter, not to a pass.
+
 - **`hoist_subexpressions` is still quadratic on a large loop body.** Two of
   the three passes that were have been fixed: `share_in_body` counts uses once
   per round instead of per candidate, and `escapes` answers from a precomputed
