@@ -6,18 +6,20 @@ program fortad_cli
     !!
     !! Reads Fortran, writes Fortran. Nothing else is needed to use the result:
     !! compile the generated file with the rest of your project.
-    use fortad, only: fad_jvp, fad_roundtrip, fad_result_t, fad_version
+    use fortad, only: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, &
+                      fad_result_t, fad_version
     implicit none
 
     character(len=:), allocatable :: input_path, output_path, indep_list
-    character(len=:), allocatable :: directions, proc_name, source
+    character(len=:), allocatable :: directions, proc_name, source, mode
+    character(len=:), allocatable :: module_name
     character(len=32), allocatable :: independents(:)
     type(fad_result_t) :: res
     logical :: roundtrip_only
     integer :: unit, stat
 
     call parse_arguments(input_path, output_path, indep_list, directions, &
-                         proc_name, roundtrip_only, stat)
+                         proc_name, mode, module_name, roundtrip_only, stat)
     if (stat /= 0) then
         call usage()
         error stop 2
@@ -31,6 +33,12 @@ program fortad_cli
 
     if (roundtrip_only) then
         res = fad_roundtrip(source)
+    else if (mode == "reverse") then
+        independents = split_commas(indep_list)
+        res = run_reverse(source, independents, proc_name, module_name)
+    else if (mode == "hessian") then
+        independents = split_commas(indep_list)
+        res = run_hessian(source, independents, proc_name, module_name)
     else
         independents = split_commas(indep_list)
         ! An absent --name means "let fortad choose", so the optional argument
@@ -62,12 +70,50 @@ program fortad_cli
 
 contains
 
+    function run_reverse(source, independents, proc_name, module_name) result(res)
+        !! Reverse mode, with the optional arguments genuinely absent when the
+        !! user did not supply them.
+        character(len=*), intent(in) :: source, independents(:)
+        character(len=*), intent(in) :: proc_name, module_name
+        type(fad_result_t) :: res
+
+        if (len_trim(proc_name) > 0 .and. len_trim(module_name) > 0) then
+            res = fad_vjp(source, independents, name=trim(proc_name), &
+                          module_name=trim(module_name))
+        else if (len_trim(proc_name) > 0) then
+            res = fad_vjp(source, independents, name=trim(proc_name))
+        else if (len_trim(module_name) > 0) then
+            res = fad_vjp(source, independents, module_name=trim(module_name))
+        else
+            res = fad_vjp(source, independents)
+        end if
+    end function run_reverse
+
+    function run_hessian(source, independents, proc_name, module_name) result(res)
+        !! Forward-over-reverse Hessian-vector product.
+        character(len=*), intent(in) :: source, independents(:)
+        character(len=*), intent(in) :: proc_name, module_name
+        type(fad_result_t) :: res
+
+        if (len_trim(proc_name) > 0 .and. len_trim(module_name) > 0) then
+            res = fad_hvp(source, independents, name=trim(proc_name), &
+                          module_name=trim(module_name))
+        else if (len_trim(proc_name) > 0) then
+            res = fad_hvp(source, independents, name=trim(proc_name))
+        else if (len_trim(module_name) > 0) then
+            res = fad_hvp(source, independents, module_name=trim(module_name))
+        else
+            res = fad_hvp(source, independents)
+        end if
+    end function run_hessian
+
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
-                               proc_name, roundtrip_only, stat)
+                               proc_name, mode, module_name, roundtrip_only, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
         character(len=:), allocatable, intent(out) :: indep_list, directions
-        character(len=:), allocatable, intent(out) :: proc_name
+        character(len=:), allocatable, intent(out) :: proc_name, mode
+        character(len=:), allocatable, intent(out) :: module_name
         logical, intent(out) :: roundtrip_only
         integer, intent(out) :: stat
         character(len=1024) :: arg
@@ -78,6 +124,8 @@ contains
         indep_list = ""
         directions = ""
         proc_name = ""
+        mode = "forward"
+        module_name = ""
         roundtrip_only = .false.
         stat = 0
 
@@ -118,6 +166,29 @@ contains
                 end if
                 call get_command_argument(i, arg, length)
                 output_path = trim(arg(1:length))
+            case ("-m", "--mode")
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, arg, length)
+                mode = trim(arg(1:length))
+                select case (mode)
+                case ("forward", "reverse", "hessian")
+                    continue
+                case default
+                    stat = 1
+                    return
+                end select
+            case ("--module")
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, arg, length)
+                module_name = trim(arg(1:length))
             case ("--roundtrip")
                 roundtrip_only = .true.
             case ("--version")
@@ -150,6 +221,10 @@ contains
         write (*, '(a)') "usage: fortad --indep <names> [options] <file.f90>"
         write (*, '(a)') ""
         write (*, '(a)') "  -i, --indep a,b       independent variables (required)"
+        write (*, '(a)') "  -m, --mode MODE       forward (default), reverse, "// &
+            "or hessian"
+        write (*, '(a)') "      --module NAME     wrap the result in a module, "// &
+            "for a checked interface"
         write (*, '(a)') "  -d, --directions nd   vector mode: name of the "// &
             "direction-count argument"
         write (*, '(a)') "      --name f_jvp      name of the generated procedure"
