@@ -7,13 +7,13 @@ adapted code, and none may without the review described in
 [LEGAL.md](LEGAL.md) §3.
 
 The machine-readable inspection baseline is
-[`docs/upstreams.toml`](docs/upstreams.toml). It pins the revision, licence,
+fortad-bench's [`docs/upstreams.toml`](https://github.com/lazy-fortran/fortad-bench/blob/main/docs/upstreams.toml). It pins the revision, licence,
 inspected paths, and intended use of every project fortad studies.
 
 Inspection baseline established: 2026-08-04. Revisions are recorded by
-`scripts/fetch_upstreams.py --licenses` into the gitignored
-`docs/generated/license-inventory.md`; that file, not this one, is the record of
-what was actually on disk.
+fortad-bench's `scripts/fetch_upstreams.py --licenses` into its gitignored
+`docs/generated/license-inventory.md`; that file, not this one, is the record
+of what was actually on disk.
 
 ## Core transformation
 
@@ -72,6 +72,10 @@ what was actually on disk.
 | Gauss-Newton and HVP consumers | Nocedal & Wright, 2006 | none | selects which derivative object each optimiser gets | no |
 
 ## Benchmarks and corpora
+
+Workloads, engine adapters, and measurement records live in
+[fortad-bench](https://github.com/lazy-fortran/fortad-bench), which carries its own PROVENANCE.md. This table records
+only which corpora fortad's claims depend on.
 
 | Corpus | Licence | Use | Ported |
 |---|---|---|---|

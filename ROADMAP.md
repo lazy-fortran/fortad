@@ -1,9 +1,17 @@
 # fortad roadmap
 
-The target is a source-transformation AD engine for Fortran that **beats Enzyme
-on measured complete-workload wall clock** on fortnum's kernels, emits standard
-Fortran that every conforming compiler builds, and does so with a build-time
-cost far below Enzyme's.
+The target is a source-transformation AD engine for Fortran that is **faster
+than every existing AD engine, at both build time and runtime, in every mode**.
+
+Every engine means Enzyme, Tapenade, Clad, CoDiPack, ADOL-C, Adept, Sacado,
+JAX, PyTorch, Zygote, Mooncake and Enzyme.jl — not just Enzyme. Every mode means
+forward, reverse, vector forms of both, forward-over-reverse, sparse-compressed,
+and higher-order Taylor. Both metrics means the emitted derivative runs faster
+*and* the toolchain producing it builds faster.
+
+There is no workload class conceded in advance. Where a competing engine wins a
+benchmark, that is an open defect with an owner, not a documented limitation.
+Reasoning in [docs/dossier.md](docs/dossier.md).
 
 Ordering principle: **measured win per unit of work**, not taxonomic
 completeness. Forward mode on one kernel that beats Enzyme is worth more than a
@@ -35,7 +43,8 @@ Work through this file one checkbox at a time.
    the compiler refuses to vectorise is a failed item even if it is correct.
 9. Any algorithm gets its [PROVENANCE.md](PROVENANCE.md) row **before** its
    implementation.
-10. `git status --porcelain upstream literature docs/generated` must be empty.
+10. No third-party code or literature enters this repository. The study
+    corpus and the expensive benchmark corpus live in fortad-bench.
 11. Update committed benchmark evidence when an item affects performance.
 12. Check off the item, commit implementation + tests + evidence + this file
     together, push, and only then select the next item.
@@ -55,8 +64,8 @@ The purpose of this phase is to find out early whether the thesis is wrong. Ever
 item is cheap and every item can kill or redirect the project.
 
 - [ ] **P0.1 Fetch and licence-verify the study corpus.** Run
-      `scripts/fetch_upstreams.py` and `--licenses`. Resolve every `VERIFY` in
-      `docs/upstreams.toml` against the actual checkout. Any entry with no
+      fortad-bench's `scripts/fetch_upstreams.py` and `--licenses`. Resolve every `VERIFY` in
+      fortad-bench's `docs/upstreams.toml` against the actual checkout. Any entry with no
       discoverable licence drops to metadata-only. Record the revisions.
 - [ ] **P0.2 Resolve the bibliography.** `scripts/fetch_literature.py --resolve`,
       then `--fetch`. Fix titles that Crossref cannot match. Record which papers
@@ -80,9 +89,10 @@ item is cheap and every item can kill or redirect the project.
       Validate against finite differences and the adjoint identity. Benchmark
       against the existing C++/Enzyme numbers on the same machine. **This is the
       number fortad must beat, and the hand-written version is the ceiling.**
-- [ ] **P0.7 Establish the benchmark harness.** Add fortad as a `solutions/`
-      entry in `differentiable-fortran` so the protocol, contract and plots are
-      inherited rather than reinvented. Baseline row for Enzyme and analytical.
+- [ ] **P0.7 Establish the benchmark harness in fortad-bench.** Stand up
+      `harness/` and the `analytical`, finite-difference and Enzyme adapters,
+      inheriting `differentiable-fortran`'s protocol and contract rather than
+      reinventing them. Record build time alongside runtime from the first row.
 - [ ] **P0.8 Decision gate.** Write `docs/design/go-no-go.md`: given P0.4 and
       P0.6, is the thesis intact? If fortfront cannot parse real kernels, or if
       the hand-written Fortran JVP does not at least match C++/Enzyme, stop and

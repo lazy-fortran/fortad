@@ -18,26 +18,30 @@ project unless a file header says otherwise.
 
 **fortad never redistributes anyone else's code or anyone else's literature.**
 
-Concretely:
+In this repository the rule is absolute and needs no machinery: **nothing
+third-party belongs here at all.** fortad contains its own source, its own
+tests, and its own documents.
 
-- `upstream/` and `literature/` are gitignored in full. They are populated
-  locally by `scripts/fetch_upstreams.py` and `scripts/fetch_literature.py` and
-  they never enter a commit, a release tarball, or a container image.
-- No upstream source file is copied, vendored, or transcribed into fortad.
-- No publisher PDF, no figure, and no formatted excerpt from a paper is
-  committed. Bibliographic metadata — author, title, venue, year, DOI — is
-  factual and is committed, in [`docs/bibliography.bib`](docs/bibliography.bib).
-- `docs/generated/` is gitignored because generated inventories quote upstream
-  licence text.
+The study corpus and the literature live in
+**[fortad-bench](https://github.com/lazy-fortran/fortad-bench)**, which holds:
 
-If a commit would add a file under `upstream/`, `literature/`, or
-`docs/generated/`, it is wrong. The `.gitignore` enforces this, and a CI check
-should too.
+- [`docs/upstreams.toml`](https://github.com/lazy-fortran/fortad-bench/blob/main/docs/upstreams.toml)
+  — the pinned inspection baseline: every project fortad studies, with its
+  licence, the paths worth reading, and what we want to learn from it.
+- [`docs/bibliography.bib`](https://github.com/lazy-fortran/fortad-bench/blob/main/docs/bibliography.bib)
+  — the literature as metadata. Author, title, venue, year and DOI are facts and
+  are committed; full text is not.
+- `scripts/fetch_upstreams.py` and `scripts/fetch_literature.py` — which
+  populate gitignored `upstream/` and `literature/` trees there, and verify
+  declared licences against the actual checkouts.
+
+Those trees never enter a commit, a release tarball, or a container image in
+either repository.
 
 ## 3. Study is not adaptation
 
 Reading a publicly available source file to understand an algorithm is
-permitted for every project listed in `docs/upstreams.toml`, subject to §5.
+permitted for every project listed in fortad-bench's [`docs/upstreams.toml`](https://github.com/lazy-fortran/fortad-bench/blob/main/docs/upstreams.toml), subject to §5.
 Copying it is not. The two are separated by an explicit boundary:
 
 | Activity | Allowed | Record required |
@@ -49,7 +53,7 @@ Copying it is not. The two are separated by an explicit boundary:
 | Copy code from a GPL or LGPL project | **never** | — |
 | Copy code from a project with no discoverable licence | **never** | — |
 
-Every entry in `docs/upstreams.toml` currently declares `adapt = "none"`. That
+Every entry in that manifest currently declares `adapt = "none"`. That
 is the default and it changes only through a reviewed pull request that adds the
 `PROVENANCE.md` row first.
 
@@ -75,16 +79,17 @@ For these projects:
 
 ADIFOR and TAF/TAC++ are distributed under restrictive or commercial terms.
 fortad uses their **published papers and manuals only**. Their source is not
-fetched, not read, and not present in `docs/upstreams.toml` as a clone target.
+fetched, not read, and not present in fortad-bench's manifest as a clone target.
 
 A checkout with no discoverable licence file is treated as all-rights-reserved.
-`scripts/fetch_upstreams.py --licenses` flags these explicitly. Such a project
+fortad-bench's `scripts/fetch_upstreams.py --licenses` flags these explicitly. Such a project
 may be cited as metadata and may be run as a black-box baseline; its source is
 not a study target.
 
 ## 6. Benchmark inputs and corpora
 
-Benchmark *problems* carry their own terms. ADBench is MIT and its workloads may
+Benchmark workloads live in [fortad-bench](https://github.com/lazy-fortran/fortad-bench) and are governed by its own
+LEGAL.md. In summary: benchmark *problems* carry their own terms. ADBench is MIT and its workloads may
 be ported with attribution. MITgcm is MIT. SU2 is LGPL: its cases are run, never
 ported. Where fortad needs a workload it cannot license, it writes its own from
 the mathematical statement and records that in `PROVENANCE.md`.
@@ -103,9 +108,10 @@ imposes no licence on it. Emitted files carry a header saying so.
 
 Before opening a pull request:
 
-1. `git status --porcelain upstream literature docs/generated` is empty.
+1. No third-party file has appeared in this repository. It never should:
+   the study corpus lives in fortad-bench.
 2. No new file contains a copyright notice belonging to someone else without a
    corresponding `PROVENANCE.md` row.
 3. Any new algorithm has a `PROVENANCE.md` row citing its publication.
-4. Any new upstream added to `docs/upstreams.toml` has a verified licence and
-   `adapt = "none"` unless §3 has been satisfied.
+4. Any new upstream added to fortad-bench's manifest has a verified licence
+   and `adapt = "none"` unless §3 has been satisfied.
