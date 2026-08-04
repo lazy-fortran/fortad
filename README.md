@@ -9,9 +9,10 @@ $ fortad --mode reverse --indep a,b --module k_adjoint kernel.f90
 ```
 
 Working today: forward mode (scalar, array, loop, branch, and vector/batched),
-reverse mode (straight-line and reduction loops), and Hessian-vector products.
-27 oracle cases pass locally, each checked against finite differences, the
-adjoint identity, or Hessian symmetry - never against another AD tool.
+reverse mode (straight-line, branches, and reduction loops), Hessian-vector
+products, and a registry for your own procedures' derivatives. 34 oracle cases
+pass locally, each checked against finite differences, the adjoint identity, or
+Hessian symmetry - never against another AD tool.
 
 ## Why
 
@@ -75,7 +76,7 @@ These are numbers from one machine on one kernel, not a promise about another.
 | Straight-line expressions | yes | yes |
 | Arrays and subscripts | yes | reads yes, element assignment no |
 | `do` loops | yes | reduction loops only |
-| `if`/`else` | yes | no |
+| `if`/`else` | yes | yes |
 | Nonlinear loop-carried recurrence | yes | no |
 | Vector / batched directions | yes | no |
 | Hessian-vector products | forward-over-reverse | - |
@@ -159,9 +160,9 @@ and parallelises directly.
 
 See **[ROADMAP.md](ROADMAP.md)**, which also records what building the engine
 established. Next up: per-iteration storage for nonlinear recurrences in
-reverse mode, branches in reverse mode, and a custom-rule registry so a
-BLAS call or an implicit solve is differentiated as the operation it is rather
-than as the loop that implements it.
+reverse mode, then BLAS/LAPACK and implicit-solve rules built on the registry,
+so a linear solve is differentiated as the operation it is rather than as the
+iterations that implement it.
 
 ## Licence
 
