@@ -267,8 +267,12 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       improvement.
 - [ ] **P4.3 edge_pushing** as a competing sparse-Hessian candidate. Keep only if
       it wins measurably.
-- [ ] **P4.4 Higher-order Taylor kernels**, generated at fixed order, Rapsodia
-      style. Never by nesting AD.
+- [~] **P4.4 Higher-order Taylor kernels.** The arithmetic is built and
+      pinned against closed-form series: exp, log, sqrt, sin/cos, the Cauchy
+      product, division, and integer powers, all `O(d^2)` per operation rather
+      than the `O(2^d)` of nesting a first-order tool. The **transformation**
+      that rewrites a kernel into calls to these routines is not built; what
+      exists is the piece whose correctness can be pinned exactly.
 
 ## Phase 5 — Products
 
@@ -318,7 +322,8 @@ Structured rules that emit statements are built: `fad_add_call_rule` takes
 Fortran statement templates, and the linear-solve case is tested against a real
 solver. That closes the dossier's largest predicted lever.
 
-Remaining, in rough order of expected value: higher-order Taylor kernels, star
+Remaining, in rough order of expected value: the transformation that rewrites a
+kernel into Taylor-arithmetic calls (the arithmetic itself is done), star
 colouring for sparse Hessians, static sparsity-pattern propagation, and
 reverse-mode rules applied automatically where fortnum already declares an
 `analytical` candidate.

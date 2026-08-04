@@ -225,6 +225,38 @@ This is a **schedule, not a driver**. fortad does not own your time loop, your
 state, or your storage, and a framework that demanded to would be useless in
 exactly the codes that need this most.
 
+## Derivatives above second order
+
+Nesting a first-order tool `d` times costs `O(2ᵈ)`. Propagating a truncated
+Taylor series costs `O(d²)` per operation and gives every derivative up to `d`
+in one sweep.
+
+A Taylor object carries the coefficients of `f(x + t v)` in `t`, so
+`a(k) = (1/k!) dᵏ/dtᵏ f(x + t v)`. The rules are recurrences read off the
+defining identity of each function — `z = exp(a)` satisfies `z' = z a'`, hence
+`k z_k = Σ i a_i z_{k-i}` — so they are exact relations, not differentiated
+series approximations.
+
+```fortran
+use fortad, only: tay_var, tay_exp, tay_sin_cos, tay_mul, tay_derivative
+
+real(dp) :: x(0:8), e(0:8), s(0:8), c(0:8), z(0:8)
+
+call tay_var(0.6_dp, 1.0_dp, x)     ! value, direction
+call tay_exp(x, e)
+call tay_sin_cos(x, s, c)
+call tay_mul(e, s, z)               ! z = exp(x)*sin(x)
+print *, tay_derivative(z, 5)       ! the fifth derivative
+```
+
+**What is and is not built.** The arithmetic is here and pinned against
+closed-form series — `exp(t)` giving `1/k!`, `1/(1-t)` giving all ones,
+`log(1+t)`, `sqrt(1+t)`, the sine and cosine series, and integer powers at a
+negative base where an `exp(p log a)` implementation would fail. The
+transformation that rewrites a Fortran kernel into calls to these routines is
+**not** built. Write the calls yourself, or use forward-over-reverse for second
+order, which is generated.
+
 ## Which mode, mechanically
 
 ```
