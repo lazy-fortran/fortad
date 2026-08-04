@@ -26,6 +26,15 @@ module fortad_forward
         character(len=:), allocatable :: suffix
         !! Name of the generated procedure. Defaults to `<primal>_jvp`.
         character(len=:), allocatable :: name
+        !! Vector mode: carry `n_dir` tangent directions through one primal
+        !! sweep instead of one. Every tangent gains a leading direction
+        !! dimension, which is the contiguous axis in Fortran, so the emitted
+        !! array expressions vectorise across directions. One primal traversal
+        !! then serves k directions at cost `primal + k*active`, rather than
+        !! `k*(primal + active)`.
+        logical :: vector = .false.
+        !! Name of the direction-count dummy argument in vector mode.
+        character(len=:), allocatable :: ndir_name
     end type forward_spec_t
 
     type :: forward_status_t
@@ -41,13 +50,15 @@ contains
         type(forward_spec_t), intent(in) :: spec
         type(fad_proc_t), intent(out) :: tangent
         type(forward_status_t), intent(out) :: status
-        character(len=:), allocatable :: suffix
+        character(len=:), allocatable :: suffix, ndir
         logical, allocatable :: active(:)
         integer :: i, ignored
 
         status%ok = .true.
         suffix = "_d"
         if (allocated(spec%suffix)) suffix = spec%suffix
+        ndir = "n_dir"
+        if (allocated(spec%ndir_name)) ndir = spec%ndir_name
 
         if (.not. allocated(spec%independents)) then
             status%ok = .false.
@@ -64,8 +75,8 @@ contains
         tangent%real_suffix = "d0"
         if (allocated(primal%real_suffix)) tangent%real_suffix = primal%real_suffix
 
-        call build_signature(primal, tangent, active, suffix)
-        call build_body(primal, tangent, active, suffix, status)
+        call build_signature(primal, tangent, active, suffix, spec%vector, ndir)
+        call build_body(primal, tangent, active, suffix, spec%vector, status)
         if (.not. status%ok) return
 
         ! Every local the primal declared is still a local of the tangent
@@ -77,7 +88,7 @@ contains
             ignored = tangent%add_decl(strip_intent(primal%decls(i)))
             if (active(i)) then
                 call add_tangent_decl(tangent, primal%decls(i), suffix, &
-                                      FAD_INTENT_NONE)
+                                      FAD_INTENT_NONE, spec%vector, ndir)
             end if
         end do
     end subroutine differentiate_forward
@@ -154,19 +165,31 @@ contains
         end associate
     end function expr_reads_active
 
-    subroutine build_signature(primal, tangent, active, suffix)
+    subroutine build_signature(primal, tangent, active, suffix, vector, ndir)
         !! Dummy arguments: every primal argument, each active one followed by
-        !! its tangent, then the result and its tangent for a function.
+        !! its tangent, then the result and its tangent for a function. In
+        !! vector mode the direction count leads the list.
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: tangent
         logical, intent(in) :: active(:)
         character(len=*), intent(in) :: suffix
+        logical, intent(in) :: vector
+        character(len=*), intent(in) :: ndir
         character(len=64), allocatable :: names(:)
         integer :: i, n, di, ignored
         type(fad_decl_t) :: d
 
-        allocate (names(2*(size(primal%params) + 2)))
+        allocate (names(2*(size(primal%params) + 3)))
         n = 0
+        if (vector) then
+            n = n + 1
+            names(n) = ndir
+            d%name = ndir
+            d%type_name = "integer"
+            d%intent = FAD_INTENT_IN
+            ignored = tangent%add_decl(d)
+            d = fad_decl_t()
+        end if
         do i = 1, size(primal%params)
             n = n + 1
             names(n) = trim(primal%params(i))
@@ -177,7 +200,8 @@ contains
             n = n + 1
             names(n) = trim(primal%params(i))//suffix
             call add_tangent_decl(tangent, primal%decls(di), suffix, &
-                                  tangent_intent(primal%decls(di)%intent))
+                                  tangent_intent(primal%decls(di)%intent), &
+                                  vector, ndir)
         end do
 
         if (primal%is_function) then
@@ -190,7 +214,8 @@ contains
                 ignored = tangent%add_decl(d)
                 n = n + 1
                 names(n) = primal%result_name//suffix
-                call add_tangent_decl(tangent, d, suffix, FAD_INTENT_OUT)
+                call add_tangent_decl(tangent, d, suffix, FAD_INTENT_OUT, &
+                                      vector, ndir)
             end if
         end if
 
@@ -212,19 +237,43 @@ contains
         end select
     end function tangent_intent
 
-    subroutine add_tangent_decl(tangent, primal_decl, suffix, intent_code)
+    subroutine add_tangent_decl(tangent, primal_decl, suffix, intent_code, &
+                                vector, ndir)
         !! Declare the tangent counterpart of a primal entity.
+        !!
+        !! In vector mode the direction axis goes **first**, because Fortran
+        !! stores the leftmost index contiguously and the direction axis is the
+        !! one every tangent expression sweeps. `a(n)` becomes `a_d(n_dir, n)`,
+        !! and `a_d(:, i)` is then a contiguous vector the compiler can load
+        !! and fuse as a unit.
         type(fad_proc_t), intent(inout) :: tangent
         type(fad_decl_t), intent(in) :: primal_decl
         character(len=*), intent(in) :: suffix
         integer, intent(in) :: intent_code
+        logical, intent(in), optional :: vector
+        character(len=*), intent(in), optional :: ndir
         type(fad_decl_t) :: d
         integer :: ignored
+        logical :: vec
+
+        vec = .false.
+        if (present(vector)) vec = vector
 
         d = primal_decl
         d%name = primal_decl%name//suffix
         d%intent = intent_code
         d%is_result = .false.
+        if (vec) then
+            if (d%is_array .and. allocated(d%dims)) then
+                d%dims = ndir//", "//d%dims
+            else
+                d%dims = ndir
+            end if
+            d%is_array = .true.
+            ! Contiguity of the primal says nothing about the tangent block,
+            ! and a wrong `contiguous` is a promise the caller may not keep.
+            d%is_contiguous = .false.
+        end if
         ignored = tangent%add_decl(d)
     end subroutine add_tangent_decl
 
@@ -237,12 +286,13 @@ contains
         out%is_result = .false.
     end function strip_intent
 
-    subroutine build_body(primal, tangent, active, suffix, status)
+    subroutine build_body(primal, tangent, active, suffix, vector, status)
         !! Walk the primal statements, emitting tangent then primal.
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: tangent
         logical, intent(in) :: active(:)
         character(len=*), intent(in) :: suffix
+        logical, intent(in) :: vector
         type(forward_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
         integer :: i, dexpr, ignored, di
@@ -255,12 +305,13 @@ contains
                     if (di > 0) then
                         if (active(di)) then
                             dexpr = tangent_of(primal, tangent, ps%value, active, &
-                                               suffix, status)
+                                               suffix, vector, status)
                             if (.not. status%ok) return
                             s%kind = FAD_ASSIGN
-                            s%target = tangent_name(ps%target, suffix)
+                            s%target = tangent_name(ps%target, suffix, vector)
                             if (dexpr == 0) then
-                                s%value = tangent%add_expr(expr_const("0.0_dp"))
+                                s%value = tangent%add_expr( &
+                                    expr_const("0.0"//tangent%real_suffix))
                             else
                                 s%value = dexpr
                             end if
@@ -301,13 +352,19 @@ contains
     end subroutine build_body
 
     recursive integer function tangent_of(primal, tangent, idx, active, suffix, &
-                                          status) result(out)
+                                          vector, status) result(out)
         !! Tangent of a primal expression, as an expression in `tangent`.
+        !!
+        !! In vector mode a tangent leaf carries the whole direction block:
+        !! `x_d` becomes `x_d(:)` and `a(i)` becomes `a_d(:, i)`. Every rule
+        !! above then combines array tangents with scalar primal factors, which
+        !! is exactly the shape Fortran vectorises.
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: tangent
         integer, intent(in) :: idx
         logical, intent(in) :: active(:)
         character(len=*), intent(in) :: suffix
+        logical, intent(in) :: vector
         type(forward_status_t), intent(inout) :: status
         integer, allocatable :: args(:), dargs(:)
         integer :: i, di, a, b, da, db
@@ -324,18 +381,36 @@ contains
             case (FAD_VAR)
                 di = primal%decl_index(pe%text)
                 if (di > 0) then
-                    if (active(di)) out = tangent%add_expr( &
-                        expr_var(pe%text//suffix))
+                    if (active(di)) then
+                        if (vector) then
+                            allocate (args(1))
+                            args(1) = tangent%add_expr(expr_const(":"))
+                            e%kind = FAD_INDEX
+                            e%text = pe%text//suffix
+                            e%args = args
+                            out = tangent%add_expr(e)
+                        else
+                            out = tangent%add_expr(expr_var(pe%text//suffix))
+                        end if
+                    end if
                 end if
 
             case (FAD_INDEX)
                 di = primal%decl_index(pe%text)
                 if (di > 0) then
                     if (active(di)) then
-                        allocate (args(size(pe%args)))
-                        do i = 1, size(pe%args)
-                            args(i) = copy_expr(primal, tangent, pe%args(i))
-                        end do
+                        if (vector) then
+                            allocate (args(size(pe%args) + 1))
+                            args(1) = tangent%add_expr(expr_const(":"))
+                            do i = 1, size(pe%args)
+                                args(i + 1) = copy_expr(primal, tangent, pe%args(i))
+                            end do
+                        else
+                            allocate (args(size(pe%args)))
+                            do i = 1, size(pe%args)
+                                args(i) = copy_expr(primal, tangent, pe%args(i))
+                            end do
+                        end if
                         e%kind = FAD_INDEX
                         e%text = pe%text//suffix
                         e%args = args
@@ -346,15 +421,15 @@ contains
             case (FAD_BINOP)
                 a = copy_expr(primal, tangent, pe%args(1))
                 b = copy_expr(primal, tangent, pe%args(2))
-                da = tangent_of(primal, tangent, pe%args(1), active, suffix, status)
+                da = tangent_of(primal, tangent, pe%args(1), active, suffix, vector, status)
                 if (.not. status%ok) return
-                db = tangent_of(primal, tangent, pe%args(2), active, suffix, status)
+                db = tangent_of(primal, tangent, pe%args(2), active, suffix, vector, status)
                 if (.not. status%ok) return
                 out = jvp_binop(tangent, pe%text, a, b, da, db)
 
             case (FAD_UNOP)
                 a = copy_expr(primal, tangent, pe%args(1))
-                da = tangent_of(primal, tangent, pe%args(1), active, suffix, status)
+                da = tangent_of(primal, tangent, pe%args(1), active, suffix, vector, status)
                 if (.not. status%ok) return
                 out = jvp_unop(tangent, pe%text, a, da)
 
@@ -363,7 +438,7 @@ contains
                 do i = 1, size(pe%args)
                     args(i) = copy_expr(primal, tangent, pe%args(i))
                     dargs(i) = tangent_of(primal, tangent, pe%args(i), active, &
-                                          suffix, status)
+                                          suffix, vector, status)
                     if (.not. status%ok) return
                 end do
                 if (all(dargs == 0)) then
@@ -431,17 +506,27 @@ contains
         end if
     end function target_base
 
-    function tangent_name(target, suffix) result(name)
-        !! Tangent counterpart of an assignment target, keeping any subscript.
+    function tangent_name(target, suffix, vector) result(name)
+        !! Tangent counterpart of an assignment target, keeping any subscript
+        !! and, in vector mode, prefixing the direction axis.
         character(len=*), intent(in) :: target, suffix
+        logical, intent(in) :: vector
         character(len=:), allocatable :: name
         integer :: pos
 
         pos = index(target, "(")
         if (pos > 0) then
-            name = target(1:pos - 1)//suffix//target(pos:)
+            if (vector) then
+                name = target(1:pos - 1)//suffix//"(:, "//target(pos + 1:)
+            else
+                name = target(1:pos - 1)//suffix//target(pos:)
+            end if
         else
-            name = target//suffix
+            if (vector) then
+                name = target//suffix//"(:)"
+            else
+                name = target//suffix
+            end if
         end if
     end function tangent_name
 
