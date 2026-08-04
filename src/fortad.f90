@@ -23,6 +23,7 @@ module fortad
     use fortad_emit, only: emit_proc, emit_module
     use fortad_dce, only: eliminate_dead_stores, fold_zero_accumulations, &
                           eliminate_dead_arrays, eliminate_dead_loops
+    use fortad_opt, only: optimise
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
                                fad_clear_rules
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
@@ -202,6 +203,10 @@ contains
         call fold_zero_accumulations(adjoint)
         call eliminate_dead_stores(adjoint)
         call eliminate_dead_loops(adjoint)
+        call eliminate_dead_stores(adjoint)
+        ! Substitution and factoring leave their inputs behind, so dead-store
+        ! elimination runs again after them.
+        call optimise(adjoint)
         call eliminate_dead_stores(adjoint)
         call eliminate_dead_arrays(adjoint)
 
