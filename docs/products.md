@@ -154,6 +154,33 @@ registrant knows and the tool does not.
 callee and never assumes one is inactive: a silently dropped derivative is
 worse than a build failure, because it looks plausible.
 
+## Sparse Jacobians
+
+When most entries are structurally zero, a dense Jacobian costs `n` sweeps to
+learn almost nothing. Two columns whose nonzeros never share a row can be
+evaluated in the *same* sweep and separated afterwards: in any given row at most
+one of them contributes. Grouping columns that way is graph colouring.
+
+```fortran
+use fortad, only: sparsity_t, colour_columns, seed_matrix, recover_entries
+
+call colour_columns(pattern, colour, n_colours)
+call seed_matrix(pattern, colour, n_colours, seeds)
+call f_jvp_v(n_colours, n, x, seeds, y, compressed)   ! one vector sweep
+call recover_entries(pattern, colour, compressed, values)
+```
+
+`values` comes back in the order of `pattern%rows`, so it pairs directly with
+the pattern you supplied. A tridiagonal Jacobian of any size takes three
+colours; a diagonal one takes one. A dense one takes `n`, correctly — there is
+nothing to compress and the method says so rather than losing entries.
+
+Recovery is **exact**, not approximate: compression is a rearrangement.
+
+**You supply the pattern.** fortad cannot infer it from the source in general,
+and inventing one would be worse than asking. Be conservative: an over-full
+pattern costs sweeps, an under-full one silently loses derivative entries.
+
 ## Which mode, mechanically
 
 ```
