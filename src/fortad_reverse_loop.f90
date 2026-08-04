@@ -108,10 +108,21 @@ contains
             return
         end if
 
-        allocate (shape%accumulators(32), shape%temporaries(32))
+        ! Sized from the body, not from a constant. A body cannot have more
+        ! distinct assignment targets than it has statements, so this cannot
+        ! overflow - and overflowing was silent: a degree-eleven Bezier edge
+        ! area has fifty-four temporaries, the thirty-fifth onwards were
+        ! dropped from the shape, and the derivative came out referring to
+        ! variables it never declared.
+        block
+            integer :: room
+            room = max(16, shape%last - shape%first)
+            allocate (shape%accumulators(room), shape%temporaries(room))
+            allocate (shape%elements(room), shape%carried(room), &
+                      shape%linear(room))
+        end block
         shape%n_headers = 1
         shape%header_stmt(1) = first
-        allocate (shape%elements(32), shape%carried(32), shape%linear(32))
         shape%linear = ""
         shape%n_linear = 0
         shape%accumulators = ""
@@ -666,7 +677,10 @@ contains
         character(len=*), intent(in) :: name
 
         if (is_known(names, n, name)) return
-        if (n >= size(names)) return
+        ! The caller sizes these from the body, which bounds the number of
+        ! distinct names, so there is always room. Refusing silently is what
+        ! this used to do and it produced a derivative that did not compile.
+        if (n >= size(names)) error stop "fortad: loop shape array overflow"
         n = n + 1
         names(n) = name
     end subroutine add_name
