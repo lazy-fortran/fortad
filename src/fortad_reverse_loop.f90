@@ -134,7 +134,7 @@ contains
                     call add_name(shape%elements, shape%n_elements, target)
                     cycle
                 end if
-                is_accum = is_linear_accumulation(p, i, target)
+                is_accum = is_linear_accumulation(p, shape%first, i, target)
                 if (is_accum) then
                     call add_name(shape%accumulators, shape%n_accumulators, target)
                 else
@@ -199,10 +199,12 @@ contains
             return
         end if
 
-        if (shape%n_accumulators == 0 .and. shape%n_elements == 0) then
+        if (shape%n_accumulators == 0 .and. shape%n_elements == 0 .and. &
+            shape%n_carried == 0) then
             shape%status = LOOP_UNSUPPORTED
-            shape%message = "reverse mode: this loop neither accumulates nor "// &
-                "writes array elements, so its results do not leave the body"
+            shape%message = "reverse mode: this loop accumulates nothing, "// &
+                "writes no array element, and carries nothing across "// &
+                "iterations, so its results do not leave the body"
             return
         end if
 
@@ -243,21 +245,80 @@ contains
         yes = .false.
     end function is_loop_carried
 
-    logical function is_linear_accumulation(p, stmt, target) result(yes)
-        !! True when the statement adds a sum of terms to `target`, in any
-        !! association: `v = v + e`, `v = v - e`, `v = v + e1 + e2 - e3`.
+    logical function is_linear_accumulation(p, first, stmt, target) result(yes)
+        !! True when the statement adds to `target` a sum of terms that do not
+        !! depend on `target` **at all**, directly or through any temporary
+        !! computed earlier in the same iteration.
         !!
-        !! That is the shape whose adjoint leaves the accumulator's own adjoint
-        !! untouched, which is what removes the loop-carried dependence from the
-        !! reverse sweep. Requiring the literal two-operand form would reject
-        !! most real reduction bodies, which chain several terms.
+        !! The transitive part is not a refinement, it is the whole test. In
+        !!
+        !!     k1 = f(state)
+        !!     state = state + dt*k1
+        !!
+        !! the added term never mentions `state`, so a syntactic check calls
+        !! this a linear accumulation and concludes the accumulator's adjoint is
+        !! loop-invariant. It is not: the term depends on `state` through `k1`,
+        !! the recurrence is nonlinear, and the reverse sweep must run backwards
+        !! over a tape. Getting this wrong produced a gradient that was exactly
+        !! reversed on the RK4 kernel from the Enzyme benchmark suite - not a
+        !! crash, not a refusal, just the wrong answer.
         type(fad_proc_t), intent(in) :: p
-        integer, intent(in) :: stmt
+        integer, intent(in) :: first, stmt
         character(len=*), intent(in) :: target
-        integer :: terms(64), signs(64), n
+        integer :: terms(64), signs(64), n, i
+        logical :: split_ok
 
-        call split_accumulation(p, p%stmts(stmt)%value, target, terms, signs, n, yes)
+        call split_accumulation(p, p%stmts(stmt)%value, target, terms, signs, n, &
+                                split_ok)
+        yes = .false.
+        if (.not. split_ok) return
+        do i = 1, n
+            if (depends_on(p, first, stmt, terms(i), target)) return
+        end do
+        yes = .true.
     end function is_linear_accumulation
+
+    logical function depends_on(p, first, stmt, expr, target) result(yes)
+        !! Whether `expr` reads `target`, or any name assigned earlier in this
+        !! loop body that transitively depends on `target`.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, stmt, expr
+        character(len=*), intent(in) :: target
+        character(len=64) :: tainted(64)
+        integer :: n_tainted, k, i
+        logical :: changed
+        character(len=:), allocatable :: lhs
+
+        n_tainted = 1
+        tainted(1) = target
+
+        ! Grow the tainted set to a fixed point over the statements that run
+        ! before this one in the same iteration.
+        changed = .true.
+        do while (changed)
+            changed = .false.
+            do k = first + 1, stmt - 1
+                if (p%stmts(k)%kind /= FAD_ASSIGN) cycle
+                lhs = target_base(p%stmts(k)%target)
+                if (is_known(tainted, n_tainted, lhs)) cycle
+                do i = 1, n_tainted
+                    if (reads_name(p, p%stmts(k)%value, trim(tainted(i)))) then
+                        call add_name(tainted, n_tainted, lhs)
+                        changed = .true.
+                        exit
+                    end if
+                end do
+            end do
+        end do
+
+        yes = .false.
+        do i = 1, n_tainted
+            if (reads_name(p, expr, trim(tainted(i)))) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function depends_on
 
     subroutine split_accumulation(p, root, target, terms, signs, n, ok)
         !! Walk the `+`/`-` spine of an accumulation.

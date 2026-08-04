@@ -168,6 +168,28 @@ program test_reverse_loop_oracle
                "    end do"//nl// &
                "end subroutine k"//nl, failures)
 
+    ! The RK4 shape: the accumulated term never mentions the accumulator, but
+    ! depends on it through a temporary computed earlier in the same iteration.
+    ! A syntactic check calls this a linear accumulation and produces a reversed
+    ! gradient; the dependence has to be followed transitively.
+    call check("revloop_transitive_dependence", &
+               "subroutine k(n, a, b, s)"//nl// &
+               "    integer, intent(in) :: n"//nl// &
+               "    real(8), intent(in) :: a(n)"//nl// &
+               "    real(8), intent(in) :: b(n)"//nl// &
+               "    real(8), intent(out) :: s"//nl// &
+               "    integer :: i"//nl// &
+               "    real(8) :: u"//nl// &
+               "    real(8) :: k1"//nl// &
+               "    u = 0.5d0"//nl// &
+               "    s = 0.0d0"//nl// &
+               "    do i = 1, n"//nl// &
+               "        k1 = tanh(u) + 0.1d0*a(i)"//nl// &
+               "        u = u + 0.05d0*k1*b(i)"//nl// &
+               "        s = s + u"//nl// &
+               "    end do"//nl// &
+               "end subroutine k"//nl, failures)
+
     call check("revloop_recurrence_product", &
                        "subroutine k(n, a, b, s)"//nl// &
                        "    integer, intent(in) :: n"//nl// &
