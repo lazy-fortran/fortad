@@ -60,12 +60,19 @@ same flang, correctness gating every timing. Full method and raw data in
 | Forward, one direction | ~8% faster, and matches a hand-written tangent |
 | Forward, 16 directions | ~10x faster per direction |
 | Reverse (gradient) | 1.7-1.8x faster, within 5-9% of a hand-written adjoint |
+| Build time | 2.7x faster cold and incremental; 4x smaller object |
 | Threads | bit-identical results, 7.4x on 8 cores |
 
 The reverse-mode margin comes from fusing the adjoint into the primal loop, so
 the arrays are streamed once rather than twice. Enzyme differentiates a program
 it must run forward and then reverse; a source-level tool can restructure the
 derivative program itself.
+
+The build-time figure excludes building or installing a matching LLVM and the
+Enzyme plugin. That is a cost fortad does not have at all, but it is paid once,
+so folding it in would flatter fortad. The kernel is also small, so build time
+here measures toolchain overhead rather than compiling a large body of code; on
+a big file the Fortran compiler dominates both paths and the ratio narrows.
 
 These are numbers from one machine on one kernel, not a promise about another.
 
