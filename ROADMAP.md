@@ -599,7 +599,7 @@ Recorded so they are not rediscovered as good ideas:
 - Replacing Enzyme. Enzyme stays in fortnum as a competing `autodiff` candidate
   and as the benchmark baseline. If Enzyme wins a workload, Enzyme is selected.
 
-## fci_polygon_edge_area tangent sits at 1.28x Enzyme
+## fci_polygon_edge_area tangent sits at 1.24x Enzyme
 
 The only measurement above 20% of Enzyme across all three suites. The
 cause is measured, not guessed.
@@ -618,6 +618,13 @@ is already minimal as written.
 
 Closing this needs fortad to emit the tangent with an operand order
 that makes the shared products adjacent in a lane, which is a
-vectorisation concern rather than a differentiation one. Seven measured
-attempts put the ceiling for the current shape near 1.29x, and the
-contiguous slice read brought it from 1.40x to 1.28x.
+vectorisation concern rather than a differentiation one. The contiguous
+slice read brought it from 1.40x to 1.24x.
+
+Grouping the sum into added terms minus subtracted terms was tried and
+reverted. It produced exactly Enzyme's expression shape and cut the
+loop from nine vector arithmetic ops to six, and the measurement did
+not move - so this loop is bound by its loads and shuffles, not by its
+arithmetic. It also unbalanced sums whose signs are lopsided and cost
+the degree-eleven Bezier adjoint eleven points. Both results are worth
+keeping in mind before anyone tries the same thing again.
