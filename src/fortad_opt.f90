@@ -204,6 +204,7 @@ contains
         call regroup_products(p)
         call hoist_invariants(p)
         call hoist_subexpressions(p)
+        call share_subexpressions(p)
         call rotate_carried(p)
         call fold_identities(p)
         ! Substitution and factoring leave their inputs behind. Clearing them
@@ -2174,6 +2175,193 @@ contains
         p%stmts(1:n) = out(1:n)
         p%n_stmts = n
     end subroutine insert_before
+
+    subroutine share_subexpressions(p)
+        !! Name a subexpression a loop body computes more than once.
+        !!
+        !! The expression arena is hash-consed, so two identical subtrees are
+        !! one node. Finding what is recomputed is therefore counting uses of a
+        !! node, not comparing trees.
+        !!
+        !! This is deliberately local to one loop body and runs after every
+        !! other pass. An earlier whole-procedure common-subexpression pass
+        !! produced silently non-symmetric Hessians through the forward-over-
+        !! reverse composition and was withdrawn; confining the rewrite to a
+        !! straight-line run of assignments inside one loop is what makes it
+        !! defensible, and the Hessian symmetry oracle is what checks it.
+        type(fad_proc_t), intent(inout) :: p
+        integer :: i, first, last, n_named
+
+        n_named = 0
+        i = 1
+        do while (i <= p%n_stmts)
+            if (p%stmts(i)%kind /= FAD_DO) then
+                i = i + 1
+                cycle
+            end if
+            call loop_extent(p, i, first, last)
+            if (last == 0 .or. .not. plain_body(p, first, last)) then
+                i = i + 1
+                cycle
+            end if
+            call share_in_body(p, first, last, n_named)
+            call loop_extent(p, first, first, last)
+            i = last + 1
+        end do
+    end subroutine share_subexpressions
+
+    subroutine share_in_body(p, first, last, n_named)
+        !! Hoist one repeated subexpression per round, until none is left.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(inout) :: first, last, n_named
+        integer, parameter :: MIN_OPS = 2
+        integer :: node, j, best, best_gain, gain, uses, decl_i
+        character(len=32) :: label
+        logical :: again
+
+        again = .true.
+        do while (again)
+            again = .false.
+            best = 0
+            best_gain = 0
+            do node = 1, p%n_exprs
+                if (op_count(p, node) < MIN_OPS) cycle
+                uses = 0
+                do j = first + 1, last - 1
+                    if (p%stmts(j)%value <= 0) cycle
+                    uses = uses + occurrences(p, p%stmts(j)%value, node)
+                end do
+                if (uses < 2) cycle
+                ! What is saved is one evaluation of the node per extra use.
+                gain = (uses - 1)*op_count(p, node)
+                if (gain > best_gain) then
+                    best_gain = gain
+                    best = node
+                end if
+            end do
+            if (best == 0) exit
+
+            ! The temporary takes its type from the subexpression, not from
+            ! the statement it sits in. `base + 1` inside `z(base + 1)` is an
+            ! integer in a real-valued statement, and declaring it real makes
+            ! the subscript illegal.
+            decl_i = node_type_decl(p, best)
+            if (decl_i == 0) exit
+
+            n_named = n_named + 1
+            write (label, '(a,i0)') "fad_s", n_named
+            call name_subexpression(p, first, last, best, trim(label), decl_i)
+            call loop_extent(p, first, first, last)
+            again = .true.
+        end do
+    end subroutine share_in_body
+
+    integer function node_type_decl(p, node) result(decl_i)
+        !! A declaration whose type the subexpression's value would have.
+        !!
+        !! An expression mentioning any real is real, so a real declaration
+        !! wins over an integer one wherever both appear. With no declared name
+        !! in it at all there is nothing to copy a type from, and the
+        !! subexpression is left alone.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: node
+        integer :: first_seen
+
+        decl_i = 0
+        first_seen = 0
+        call scan_types(p, node, first_seen, decl_i)
+        if (decl_i == 0) decl_i = first_seen
+    end function node_type_decl
+
+    recursive subroutine scan_types(p, idx, first_seen, real_seen)
+        !! Record the first declared name in a subexpression, and the first
+        !! real one.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer, intent(inout) :: first_seen, real_seen
+        character(len=:), allocatable :: name
+        integer :: i, di, par
+
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            if (allocated(p%exprs(idx)%text)) then
+                name = trim(p%exprs(idx)%text)
+                par = index(name, "(")
+                if (par > 1) name = name(1:par - 1)
+                di = p%decl_index(name)
+                if (di > 0) then
+                    if (first_seen == 0) first_seen = di
+                    if (real_seen == 0 .and. allocated(p%decls(di)%type_name)) then
+                        if (index(p%decls(di)%type_name, "real") > 0) real_seen = di
+                    end if
+                end if
+            end if
+        end select
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            call scan_types(p, p%exprs(idx)%args(i), first_seen, real_seen)
+        end do
+    end subroutine scan_types
+
+    recursive integer function occurrences(p, idx, node) result(n)
+        !! How many times a node appears in an expression tree.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx, node
+        integer :: i
+
+        n = 0
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (idx == node) then
+            n = 1
+            return
+        end if
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            n = n + occurrences(p, p%exprs(idx)%args(i), node)
+        end do
+    end function occurrences
+
+    subroutine name_subexpression(p, first, last, node, label, decl_i)
+        !! Assign a repeated subexpression to a local, before its first use.
+        type(fad_proc_t), intent(inout) :: p
+        integer, intent(inout) :: first, last
+        integer, intent(in) :: node, decl_i
+        character(len=*), intent(in) :: label
+        type(fad_stmt_t) :: s
+        type(fad_decl_t) :: d
+        integer :: j, ignored, repl, at
+
+        d = p%decls(decl_i)
+        d%name = label
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        d%is_array = .false.
+        if (allocated(d%dims)) deallocate (d%dims)
+        ignored = p%add_decl(d)
+
+        at = 0
+        do j = first + 1, last - 1
+            if (p%stmts(j)%value <= 0) cycle
+            if (occurrences(p, p%stmts(j)%value, node) > 0) then
+                at = j
+                exit
+            end if
+        end do
+        if (at == 0) return
+
+        repl = p%add_expr(expr_var(label))
+        do j = at, last - 1
+            if (p%stmts(j)%value <= 0) cycle
+            p%stmts(j)%value = swap_node(p, p%stmts(j)%value, node, repl)
+        end do
+
+        s%kind = FAD_ASSIGN
+        s%target = label
+        s%value = node
+        call insert_before(p, at, s)
+        last = last + 1
+    end subroutine name_subexpression
 
     subroutine rotate_carried(p)
         !! Issue a loop-carried self-update first, behind a snapshot.
