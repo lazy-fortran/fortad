@@ -57,6 +57,9 @@ module fortad_reverse_loop
         !! Array-element targets, `c(i)`, written once per iteration.
         character(len=64), allocatable :: elements(:)
         integer :: n_elements = 0
+        !! Loop-carried variables whose value must be stored per iteration.
+        character(len=64), allocatable :: carried(:)
+        integer :: n_carried = 0
     end type loop_shape_t
 
 contains
@@ -96,13 +99,15 @@ contains
         end if
 
         allocate (shape%accumulators(32), shape%temporaries(32))
-        allocate (shape%elements(32))
+        allocate (shape%elements(32), shape%carried(32))
         shape%accumulators = ""
         shape%temporaries = ""
         shape%elements = ""
+        shape%carried = ""
         shape%n_accumulators = 0
         shape%n_temporaries = 0
         shape%n_elements = 0
+        shape%n_carried = 0
 
         do i = first + 1, shape%last - 1
             select case (p%stmts(i)%kind)
@@ -136,11 +141,12 @@ contains
                         return
                     end if
                     if (reads_name(p, p%stmts(i)%value, target)) then
-                        shape%status = LOOP_UNSUPPORTED
-                        shape%message = "reverse mode: nonlinear loop-carried "// &
-                            "recurrence in '"//target//"' needs per-iteration "// &
-                            "storage, which is the next milestone"
-                        return
+                        ! A nonlinear loop-carried recurrence: the reverse
+                        ! sweep needs this variable's value at each iteration,
+                        ! and unlike a per-iteration temporary it cannot be
+                        ! recomputed from loop-invariant data. It is taped.
+                        call add_name(shape%carried, shape%n_carried, target)
+                        cycle
                     end if
                     if (is_known(shape%temporaries, shape%n_temporaries, target)) then
                         shape%status = LOOP_UNSUPPORTED
@@ -163,6 +169,13 @@ contains
                 return
             end select
         end do
+
+        if (shape%n_carried > 0 .and. p%stmts(first)%step /= 0) then
+            shape%status = LOOP_UNSUPPORTED
+            shape%message = "reverse mode: a taped loop must have unit stride, "// &
+                "so that the iteration index maps directly onto the tape"
+            return
+        end if
 
         if (shape%n_accumulators == 0 .and. shape%n_elements == 0) then
             shape%status = LOOP_UNSUPPORTED

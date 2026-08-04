@@ -66,14 +66,27 @@ module fortad_reverse
         character(len=64), allocatable :: body_lhs(:)
         integer, allocatable :: body_rhs(:)
         logical, allocatable :: body_is_accum(:)
-        !! +1 for `s = s + e`, -1 for `s = s - e`, 0 for a temporary.
+        !! +1 for `s = s + e`, -1 for `s = s - e`, 0 for a temporary,
+        !! ELEMENT_TARGET for `c(i) = e`, CARRIED_TARGET for a taped recurrence.
         integer, allocatable :: body_sign(:)
         integer :: n_body = 0
+        !! Text of the tape index expression, e.g. "i - (1) + 1".
+        character(len=:), allocatable :: tape_index
+        logical :: taped = .false.
+        !! Carried variables and the SSA name each holds at the end of the body.
+        character(len=64), allocatable :: carried_name(:)
+        character(len=64), allocatable :: carried_last(:)
+        !! SSA name the carried variable held on entry to the loop.
+        character(len=64), allocatable :: carried_in(:)
+        integer :: n_carried = 0
     end type loop_record_t
 
     !! Marker in `body_sign` for an array-element target, distinguishing it
     !! from a scalar temporary (0) and an accumulation term (+-1).
     integer, parameter :: ELEMENT_TARGET = 2
+
+    !! Marker for a loop-carried variable whose per-iteration value is taped.
+    integer, parameter :: CARRIED_TARGET = 3
 
     integer, parameter :: ORDER_STMT = 1
     integer, parameter :: ORDER_LOOP = 2
@@ -760,7 +773,8 @@ contains
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
         type(fad_decl_t) :: d
-        character(len=:), allocatable :: fresh, incoming
+        character(len=:), allocatable :: fresh, incoming, current
+        character(len=64), allocatable :: carried_entry(:)
         integer :: i, k, di, ignored
 
         rec%shape = shape
@@ -815,12 +829,68 @@ contains
             ignored = adjoint%add_decl(d)
         end do
 
+        ! A taped loop needs one array per carried variable, sized from the
+        ! loop bounds. The tape is the price of a recurrence that cannot be
+        ! recomputed; everything else in this module exists to avoid paying it.
+        rec%taped = shape%n_carried > 0
+        if (rec%taped) allocate (carried_entry(max(1, shape%n_carried)))
+        if (rec%taped) then
+            block
+                use fortad_emit, only: emit_expr
+                character(len=:), allocatable :: lo_text, hi_text
+                lo_text = emit_expr(adjoint, rec%lo)
+                hi_text = emit_expr(adjoint, rec%hi)
+                rec%tape_index = rec%var//" - ("//lo_text//") + 1"
+                do k = 1, shape%n_carried
+                    di = primal%decl_index(trim(shape%carried(k)))
+                    if (di == 0) cycle
+                    d = primal%decls(di)
+                    d%name = trim(shape%carried(k))//"_tape"
+                    d%intent = FAD_INTENT_NONE
+                    d%is_result = .false.
+                    d%is_array = .true.
+                    d%dims = "("//hi_text//") - ("//lo_text//") + 1"
+                    ignored = adjoint%add_decl(d)
+                    ! Seed the carrier from whatever the variable held before
+                    ! the loop, or the first iteration reads an undefined value.
+                    call ssa_lookup(ssa, trim(shape%carried(k)), incoming)
+                    carried_entry(k) = incoming
+                    if (incoming /= trim(shape%carried(k))) then
+                        s%kind = FAD_ASSIGN
+                        s%target = trim(shape%carried(k))
+                        s%value = adjoint%add_expr(expr_var(incoming))
+                        ignored = adjoint%add_stmt(s)
+                    end if
+                    ! The loop-entry value lives under the plain name; each
+                    ! assignment inside the body gets its own SSA version, so
+                    ! the reverse sweep can tell the pre-update value from the
+                    ! post-update one. Conflating them was the first bug here.
+                    call ssa_set(ssa, trim(shape%carried(k)), &
+                                 trim(shape%carried(k)))
+                    d = primal%decls(di)
+                    d%intent = FAD_INTENT_NONE
+                    d%is_result = .false.
+                    ignored = adjoint%add_decl(d)
+                end do
+            end block
+        end if
+
         s%kind = FAD_DO
         s%target = rec%var
         s%lo = rec%lo
         s%hi = rec%hi
         s%step = rec%step
         rec%do_stmt = adjoint%add_stmt(s)
+
+        ! Store each carried value as it enters the iteration.
+        if (rec%taped) then
+            do k = 1, shape%n_carried
+                s%kind = FAD_ASSIGN
+                s%target = trim(shape%carried(k))//"_tape("//rec%tape_index//")"
+                s%value = adjoint%add_expr(expr_var(trim(shape%carried(k))))
+                ignored = adjoint%add_stmt(s)
+            end do
+        end if
 
         ! One accumulation can expand into several additive terms, so the body
         ! record list is sized generously rather than one entry per statement.
@@ -834,7 +904,20 @@ contains
             if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
             s%kind = FAD_ASSIGN
             s%value = copy_renamed(primal, adjoint, primal%stmts(i)%value, ssa)
-            if (index(primal%stmts(i)%target, "(") > 0) then
+            if (is_known_name(shape%carried, shape%n_carried, &
+                              primal%stmts(i)%target)) then
+                call ssa_fresh(ssa, primal%stmts(i)%target, fresh)
+                block
+                    integer :: cdi
+                    type(fad_decl_t) :: cd
+                    cdi = primal%decl_index(primal%stmts(i)%target)
+                    cd = primal%decls(cdi)
+                    cd%name = fresh
+                    cd%intent = FAD_INTENT_NONE
+                    cd%is_result = .false.
+                    ignored = adjoint%add_decl(cd)
+                end block
+            else if (index(primal%stmts(i)%target, "(") > 0) then
                 fresh = primal%stmts(i)%target
                 ! An element target is not renamed, so its array still needs a
                 ! declaration in the generated procedure when it was a local.
@@ -868,6 +951,17 @@ contains
                 rec%body_sign(rec%n_body) = ELEMENT_TARGET
                 cycle
             end if
+            if (is_known_name(shape%carried, shape%n_carried, &
+                              primal%stmts(i)%target)) then
+                ! Renamed like any other in-body assignment; what makes it
+                ! special is only that its final version feeds the next
+                ! iteration, which is handled at the end of the loop.
+                rec%body_lhs(rec%n_body) = fresh
+                rec%body_is_accum(rec%n_body) = .false.
+                rec%body_rhs(rec%n_body) = s%value
+                rec%body_sign(rec%n_body) = 0
+                cycle
+            end if
             if (rec%body_is_accum(rec%n_body)) then
                 ! `s = s + e1 - e2 + ...`: the reverse sweep needs each term
                 ! and its sign, so the accumulation expands into one body
@@ -896,6 +990,24 @@ contains
                 rec%body_rhs(rec%n_body) = s%value
                 rec%body_sign(rec%n_body) = 0
             end if
+        end do
+
+        ! Carry each recurrence's final in-body value into the next iteration.
+        allocate (rec%carried_name(max(1, shape%n_carried)))
+        allocate (rec%carried_last(max(1, shape%n_carried)))
+        allocate (rec%carried_in(max(1, shape%n_carried)))
+        rec%n_carried = shape%n_carried
+        do k = 1, shape%n_carried
+            call ssa_lookup(ssa, trim(shape%carried(k)), current)
+            rec%carried_name(k) = trim(shape%carried(k))
+            rec%carried_last(k) = current
+            rec%carried_in(k) = carried_entry(k)
+            s%kind = FAD_ASSIGN
+            s%target = trim(shape%carried(k))
+            s%value = adjoint%add_expr(expr_var(current))
+            ignored = adjoint%add_stmt(s)
+            ! After the loop the plain name holds the final value.
+            call ssa_set(ssa, trim(shape%carried(k)), trim(shape%carried(k)))
         end do
 
         s%kind = FAD_END_DO
@@ -955,6 +1067,14 @@ contains
                                      trim(loops(k)%accum_names(i)), suffix)
                 s%kind = FAD_ASSIGN
                 s%target = trim(loops(k)%accum_names(i))//suffix
+                s%value = zero
+                ignored = adjoint%add_stmt(s)
+            end do
+            do i = 1, loops(k)%n_carried
+                call declare_adjoint(primal, adjoint, ssa, &
+                                     trim(loops(k)%carried_name(i)), suffix)
+                s%kind = FAD_ASSIGN
+                s%target = trim(loops(k)%carried_name(i))//suffix
                 s%value = zero
                 ignored = adjoint%add_stmt(s)
             end do
@@ -1027,7 +1147,8 @@ contains
         ! same values in the same order and stays parallelisable. Memory
         ! bandwidth, not arithmetic, is what bounds these kernels, so halving
         ! the traffic is the single largest win available here.
-        if (n_loops == 1 .and. can_fuse(primal, loops(1), dependent)) then
+        if (n_loops == 1 .and. .not. loops(1)%taped .and. &
+            can_fuse(primal, loops(1), dependent)) then
             call fuse_loop(adjoint, loops(1), suffix)
         end if
     end subroutine build_reverse_sweep
@@ -1332,14 +1453,35 @@ contains
         integer, intent(inout) :: n_tmp
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
-        integer :: i, ignored, seed_expr
+        integer :: i, ignored, seed_expr, carried_seed
 
+        ! A taped loop must run backwards: the carried variable's adjoint
+        ! flows from later iterations to earlier ones, which is exactly the
+        ! dependence the untaped cases do not have.
         s%kind = FAD_DO
         s%target = rec%var
-        s%lo = rec%lo
-        s%hi = rec%hi
-        s%step = rec%step
+        if (rec%taped) then
+            s%lo = rec%hi
+            s%hi = rec%lo
+            s%step = adjoint%add_expr(expr_const("-1"))
+        else
+            s%lo = rec%lo
+            s%hi = rec%hi
+            s%step = rec%step
+        end if
         ignored = adjoint%add_stmt(s)
+
+        ! Restore each carried value as it was on entry to this iteration, so
+        ! the body can be recomputed exactly as the forward sweep ran it.
+        if (rec%taped) then
+            do i = 1, rec%n_carried
+                s%kind = FAD_ASSIGN
+                s%target = trim(rec%carried_name(i))
+                s%value = adjoint%add_expr(expr_var( &
+                    trim(rec%carried_name(i))//"_tape("//rec%tape_index//")"))
+                ignored = adjoint%add_stmt(s)
+            end do
+        end if
 
         ! Recompute the per-iteration temporaries rather than storing them.
         ! An array-element write is not recomputed: its value is still in the
@@ -1347,11 +1489,28 @@ contains
         do i = 1, rec%n_body
             if (rec%body_is_accum(i)) cycle
             if (rec%body_sign(i) == ELEMENT_TARGET) cycle
+            if (rec%body_sign(i) == CARRIED_TARGET) cycle
             s%kind = FAD_ASSIGN
             s%target = trim(rec%body_lhs(i))
             s%value = rec%body_rhs(i)
             ignored = adjoint%add_stmt(s)
         end do
+
+        ! The adjoint arriving from the next iteration belongs to this
+        ! iteration's final version, so hand it over and clear the carrier.
+        if (rec%taped) then
+            do i = 1, rec%n_carried
+                s%kind = FAD_ASSIGN
+                s%target = trim(rec%carried_last(i))//suffix
+                s%value = adjoint%add_expr( &
+                    expr_var(trim(rec%carried_name(i))//suffix))
+                ignored = adjoint%add_stmt(s)
+                s%kind = FAD_ASSIGN
+                s%target = trim(rec%carried_name(i))//suffix
+                s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
+                ignored = adjoint%add_stmt(s)
+            end do
+        end if
 
         ! Then unwind the body in reverse order, whatever each statement is.
         ! Kind-by-kind passes were wrong: an element write's adjoint is fed by
@@ -1396,6 +1555,23 @@ contains
         s%kind = FAD_END_DO
         s%value = 0
         ignored = adjoint%add_stmt(s)
+
+        ! What the carrier holds after the reverse loop is the adjoint of the
+        ! value the loop was entered with, so pass it to that value's own name.
+        do i = 1, rec%n_carried
+            if (trim(rec%carried_in(i)) == trim(rec%carried_name(i))) cycle
+            s%kind = FAD_ASSIGN
+            s%target = trim(rec%carried_in(i))//suffix
+            block
+                integer :: lhs_e, rhs_e
+                lhs_e = adjoint%add_expr( &
+                    expr_var(trim(rec%carried_in(i))//suffix))
+                rhs_e = adjoint%add_expr( &
+                    expr_var(trim(rec%carried_name(i))//suffix))
+                s%value = fad_add(adjoint, lhs_e, rhs_e)
+            end block
+            ignored = adjoint%add_stmt(s)
+        end do
     end subroutine emit_loop_reverse
 
     logical function adjoint_is_live(primal, ssa, ssa_name, active) result(yes)
@@ -1604,7 +1780,7 @@ contains
         end do
     end function carries_adjoint
 
-    subroutine materialise(primal, adjoint, expr, ssa, n_tmp, out)
+    subroutine materialise(primal, adjoint, expr, ssa, n_tmp, out, force)
         !! Bind a compound seed to a scalar local.
         !!
         !! This is statement-level preaccumulation: the partial chain for one
@@ -1616,18 +1792,28 @@ contains
         type(ssa_map_t), intent(in) :: ssa
         integer, intent(inout) :: n_tmp
         integer, intent(out) :: out
+        !! Bind even a bare variable reference. Needed when the caller is about
+        !! to overwrite that variable and still needs its old value.
+        logical, intent(in), optional :: force
         type(fad_stmt_t) :: s
         type(fad_decl_t) :: d
         character(len=32) :: buf
         character(len=:), allocatable :: name
         integer :: ignored
+        logical :: force_bind
+
+        force_bind = .false.
+        if (present(force)) force_bind = force
 
         if (expr <= 0) then
             out = 0
             return
         end if
-        if (adjoint%exprs(expr)%kind == FAD_VAR .or. &
-            adjoint%exprs(expr)%kind == FAD_CONST) then
+        if (adjoint%exprs(expr)%kind == FAD_CONST) then
+            out = expr
+            return
+        end if
+        if (adjoint%exprs(expr)%kind == FAD_VAR .and. .not. force_bind) then
             out = expr
             return
         end if
