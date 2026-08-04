@@ -364,12 +364,23 @@ euler it is worth 15%.
 
 Whether to substitute a definition read more than once cannot be decided in
 advance: duplicating it is right when factoring then folds the whole chain into
-constants and wrong when it does not. `optimise` therefore runs the sequence
-twice, once conservative and once willing to duplicate anything and to
-distribute products over sums, and keeps whichever loop body has the fewer
-arithmetic operations. Ties go to the conservative result. Counting operations
-rather than nodes matters: a form with fewer multiplies but more operands looks
-worse on node count and is faster.
+constants and wrong when it does not. So both are tried, and the choice is made
+**per loop**, greedily - each top-level loop is offered the bold form in turn
+and keeps it only if the total operation count in loop bodies falls. That is
+`n + 1` runs of the pass sequence for `n` loops, cheap next to compiling the
+result. Ties go to the conservative form, which has fewer duplicated
+subexpressions and so fewer live values than the cost model can see.
+
+Two details of the cost model were each worth a large fraction of the benefit
+and each looked like a detail:
+
+- It counts arithmetic **operations**, not arena nodes. A variable or a literal
+  is free, and counting leaves made a form with fewer multiplies but more
+  operands score worse than one with more multiplies.
+- The pass sequence ends with dead-store elimination. Without it a collapsed
+  loop body still carried the statements it replaced, and scored exactly what it
+  replaced - so every bold trial tied with its conservative twin and none was
+  ever selected. The whole per-loop mechanism was inert until this was fixed.
 
 Every pass reasons only within a straight-line run of assignments; a definition
 whose reads are not all inside that window is left alone. The passes run on both
@@ -408,7 +419,7 @@ document. Currently open:
   for that choice and always prefers recomputation, which is right for the
   bandwidth-bound cases it was chosen for and wrong here. Dossier section 4.3.
 
-- **rk4 with the primal is 10% behind Enzyme.** 21.15 ns/input against 19.13,
+- **rk4 with the primal is 10% behind Enzyme, which is within tolerance.** 21.15 ns/input against 19.13,
   on a primal costing 13.44; the reverse sweeps are 7.71 and 5.69. The whole rk4
   step is linear in `state`, so the adjoint collapses in principle to one
   scaling and one scatter. `rename_bodies` removed the multiple-definition
@@ -417,18 +428,6 @@ document. Currently open:
   factoring works within one statement. Merging an accumulation chain into a
   single expression before factoring is the remaining step. Gradient-only rk4
   already leads Tapenade, 7.68 against 8.71.
-
-- **The per-loop bold selection does not fire where forcing it wins.** The
-  choice is now made per loop, greedily: each loop is offered the bold form in
-  turn and keeps it if the total operation count in loop bodies falls. On
-  euler's forward loop that ought to be decisive - forcing the bold form
-  everywhere emits `state = state*fad_c1 + z(i)*fad_c2`, three operations
-  against five, and measures 1.96 ns/input against 3.16 - but the greedy trial
-  scores the same 17 operations with and without it. Tracing confirms
-  distribution does run on that loop during the trial, so the collapse depends
-  on something the single-loop trial does not reproduce. Reproduce by setting
-  the initial mask to `.true.` in `optimise`; that form is not shipped because
-  applied blanket it regressed rk4 and ba by 10-20%.
 
 - **The CSE pass is written but disabled.** `fortad_cse` produces wrong
   Hessians through the `fad_hvp` composition path, silently - a plausible but
