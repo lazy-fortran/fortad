@@ -249,8 +249,10 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 - [ ] **P3.4 Fixed-point adjoints.** Christianson two-phase.
 - [ ] **P3.5 FFT, quadrature, interpolation, special-function rules.** Sourced
       from fortnum's analytical kernels and DLMF identities.
-- [ ] **P3.6 Revolve checkpointing** for time-stepping adjoints. Griewank &
-      Walther 2000.
+- [x] **P3.6 Revolve checkpointing** for time-stepping adjoints. Griewank &
+      Walther 2000. Schedules are executed against a simulated integration in
+      the tests, not inspected, and the forward-step count is checked against
+      the binomial bound.
 - [~] **P3.7 Sparsity.** Distance-2 column colouring and compressed Jacobians
       are done and tested. Static pattern propagation and star colouring for
       Hessians are not; the pattern is supplied by the caller.
@@ -313,10 +315,10 @@ Structured rules that emit statements are built: `fad_add_call_rule` takes
 Fortran statement templates, and the linear-solve case is tested against a real
 solver. That closes the dossier's largest predicted lever.
 
-Remaining, in rough order of expected value: Revolve checkpointing, higher-order
-Taylor kernels, star colouring for sparse Hessians, static sparsity-pattern
-propagation, and reverse-mode rules applied automatically where fortnum already
-declares an `analytical` candidate.
+Remaining, in rough order of expected value: higher-order Taylor kernels, star
+colouring for sparse Hessians, static sparsity-pattern propagation, and
+reverse-mode rules applied automatically where fortnum already declares an
+`analytical` candidate.
 Branches inside loops and recurrences inside nests are still refused by name.
 
 ## Explicitly out of scope
