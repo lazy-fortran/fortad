@@ -66,6 +66,71 @@ program fortad_cli
 
 contains
 
+    subroutine register_call_rule(spec, stat)
+        !! Register one `NAME:n_args:tangents|adjoints` call rule.
+        use, intrinsic :: iso_fortran_env, only: error_unit
+        use fortad, only: fad_add_call_rule
+        character(len=*), intent(in) :: spec
+        integer, intent(out) :: stat
+        integer, parameter :: MAX_LINES = 16
+        character(len=256) :: tangent(MAX_LINES), adjoint(MAX_LINES)
+        integer :: c1, c2, bar, n_args, n_t, n_a, ios
+
+        stat = 0
+        c1 = index(spec, ":")
+        if (c1 > 0) then
+            c2 = index(spec(c1 + 1:), ":")
+        else
+            c2 = 0
+        end if
+        bar = index(spec, "|")
+        if (c1 <= 1 .or. c2 == 0 .or. bar == 0) then
+            write (error_unit, '(a)') "fortad: a call rule reads "// &
+                "NAME:n_args:tangent;...|adjoint;..., got: "//trim(spec)
+            stat = 1
+            return
+        end if
+        c2 = c1 + c2
+        read (spec(c1 + 1:c2 - 1), *, iostat=ios) n_args
+        if (ios /= 0) then
+            write (error_unit, '(a)') "fortad: a call rule needs an argument "// &
+                "count, got: "//trim(spec(c1 + 1:c2 - 1))
+            stat = 1
+            return
+        end if
+
+        call split_lines(spec(c2 + 1:bar - 1), tangent, n_t, MAX_LINES)
+        call split_lines(spec(bar + 1:), adjoint, n_a, MAX_LINES)
+        call fad_add_call_rule(trim(spec(:c1 - 1)), n_args, tangent(:n_t), &
+                               adjoint(:n_a), stat)
+        if (stat /= 0) write (error_unit, '(a)') &
+            "fortad: could not register the call rule for "//trim(spec(:c1 - 1))
+    end subroutine register_call_rule
+
+    subroutine split_lines(text, lines, n_lines, cap)
+        !! Split on ";" into statement templates.
+        character(len=*), intent(in) :: text
+        character(len=*), intent(out) :: lines(:)
+        integer, intent(out) :: n_lines
+        integer, intent(in) :: cap
+        integer :: from, at
+
+        n_lines = 0
+        from = 1
+        do
+            if (from > len(text)) exit
+            if (n_lines >= cap) exit
+            at = index(text(from:), ";")
+            n_lines = n_lines + 1
+            if (at == 0) then
+                lines(n_lines) = adjustl(text(from:))
+                exit
+            end if
+            lines(n_lines) = adjustl(text(from:from + at - 2))
+            from = from + at
+        end do
+    end subroutine split_lines
+
     subroutine register_rule(spec, stat)
         !! Register one `NAME:partial;partial;...` rule.
         !!
@@ -236,6 +301,25 @@ contains
                 if (allocated(dep_name)) deallocate (dep_name)
                 allocate (character(len=length) :: dep_name)
                 call get_command_argument(i, dep_name)
+            case ("--call-rule")
+                ! The derivative of a subroutine call, as statements rather
+                ! than partials, because a subroutine has no single result.
+                ! Written NAME:n_args:tangent;tangent|adjoint;adjoint over
+                ! $k for the k-th actual, $kd for its tangent and $kb for its
+                ! adjoint. Enzyme spells the same thing as a custom rule.
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, length=length)
+                block
+                    character(len=:), allocatable :: spec
+                    allocate (character(len=length) :: spec)
+                    call get_command_argument(i, spec)
+                    call register_call_rule(spec, stat)
+                    if (stat /= 0) return
+                end block
             case ("--proc")
                 ! Which procedure of a module to differentiate. The rest of
                 ! the file stays available, so a call to a sibling is inlined

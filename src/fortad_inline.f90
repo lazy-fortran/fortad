@@ -469,14 +469,14 @@ contains
             select case (callee%stmts(i)%kind)
             case (FAD_ASSIGN)
                 s%kind = FAD_ASSIGN
-                s%target = renamed_of(binds, n_binds, callee%stmts(i)%target)
+                s%target = renamed_target(binds, n_binds, callee%stmts(i)%target)
                 s%value = import(target, callee, callee%stmts(i)%value, binds, &
                                  n_binds)
                 s%line = callee%stmts(i)%line
             case (FAD_DO, FAD_END_DO)
                 s = callee%stmts(i)
                 if (callee%stmts(i)%kind == FAD_DO) then
-                    s%target = renamed_of(binds, n_binds, callee%stmts(i)%target)
+                    s%target = renamed_target(binds, n_binds, callee%stmts(i)%target)
                     s%lo = import(target, callee, callee%stmts(i)%lo, binds, n_binds)
                     s%hi = import(target, callee, callee%stmts(i)%hi, binds, n_binds)
                     if (callee%stmts(i)%step > 0) &
@@ -493,6 +493,77 @@ contains
             where_at = where_at + 1
         end do
     end subroutine splice_body
+
+    function renamed_target(binds, n_binds, text) result(out)
+        !! Rename an assignment target, subscript and all.
+        !!
+        !! A target is text, not an expression tree, so `output(i)` needs both
+        !! its array and every name in its subscript rewritten. Renaming only
+        !! whole targets left `output(i)` untouched while the right-hand side
+        !! moved on to the new names, which is wrong code rather than a
+        !! refusal.
+        type(binding_t), intent(in) :: binds(:)
+        integer, intent(in) :: n_binds
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: out, base, subs
+        integer :: paren
+
+        paren = index(text, "(")
+        if (paren == 0) then
+            out = renamed_of(binds, n_binds, text)
+            return
+        end if
+        base = trim(text(:paren - 1))
+        subs = text(paren + 1:len_trim(text) - 1)
+        out = renamed_of(binds, n_binds, base)//"("// &
+              rename_in_text(binds, n_binds, subs)//")"
+    end function renamed_target
+
+    function rename_in_text(binds, n_binds, text) result(out)
+        !! Rewrite every identifier in a fragment of Fortran text.
+        type(binding_t), intent(in) :: binds(:)
+        integer, intent(in) :: n_binds
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: out
+        integer :: i, from
+
+        out = ""
+        i = 1
+        do while (i <= len(text))
+            if (starts_name(text, i)) then
+                from = i
+                do while (i <= len(text))
+                    if (.not. name_char(text(i:i))) exit
+                    i = i + 1
+                end do
+                out = out//renamed_of(binds, n_binds, text(from:i - 1))
+            else
+                out = out//text(i:i)
+                i = i + 1
+            end if
+        end do
+    end function rename_in_text
+
+    logical function starts_name(text, at) result(yes)
+        !! Whether a name begins here and is not the tail of an earlier one.
+        character(len=*), intent(in) :: text
+        integer, intent(in) :: at
+
+        yes = .false.
+        if (.not. name_char(text(at:at))) return
+        if (text(at:at) >= "0" .and. text(at:at) <= "9") return
+        if (at > 1) then
+            if (name_char(text(at - 1:at - 1))) return
+        end if
+        yes = .true.
+    end function starts_name
+
+    logical function name_char(c) result(yes)
+        character, intent(in) :: c
+
+        yes = (c >= "a" .and. c <= "z") .or. (c >= "A" .and. c <= "Z") .or. &
+              (c >= "0" .and. c <= "9") .or. c == "_"
+    end function name_char
 
     function renamed_of(binds, n_binds, name) result(out)
         !! What this name is called in the caller.
@@ -537,8 +608,26 @@ contains
             end do
         end if
 
+        ! An array reference carries its name as text, not as a child, so it
+        ! needs the same substitution a bare variable gets. Missing this left
+        ! the callee's own name for the caller's array in the emitted code.
         e%kind = callee%exprs(idx)%kind
         e%text = callee%exprs(idx)%text
+        if (callee%exprs(idx)%kind == FAD_INDEX) then
+            do k = 1, n_binds
+                if (.not. same_name(binds(k)%name, callee%exprs(idx)%text)) cycle
+                if (len_trim(binds(k)%renamed) > 0) then
+                    e%text = trim(binds(k)%renamed)
+                else if (binds(k)%expr > 0) then
+                    ! Bound to a caller expression: only a plain name can serve
+                    ! as an array reference here.
+                    if (target%exprs(binds(k)%expr)%kind == FAD_VAR) then
+                        e%text = trim(target%exprs(binds(k)%expr)%text)
+                    end if
+                end if
+                exit
+            end do
+        end if
         if (allocated(callee%exprs(idx)%args)) then
             allocate (e%args(size(callee%exprs(idx)%args)))
             do i = 1, size(callee%exprs(idx)%args)

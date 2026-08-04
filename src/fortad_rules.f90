@@ -38,7 +38,7 @@ contains
         case ("sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", &
               "tanh", "exp", "log", "log10", "sqrt", "abs", "erf", "erfc", &
               "max", "min", "sign", "atan2", "hypot", "real", "dble", "sum", &
-              "dot_product")
+              "dot_product", "aimag", "cmplx", "conjg")
             yes = .true.
         case default
             ! A user-registered rule counts as knowing the derivative.
@@ -260,6 +260,31 @@ contains
 
         case ("real", "dble")
             out = da
+
+        case ("aimag", "conjg")
+            ! Linear over the reals, so the tangent passes straight through.
+            if (da == 0) return
+            out = fad_fn1(p, lower(name), da)
+
+        case ("cmplx")
+            ! Assembling a complex from parts is linear in each part, so the
+            ! tangent assembles the same way from the parts' tangents. A third
+            ! argument is a kind and carries no derivative.
+            if (size(args) < 2) then
+                out = da
+                return
+            end if
+            db = dargs(2)
+            if (da == 0 .and. db == 0) return
+            u = da
+            v = db
+            if (u == 0) u = p%add_expr(expr_const("0"))
+            if (v == 0) v = p%add_expr(expr_const("0"))
+            if (size(args) >= 3) then
+                out = fad_fn3(p, "cmplx", u, v, args(3))
+            else
+                out = fad_fn2(p, "cmplx", u, v)
+            end if
 
         case ("max", "min")
             if (size(args) < 2) return
