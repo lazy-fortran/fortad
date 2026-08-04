@@ -1671,7 +1671,7 @@ contains
         type(fad_stmt_t) :: s
         integer, allocatable :: dargs(:), node_args(:)
         integer :: i, j, one, partial, contrib, child_seed, ignored, di
-        integer :: node_kind, lhs
+        integer :: node_kind, lhs, two
         character(len=:), allocatable :: base, node_text
 
         if (idx <= 0 .or. idx > adjoint%n_exprs) return
@@ -1703,6 +1703,21 @@ contains
 
         case (FAD_BINOP)
             one = fad_real(adjoint, "1.0")
+            if (trim(node_text) == "*" .and. node_args(1) == node_args(2)) then
+                ! x*x: both operands are the same value, so the two adjoint
+                ! contributions are identical. Push one, doubled, rather than
+                ! the same accumulation twice.
+                if (carries_adjoint(primal, adjoint, node_args(1), ssa, active)) then
+                    two = fad_real(adjoint, "2.0")
+                    partial = fad_mul(adjoint, two, node_args(1))
+                    contrib = fad_mul(adjoint, seed, partial)
+                    call materialise(primal, adjoint, contrib, ssa, n_tmp, &
+                                     child_seed)
+                    call accumulate(primal, adjoint, node_args(1), child_seed, &
+                                    ssa, suffix, active, n_tmp, status)
+                end if
+                return
+            end if
             do j = 1, 2
                 ! Nothing downstream of a constant subtree has an adjoint, so
                 ! computing its partial would only emit dead temporaries.

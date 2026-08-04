@@ -58,9 +58,19 @@ contains
         case ("-")
             out = fad_sub(p, da, db)
         case ("*")
-            t1 = fad_mul(p, da, b)
-            t2 = fad_mul(p, a, db)
-            out = fad_add(p, t1, t2)
+            if (a == b .and. da == db) then
+                ! x*x. Both product-rule terms are identical, so emit one and
+                ! double it: two multiplies and an add become one of each.
+                ! Squares are common enough in derivative code that this is
+                ! worth a special case rather than a general simplifier.
+                t1 = fad_mul(p, a, da)
+                t2 = fad_real(p, "2.0")
+                out = fad_mul(p, t2, t1)
+            else
+                t1 = fad_mul(p, da, b)
+                t2 = fad_mul(p, a, db)
+                out = fad_add(p, t1, t2)
+            end if
         case ("/")
             if (db == 0) then
                 out = fad_div(p, da, b)
