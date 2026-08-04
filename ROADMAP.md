@@ -651,3 +651,25 @@ is the first thing large enough to expose it.
 What this blocks: three of fortnum's vector-Newton routines, which are
 the last of Enzyme's corpus that fortad cannot yet do for a reason that
 is fortad's own rather than a missing rule.
+
+## Slice packing pays twice on a wide operator
+
+fortfem's curved quadrilateral cell area takes sixteen inputs and its
+tangent runs 1.63x Enzyme, the widest gap in that suite. fortad emits
+444 instructions against Enzyme's 305.
+
+The emitted loop reads the whole run as a slice, into a sixteen-element
+temporary, and then copies each element out into a named scalar. Both
+costs are paid: the copy of the run, and the extraction of every
+element. Enzyme reads `z(base + k)` where it needs it.
+
+Packing is right when a run is read once and narrow - fortfem's polygon
+edge area, four inputs, went from 1.40x to 1.24x on it. It is wrong
+when the elements are each bound to a name that is then used
+separately, because the slice copy buys nothing the individual reads
+did not already have.
+
+The fix is not a width threshold, which would be arbitrary. It is to
+propagate the element reads into their uses so the named temporaries
+disappear, leaving the slice as the only load - or, where that is not
+possible, to leave the reads alone.
