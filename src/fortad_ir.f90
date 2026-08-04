@@ -28,6 +28,10 @@ module fortad_ir
     integer, parameter, public :: FAD_IF = 4        !! if (cond) then
     integer, parameter, public :: FAD_ELSE = 5
     integer, parameter, public :: FAD_END_IF = 6
+    !! `call name(args...)`. The arguments live in `call_args`; the name is in
+    !! `target`. fortad never differentiates the body of such a call - it
+    !! applies a registered rule or refuses.
+    integer, parameter, public :: FAD_CALL_STMT = 7
 
     ! Argument intents, mirroring fortfront's constants.
     integer, parameter, public :: FAD_INTENT_NONE = 0
@@ -54,6 +58,8 @@ module fortad_ir
         integer :: lo = 0, hi = 0, step = 0
         !! Source line in the primal, for provenance comments.
         integer :: line = 0
+        !! Actual arguments of a FAD_CALL_STMT.
+        integer, allocatable :: call_args(:)
     end type fad_stmt_t
 
     type, public :: fad_decl_t
@@ -78,6 +84,11 @@ module fortad_ir
         !! primal names a kind parameter. Emitting `1.0_dp` into a procedure
         !! that never defined `dp` is a compile error, so this is not cosmetic.
         character(len=:), allocatable :: real_suffix
+        !! Whether the generated procedure may be declared `pure`. Code fortad
+        !! writes itself always could be; a call to a procedure fortad cannot
+        !! see might not be, and claiming purity it cannot verify would be a
+        !! promise to the compiler that the compiler will act on.
+        logical :: is_pure = .true.
         type(fad_decl_t), allocatable :: decls(:)
         character(len=:), allocatable :: params(:)
         type(fad_expr_t), allocatable :: exprs(:)

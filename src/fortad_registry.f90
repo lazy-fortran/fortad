@@ -26,6 +26,8 @@ module fortad_registry
 
     public :: fad_add_rule, fad_clear_rules, registry_has, registry_n_args, &
               registry_partial
+    public :: fad_add_call_rule, call_rule_has, call_rule_lines, &
+              call_rule_substitute, MAX_RULE_LINES
 
     integer, parameter :: MAX_RULES = 256
     integer, parameter :: MAX_ARGS = 8
@@ -38,8 +40,27 @@ module fortad_registry
         character(len=EXPR_LEN) :: partials(MAX_ARGS) = ""
     end type rule_t
 
+    integer, parameter :: MAX_RULE_LINES = 8
+
+    type :: call_rule_t
+        !! A rule for a subroutine call, given as Fortran statement templates.
+        !!
+        !! This is how a derivative gets to be the derivative of an *operation*
+        !! rather than of the loop that implements it. Differentiating a linear
+        !! solve through its iterations is asymptotically worse than one
+        !! application of the implicit function theorem, and no analysis fortad
+        !! could do would find the better form on its own.
+        character(len=NAME_LEN) :: name = ""
+        integer :: n_args = 0
+        integer :: n_tangent = 0, n_adjoint = 0
+        character(len=EXPR_LEN) :: tangent(MAX_RULE_LINES) = ""
+        character(len=EXPR_LEN) :: adjoint(MAX_RULE_LINES) = ""
+    end type call_rule_t
+
     type(rule_t), save :: rules(MAX_RULES)
     integer, save :: n_rules = 0
+    type(call_rule_t), save :: call_rules(MAX_RULES)
+    integer, save :: n_call_rules = 0
 
 contains
 
@@ -89,9 +110,129 @@ contains
         end do
     end subroutine fad_add_rule
 
+    subroutine fad_add_call_rule(name, n_args, tangent, adjoint, stat)
+        !! Register statement templates for a subroutine call.
+        !!
+        !! Templates are Fortran statements over three placeholder families:
+        !!
+        !!   `$k`   the k-th actual argument, as written at the call site
+        !!   `$kd`  its tangent variable
+        !!   `$kb`  its adjoint variable
+        !!
+        !! For a linear solve `call linsolve(A, b, x)` the tangent rule is
+        !! `A x_d = b_d - A_d x` and the adjoint is a transposed solve followed
+        !! by a rank-one update - neither of which fortad could derive.
+        !!
+        !! fortad substitutes text and emits it. It does not parse, check, or
+        !! simplify these templates: correctness here is the registrant's.
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: n_args
+        character(len=*), intent(in) :: tangent(:)
+        character(len=*), intent(in) :: adjoint(:)
+        integer, intent(out), optional :: stat
+        integer :: i, slot
+
+        if (present(stat)) stat = 0
+        if (size(tangent) > MAX_RULE_LINES .or. size(adjoint) > MAX_RULE_LINES) then
+            if (present(stat)) stat = 1
+            return
+        end if
+
+        slot = find_call(name)
+        if (slot == 0) then
+            if (n_call_rules >= MAX_RULES) then
+                if (present(stat)) stat = 2
+                return
+            end if
+            n_call_rules = n_call_rules + 1
+            slot = n_call_rules
+        end if
+
+        call_rules(slot)%name = lower(trim(name))
+        call_rules(slot)%n_args = n_args
+        call_rules(slot)%n_tangent = size(tangent)
+        call_rules(slot)%n_adjoint = size(adjoint)
+        call_rules(slot)%tangent = ""
+        call_rules(slot)%adjoint = ""
+        do i = 1, size(tangent)
+            call_rules(slot)%tangent(i) = trim(tangent(i))
+        end do
+        do i = 1, size(adjoint)
+            call_rules(slot)%adjoint(i) = trim(adjoint(i))
+        end do
+    end subroutine fad_add_call_rule
+
+    logical function call_rule_has(name) result(yes)
+        !! True when a statement rule is registered for `name`.
+        character(len=*), intent(in) :: name
+
+        yes = find_call(name) > 0
+    end function call_rule_has
+
+    integer function call_rule_lines(name, which) result(n)
+        !! Number of template lines: `which` is "tangent" or "adjoint".
+        character(len=*), intent(in) :: name, which
+        integer :: slot
+
+        n = 0
+        slot = find_call(name)
+        if (slot == 0) return
+        if (which == "tangent") then
+            n = call_rules(slot)%n_tangent
+        else
+            n = call_rules(slot)%n_adjoint
+        end if
+    end function call_rule_lines
+
+    function call_rule_substitute(name, which, line, args, tangents, adjoints) &
+        result(text)
+        !! One template line with its placeholders filled in.
+        character(len=*), intent(in) :: name, which
+        integer, intent(in) :: line
+        character(len=*), intent(in) :: args(:), tangents(:), adjoints(:)
+        character(len=:), allocatable :: text
+        integer :: slot, i
+
+        text = ""
+        slot = find_call(name)
+        if (slot == 0) return
+        if (which == "tangent") then
+            if (line < 1 .or. line > call_rules(slot)%n_tangent) return
+            text = trim(call_rules(slot)%tangent(line))
+        else
+            if (line < 1 .or. line > call_rules(slot)%n_adjoint) return
+            text = trim(call_rules(slot)%adjoint(line))
+        end if
+
+        ! Highest index first so `$1` never matches the start of `$10`, and the
+        ! two-character forms before the bare one for the same reason.
+        do i = min(size(args), MAX_ARGS), 1, -1
+            text = replace_all(text, "$"//itoa(i)//"d", trim(tangents(i)))
+            text = replace_all(text, "$"//itoa(i)//"b", trim(adjoints(i)))
+            text = replace_all(text, "$"//itoa(i), trim(args(i)))
+        end do
+    end function call_rule_substitute
+
+    integer function find_call(name) result(slot)
+        !! Index of the statement rule for `name`, or 0.
+        character(len=*), intent(in) :: name
+        integer :: i
+        character(len=:), allocatable :: key
+
+        key = lower(trim(name))
+        slot = 0
+        do i = 1, n_call_rules
+            if (trim(call_rules(i)%name) == key) then
+                slot = i
+                return
+            end if
+        end do
+    end function find_call
+
     subroutine fad_clear_rules()
         !! Forget every registered rule.
         n_rules = 0
+        n_call_rules = 0
     end subroutine fad_clear_rules
 
     logical function registry_has(name) result(yes)

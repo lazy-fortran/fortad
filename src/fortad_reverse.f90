@@ -25,7 +25,8 @@ module fortad_reverse
                         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
                         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
                         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
-                        FAD_ELSE, FAD_END_IF, FAD_INTENT_IN, FAD_INTENT_OUT, &
+                        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
+                        FAD_INTENT_OUT, &
                         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
                             fad_add, fad_mul, fad_neg, fad_real
@@ -133,6 +134,7 @@ contains
         character(len=:), allocatable :: suffix, dependent
         logical, allocatable :: active(:)
         type(ssa_map_t) :: ssa
+        integer :: i
         character(len=64), allocatable :: lhs_names(:)
         integer, allocatable :: rhs_exprs(:)
         type(loop_record_t), allocatable :: loops(:)
@@ -164,6 +166,10 @@ contains
         adjoint%is_function = .false.
         adjoint%real_suffix = "d0"
         if (allocated(primal%real_suffix)) adjoint%real_suffix = primal%real_suffix
+        adjoint%is_pure = .true.
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind == FAD_CALL_STMT) adjoint%is_pure = .false.
+        end do
 
         call build_signature(primal, adjoint, spec, dependent, suffix, active)
         call build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &

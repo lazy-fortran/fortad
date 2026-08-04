@@ -10,9 +10,12 @@ module fortad_forward
                         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
                         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
                         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
-                        FAD_ELSE, FAD_END_IF, FAD_INTENT_IN, FAD_INTENT_OUT, &
-                        FAD_INTENT_INOUT, FAD_INTENT_NONE
+                        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
+                        FAD_INTENT_OUT, FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule
+    use fortad_registry, only: call_rule_has, call_rule_lines, &
+                               call_rule_substitute
+    use fortad_emit, only: emit_expr
     implicit none
     private
 
@@ -74,6 +77,7 @@ contains
         tangent%is_function = .false.
         tangent%real_suffix = "d0"
         if (allocated(primal%real_suffix)) tangent%real_suffix = primal%real_suffix
+        tangent%is_pure = .not. has_calls(primal)
 
         call build_signature(primal, tangent, active, suffix, spec%vector, ndir)
         call build_body(primal, tangent, active, suffix, spec%vector, status)
@@ -126,6 +130,23 @@ contains
         do while (changed)
             changed = .false.
             do j = 1, primal%n_stmts
+                if (primal%stmts(j)%kind == FAD_CALL_STMT) then
+                    ! A call is opaque, so which arguments it writes is unknown.
+                    ! If any argument is active, every argument is treated as
+                    ! active: the alternative is guessing, and guessing wrong
+                    ! drops a derivative silently.
+                    if (.not. call_reads_active(primal, primal%stmts(j), active)) cycle
+                    do i = 1, size(primal%stmts(j)%call_args)
+                        di = arg_decl_index(primal, primal%stmts(j)%call_args(i))
+                        if (di <= 0) cycle
+                        if (.not. is_real_decl(primal, di)) cycle
+                        if (.not. active(di)) then
+                            active(di) = .true.
+                            changed = .true.
+                        end if
+                    end do
+                    cycle
+                end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 if (.not. expr_reads_active(primal, primal%stmts(j)%value, active)) cycle
                 base = target_base(primal%stmts(j)%target)
@@ -139,6 +160,62 @@ contains
             end do
         end do
     end subroutine seed_activity
+
+    logical function has_calls(p) result(yes)
+        !! True when the procedure calls something fortad cannot see into.
+        type(fad_proc_t), intent(in) :: p
+        integer :: i
+
+        yes = .false.
+        do i = 1, p%n_stmts
+            if (p%stmts(i)%kind == FAD_CALL_STMT) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function has_calls
+
+    logical function call_reads_active(p, s, active) result(yes)
+        !! True when any actual argument of a call reads an active variable.
+        type(fad_proc_t), intent(in) :: p
+        type(fad_stmt_t), intent(in) :: s
+        logical, intent(in) :: active(:)
+        integer :: i
+
+        yes = .false.
+        if (.not. allocated(s%call_args)) return
+        do i = 1, size(s%call_args)
+            if (expr_reads_active(p, s%call_args(i), active)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function call_reads_active
+
+    integer function arg_decl_index(p, idx) result(di)
+        !! Declaration index of an actual argument that is a plain variable.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+
+        di = 0
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            di = p%decl_index(p%exprs(idx)%text)
+        end select
+    end function arg_decl_index
+
+    logical function is_real_decl(p, di) result(yes)
+        !! Only real arguments carry derivatives; an integer dimension does not.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: di
+
+        yes = .false.
+        if (di <= 0 .or. di > p%n_decls) return
+        if (.not. allocated(p%decls(di)%type_name)) return
+        yes = index(p%decls(di)%type_name, "real") == 1 .or. &
+              index(p%decls(di)%type_name, "REAL") == 1
+    end function is_real_decl
 
     recursive logical function expr_reads_active(p, idx, active) result(yes)
         !! True when the expression reads any active variable.
@@ -342,6 +419,11 @@ contains
                     s%value = copy_expr(primal, tangent, ps%value)
                     ignored = tangent%add_stmt(s)
 
+                case (FAD_CALL_STMT)
+                    call emit_call_tangent(primal, tangent, ps, active, suffix, &
+                                           vector, status)
+                    if (.not. status%ok) return
+
                 case default
                     status%ok = .false.
                     status%message = "forward mode: unsupported statement kind"
@@ -350,6 +432,73 @@ contains
             end associate
         end do
     end subroutine build_body
+
+    subroutine emit_call_tangent(primal, tangent, ps, active, suffix, vector, &
+                                 status)
+        !! Apply a registered statement rule to a subroutine call.
+        !!
+        !! The call is opaque to fortad: it emits the registered tangent
+        !! statements and then the call itself. Without a rule it refuses,
+        !! because assuming a call is inactive would silently drop whatever
+        !! derivative flows through it.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: tangent
+        type(fad_stmt_t), intent(in) :: ps
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: vector
+        type(forward_status_t), intent(inout) :: status
+        character(len=512), allocatable :: args(:), tangents(:), adjoints(:)
+        type(fad_stmt_t) :: s
+        integer :: i, di, ignored, n_args
+
+        if (.not. call_rule_has(ps%target)) then
+            status%ok = .false.
+            status%message = "no derivative rule for the call to '"//ps%target// &
+                "'; register one with fad_add_call_rule, or keep it out of "// &
+                "the active path"
+            return
+        end if
+
+        n_args = size(ps%call_args)
+        allocate (args(n_args), tangents(n_args), adjoints(n_args))
+        do i = 1, n_args
+            args(i) = emit_expr(primal, ps%call_args(i))
+            tangents(i) = trim(args(i))//suffix
+            adjoints(i) = trim(args(i))//"_b"
+            di = primal%decl_index(trim(args(i)))
+            if (di > 0) then
+                if (.not. active(di)) tangents(i) = "<inactive>"
+            end if
+        end do
+
+        ! The primal call goes first, unlike an assignment. A rule generally
+        ! needs the call's *outputs*: the tangent of a linear solve is
+        ! `A x_d = b_d - A_d x`, which reads the solution `x`. A rule needing a
+        ! pre-call value must save it itself, and this is documented rather
+        ! than inferred, because fortad cannot see which arguments a call
+        ! writes.
+        s%kind = FAD_CALL_STMT
+        s%target = ps%target
+        block
+            integer, allocatable :: cargs(:)
+            allocate (cargs(n_args))
+            do i = 1, n_args
+                cargs(i) = copy_expr(primal, tangent, ps%call_args(i))
+            end do
+            s%call_args = cargs
+        end block
+        ignored = tangent%add_stmt(s)
+
+        do i = 1, call_rule_lines(ps%target, "tangent")
+            s%kind = FAD_ASSIGN
+            s%target = "!fad_raw"
+            s%value = tangent%add_expr(expr_const( &
+                call_rule_substitute(ps%target, "tangent", i, args, tangents, &
+                                     adjoints)))
+            ignored = tangent%add_stmt(s)
+        end do
+    end subroutine emit_call_tangent
 
     recursive integer function tangent_of(primal, tangent, idx, active, suffix, &
                                           vector, status) result(out)
