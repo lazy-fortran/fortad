@@ -406,6 +406,13 @@ gap), star colouring for sparse Hessians, static sparsity-pattern propagation,
 and reverse-mode rules applied automatically where fortnum already declares an
 `analytical` candidate.
 Branches inside loops and recurrences inside nests are still refused by name.
+Assignment to an array element outside a loop is no longer among them: an
+element write names a storage location rather than a variable, so there is
+nothing to give an SSA version to, and its adjoint is a scatter into the
+matching element of the array's adjoint. Where that array is the dependent, the
+sweep works on a local copy of the seed - clearing an element's adjoint after
+reading it is what makes a store's adjoint stop there, and the seed is the
+caller's `intent(in)` argument.
 
 ## Open defects
 

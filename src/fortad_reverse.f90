@@ -146,6 +146,7 @@ contains
         type(ssa_map_t) :: ssa
         integer :: i
         character(len=64), allocatable :: lhs_names(:)
+        logical, allocatable :: is_element(:)
         integer, allocatable :: rhs_exprs(:)
         type(loop_record_t), allocatable :: loops(:)
         type(branch_record_t), allocatable :: branches(:)
@@ -189,11 +190,13 @@ contains
 
         call build_signature(primal, adjoint, spec, dependent, suffix, active)
         call build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
+                                 is_element, &
                                  n_rec, loops, n_loops, branches, n_branches, &
                                  order_kind, order_index, n_order, active, &
                                  status)
         if (.not. status%ok) return
         call build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
+                                 is_element, &
                                  n_rec, loops, n_loops, branches, n_branches, &
                                  order_kind, order_index, n_order, &
                                  spec, dependent, suffix, active, status)
@@ -256,16 +259,10 @@ contains
         do i = 1, primal%n_stmts
             select case (primal%stmts(i)%kind)
             case (FAD_ASSIGN)
-                ! Inside a loop, an element write is a scatter that analyse_loop
-                ! validates. Outside one there is no index to scatter over, so
-                ! the adjoint would have nowhere to go.
-                if (depth == 0 .and. index(primal%stmts(i)%target, "(") > 0) then
-                    status%ok = .false.
-                    status%message = "reverse mode: assignment to an array "// &
-                        "element outside a loop is not supported yet; forward "// &
-                        "mode handles it"
-                    return
-                end if
+                ! An element write is a scatter wherever it appears. Inside a
+                ! loop `analyse_loop` validates the index; outside one the
+                ! index is whatever the subscript says and the adjoint goes to
+                ! the matching element of the array's adjoint.
             case (FAD_DO)
                 depth = depth + 1
                 call analyse_loop(primal, i, shape)
@@ -469,6 +466,7 @@ contains
     end subroutine build_signature
 
     subroutine build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
+                                   is_element, &
                                    n_rec, loops, n_loops, branches, n_branches, &
                                    order_kind, order_index, n_order, active, &
                                    status)
@@ -484,6 +482,9 @@ contains
         type(ssa_map_t), intent(inout) :: ssa
         character(len=64), allocatable, intent(out) :: lhs_names(:)
         integer, allocatable, intent(out) :: rhs_exprs(:)
+        !! Whether each record's target is an array element rather than a
+        !! variable. An element is not versioned and its adjoint is a scatter.
+        logical, allocatable, intent(out) :: is_element(:)
         integer, intent(out) :: n_rec
         type(loop_record_t), allocatable, intent(out) :: loops(:)
         integer, intent(out) :: n_loops
@@ -506,6 +507,8 @@ contains
         call ssa_init(primal, ssa)
         allocate (lhs_names(max(1, primal%n_stmts)))
         allocate (rhs_exprs(max(1, primal%n_stmts)))
+        allocate (is_element(max(1, primal%n_stmts)))
+        is_element = .false.
         allocate (loops(max(1, primal%n_stmts)))
         allocate (branches(max(1, primal%n_stmts)))
         allocate (order_kind(max(1, primal%n_stmts)))
@@ -519,7 +522,17 @@ contains
         do while (i <= primal%n_stmts)
             select case (primal%stmts(i)%kind)
             case (FAD_ASSIGN)
-                di = primal%decl_index(primal%stmts(i)%target)
+                ! An element write names a storage location, not a variable, so
+                ! there is nothing to give a version to: `point(1)` means the
+                ! same place every time it is written. It is emitted verbatim
+                ! and its adjoint is a scatter into the same element of the
+                ! array's adjoint.
+                is_element(n_rec + 1) = index(primal%stmts(i)%target, "(") > 0
+                if (is_element(n_rec + 1)) then
+                    di = primal%decl_index(target_base(primal%stmts(i)%target))
+                else
+                    di = primal%decl_index(primal%stmts(i)%target)
+                end if
                 if (di == 0) then
                     status%ok = .false.
                     status%message = "assignment to undeclared '"// &
@@ -528,13 +541,20 @@ contains
                 end if
                 s%kind = FAD_ASSIGN
                 s%value = copy_renamed(primal, adjoint, primal%stmts(i)%value, ssa)
-                call ssa_fresh(ssa, primal%stmts(i)%target, fresh)
+                if (is_element(n_rec + 1)) then
+                    fresh = primal%stmts(i)%target
+                    d = primal%decls(di)
+                    d%is_result = .false.
+                    ignored = adjoint%add_decl(d)
+                else
+                    call ssa_fresh(ssa, primal%stmts(i)%target, fresh)
+                    d = primal%decls(di)
+                    d%name = fresh
+                    d%intent = FAD_INTENT_NONE
+                    d%is_result = .false.
+                    ignored = adjoint%add_decl(d)
+                end if
                 s%target = fresh
-                d = primal%decls(di)
-                d%name = fresh
-                d%intent = FAD_INTENT_NONE
-                d%is_result = .false.
-                ignored = adjoint%add_decl(d)
                 ignored = adjoint%add_stmt(s)
                 n_rec = n_rec + 1
                 lhs_names(n_rec) = fresh
@@ -1160,6 +1180,7 @@ contains
     end subroutine emit_loop_forward
 
     subroutine build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
+                                   is_element, &
                                    n_rec, loops, n_loops, branches, n_branches, &
                                    order_kind, order_index, n_order, &
                                    spec, dependent, suffix, active, status)
@@ -1173,6 +1194,7 @@ contains
         type(fad_proc_t), intent(inout) :: adjoint
         type(ssa_map_t), intent(in) :: ssa
         character(len=*), intent(in) :: lhs_names(:)
+        logical, intent(in) :: is_element(:)
         integer, intent(in) :: rhs_exprs(:), n_rec
         type(loop_record_t), intent(in) :: loops(:)
         integer, intent(in) :: n_loops
@@ -1267,6 +1289,28 @@ contains
             select case (order_kind(k))
             case (ORDER_STMT)
                 i = order_index(k)
+                if (is_element(i)) then
+                    ! The adjoint of `point(1) = e` is the same element of the
+                    ! array's adjoint, propagated into `e` and then cleared:
+                    ! the store killed whatever was there before it.
+                    call declare_seed_shadow(primal, adjoint, dependent, suffix)
+                    seed_expr = adjoint%add_expr(expr_var(shadow_element( &
+                        trim(lhs_names(i)), suffix, dependent)))
+                    call accumulate(primal, adjoint, rhs_exprs(i), seed_expr, &
+                                    ssa, suffix, active, n_tmp, status)
+                    if (.not. status%ok) return
+                    block
+                        type(fad_stmt_t) :: zs
+                        integer :: zignored
+                        zs%kind = FAD_ASSIGN
+                        zs%target = shadow_element(trim(lhs_names(i)), suffix, &
+                                                   dependent)
+                        zs%value = adjoint%add_expr( &
+                            expr_const("0.0"//adjoint%real_suffix))
+                        zignored = adjoint%add_stmt(zs)
+                    end block
+                    cycle
+                end if
                 if (.not. adjoint_is_live(primal, ssa, lhs_names(i), active)) cycle
                 seed_expr = adjoint%add_expr(expr_var(trim(lhs_names(i))//suffix))
                 call accumulate(primal, adjoint, rhs_exprs(i), seed_expr, ssa, &
@@ -1442,6 +1486,53 @@ contains
             name = target//suffix
         end if
     end function adjoint_element
+
+    function shadow_element(target, suffix, dependent) result(name)
+        !! As `adjoint_element`, but through a local copy for the dependent.
+        !!
+        !! Reading an element's adjoint and then clearing it is how a store's
+        !! adjoint works: the store killed whatever the element held, so its
+        !! adjoint stops there. For the dependent that adjoint is the caller's
+        !! incoming seed, declared `intent(in)`, and clearing it would both fail
+        !! to compile and mean writing to the caller's argument. The sweep works
+        !! on a copy instead.
+        character(len=*), intent(in) :: target, suffix, dependent
+        character(len=:), allocatable :: name, base
+        integer :: pos
+
+        pos = index(target, "(")
+        base = target
+        if (pos > 0) base = target(1:pos - 1)
+        if (trim(base) == trim(dependent)) then
+            name = trim(base)//suffix//"_in"
+            if (pos > 0) name = name//target(pos:)
+        else
+            name = adjoint_element(target, suffix)
+        end if
+    end function shadow_element
+
+    subroutine declare_seed_shadow(primal, adjoint, dependent, suffix)
+        !! Declare and fill the dependent's local adjoint copy.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        character(len=*), intent(in) :: dependent, suffix
+        type(fad_decl_t) :: d
+        type(fad_stmt_t) :: s
+        integer :: di, ignored
+
+        if (adjoint%decl_index(dependent//suffix//"_in") > 0) return
+        di = primal%decl_index(dependent)
+        if (di == 0) return
+        d = primal%decls(di)
+        d%name = dependent//suffix//"_in"
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        ignored = adjoint%add_decl(d)
+        s%kind = FAD_ASSIGN
+        s%target = dependent//suffix//"_in"
+        s%value = adjoint%add_expr(expr_var(dependent//suffix))
+        ignored = adjoint%add_stmt(s)
+    end subroutine declare_seed_shadow
 
     logical function worth_taping(primal, shape, name) result(yes)
         !! Whether storing a temporary beats recomputing it.
