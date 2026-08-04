@@ -58,6 +58,10 @@ module fortad_reverse
         type(loop_shape_t) :: shape
         character(len=:), allocatable :: var
         integer :: lo = 0, hi = 0, step = 0
+        !! Every level of the nest, outermost first.
+        character(len=64), allocatable :: nest_var(:)
+        integer, allocatable :: nest_lo(:), nest_hi(:), nest_step(:)
+        integer :: n_levels = 0
         character(len=64), allocatable :: accum_names(:)
         !! Statement indices in the generated procedure of this loop's `do`
         !! and `end do`, so the adjoint body can be spliced into the same loop.
@@ -875,12 +879,41 @@ contains
             end block
         end if
 
-        s%kind = FAD_DO
-        s%target = rec%var
-        s%lo = rec%lo
-        s%hi = rec%hi
-        s%step = rec%step
-        rec%do_stmt = adjoint%add_stmt(s)
+        ! Reproduce every level of the nest, outermost first.
+        allocate (rec%nest_var(shape%n_headers), rec%nest_lo(shape%n_headers))
+        allocate (rec%nest_hi(shape%n_headers), rec%nest_step(shape%n_headers))
+        rec%n_levels = shape%n_headers
+        do k = 1, shape%n_headers
+            associate (h => primal%stmts(shape%header_stmt(k)))
+                rec%nest_var(k) = h%target
+                rec%nest_lo(k) = copy_renamed(primal, adjoint, h%lo, ssa)
+                rec%nest_hi(k) = copy_renamed(primal, adjoint, h%hi, ssa)
+                rec%nest_step(k) = 0
+                if (h%step /= 0) then
+                    rec%nest_step(k) = copy_renamed(primal, adjoint, h%step, ssa)
+                end if
+                di = primal%decl_index(h%target)
+                if (di > 0) then
+                    d = primal%decls(di)
+                    d%intent = FAD_INTENT_NONE
+                    d%is_result = .false.
+                    ignored = adjoint%add_decl(d)
+                end if
+            end associate
+        end do
+
+        do k = 1, rec%n_levels
+            s%kind = FAD_DO
+            s%target = trim(rec%nest_var(k))
+            s%lo = rec%nest_lo(k)
+            s%hi = rec%nest_hi(k)
+            s%step = rec%nest_step(k)
+            if (k == 1) then
+                rec%do_stmt = adjoint%add_stmt(s)
+            else
+                ignored = adjoint%add_stmt(s)
+            end if
+        end do
 
         ! Store each carried value as it enters the iteration.
         if (rec%taped) then
@@ -1010,9 +1043,11 @@ contains
             call ssa_set(ssa, trim(shape%carried(k)), trim(shape%carried(k)))
         end do
 
-        s%kind = FAD_END_DO
-        s%value = 0
-        rec%end_do_stmt = adjoint%add_stmt(s)
+        do k = 1, rec%n_levels
+            s%kind = FAD_END_DO
+            s%value = 0
+            rec%end_do_stmt = adjoint%add_stmt(s)
+        end do
     end subroutine emit_loop_forward
 
     subroutine build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
@@ -1103,11 +1138,9 @@ contains
             di = primal%decl_index(trim(spec%independents(i)))
             if (di == 0) cycle
             s%kind = FAD_ASSIGN
-            if (primal%decls(di)%is_array) then
-                s%target = trim(spec%independents(i))//suffix//"(:)"
-            else
-                s%target = trim(spec%independents(i))//suffix
-            end if
+            ! A bare name assigns the whole array whatever its rank; "(:)"
+            ! would silently assume rank one and fail to compile at rank two.
+            s%target = trim(spec%independents(i))//suffix
             s%value = zero
             ignored = adjoint%add_stmt(s)
         end do
@@ -1148,6 +1181,7 @@ contains
         ! bandwidth, not arithmetic, is what bounds these kernels, so halving
         ! the traffic is the single largest win available here.
         if (n_loops == 1 .and. .not. loops(1)%taped .and. &
+            loops(1)%n_levels == 1 .and. &
             can_fuse(primal, loops(1), dependent)) then
             call fuse_loop(adjoint, loops(1), suffix)
         end if
@@ -1280,7 +1314,7 @@ contains
         d%is_result = .false.
         ignored = adjoint%add_decl(d)
         s%kind = FAD_ASSIGN
-        s%target = base//suffix//"(:)"
+        s%target = base//suffix
         s%value = zero
         ignored = adjoint%add_stmt(s)
     end subroutine declare_array_adjoint
@@ -1458,18 +1492,20 @@ contains
         ! A taped loop must run backwards: the carried variable's adjoint
         ! flows from later iterations to earlier ones, which is exactly the
         ! dependence the untaped cases do not have.
-        s%kind = FAD_DO
-        s%target = rec%var
-        if (rec%taped) then
-            s%lo = rec%hi
-            s%hi = rec%lo
-            s%step = adjoint%add_expr(expr_const("-1"))
-        else
-            s%lo = rec%lo
-            s%hi = rec%hi
-            s%step = rec%step
-        end if
-        ignored = adjoint%add_stmt(s)
+        do i = 1, rec%n_levels
+            s%kind = FAD_DO
+            s%target = trim(rec%nest_var(i))
+            if (rec%taped) then
+                s%lo = rec%nest_hi(i)
+                s%hi = rec%nest_lo(i)
+                s%step = adjoint%add_expr(expr_const("-1"))
+            else
+                s%lo = rec%nest_lo(i)
+                s%hi = rec%nest_hi(i)
+                s%step = rec%nest_step(i)
+            end if
+            ignored = adjoint%add_stmt(s)
+        end do
 
         ! Restore each carried value as it was on entry to this iteration, so
         ! the body can be recomputed exactly as the forward sweep ran it.
@@ -1552,9 +1588,11 @@ contains
             end if
         end do
 
-        s%kind = FAD_END_DO
-        s%value = 0
-        ignored = adjoint%add_stmt(s)
+        do i = 1, rec%n_levels
+            s%kind = FAD_END_DO
+            s%value = 0
+            ignored = adjoint%add_stmt(s)
+        end do
 
         ! What the carrier holds after the reverse loop is the adjoint of the
         ! value the loop was entered with, so pass it to that value's own name.

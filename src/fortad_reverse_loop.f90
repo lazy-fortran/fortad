@@ -60,6 +60,9 @@ module fortad_reverse_loop
         !! Loop-carried variables whose value must be stored per iteration.
         character(len=64), allocatable :: carried(:)
         integer :: n_carried = 0
+        !! Statement indices of every `do` in the nest, outermost first.
+        integer :: header_stmt(8) = 0
+        integer :: n_headers = 0
     end type loop_shape_t
 
 contains
@@ -99,6 +102,8 @@ contains
         end if
 
         allocate (shape%accumulators(32), shape%temporaries(32))
+        shape%n_headers = 1
+        shape%header_stmt(1) = first
         allocate (shape%elements(32), shape%carried(32))
         shape%accumulators = ""
         shape%temporaries = ""
@@ -158,10 +163,20 @@ contains
                     end if
                     call add_name(shape%temporaries, shape%n_temporaries, target)
                 end if
-            case (FAD_DO, FAD_END_DO)
-                shape%status = LOOP_UNSUPPORTED
-                shape%message = "reverse mode: nested loops are not supported yet"
-                return
+            case (FAD_DO)
+                ! A nested loop is part of the same nest: the accumulator's
+                ! adjoint is invariant across every level, so the whole nest
+                ! inverts as one unit with its headers reproduced in order.
+                shape%n_headers = shape%n_headers + 1
+                if (shape%n_headers > size(shape%header_stmt)) then
+                    shape%status = LOOP_UNSUPPORTED
+                    shape%message = "reverse mode: loop nest is deeper than "// &
+                        "fortad supports"
+                    return
+                end if
+                shape%header_stmt(shape%n_headers) = i
+            case (FAD_END_DO)
+                continue
             case (FAD_IF, FAD_ELSE, FAD_END_IF)
                 shape%status = LOOP_UNSUPPORTED
                 shape%message = "reverse mode: a branch inside a loop needs "// &
@@ -169,6 +184,13 @@ contains
                 return
             end select
         end do
+
+        if (shape%n_carried > 0 .and. shape%n_headers > 1) then
+            shape%status = LOOP_UNSUPPORTED
+            shape%message = "reverse mode: a loop-carried recurrence inside a "// &
+                "nest would need one tape per level; not supported yet"
+            return
+        end if
 
         if (shape%n_carried > 0 .and. p%stmts(first)%step /= 0) then
             shape%status = LOOP_UNSUPPORTED
