@@ -11,7 +11,7 @@ $ fortad --mode reverse --indep a,b --module k_adjoint kernel.f90
 Working today: forward mode (scalar, array, loop, branch, and vector/batched),
 reverse mode (straight-line, branches, and loops - reductions, element writes,
 and taped recurrences), Hessian-vector products, and a registry for your own
-procedures' derivatives. 59 oracle cases
+procedures' derivatives. 60 oracle cases
 pass locally, each checked against finite differences, the adjoint identity, or
 Hessian symmetry - never against another AD tool.
 
@@ -104,7 +104,7 @@ wrong derivative.
 | Linear UQ | cov(y) = J cov(x) J^T | vector forward | working, [documented](docs/products.md) |
 | Gauss-Newton | J, J^T J v | vector forward + reverse | working, [documented](docs/products.md) |
 | Sparse Jacobians | compressed | column colouring | working, [documented](docs/products.md) |
-| Sparse Hessians | compressed | star colouring | planned |
+| Sparse Hessians | compressed | column colouring | working; star colouring would use fewer |
 | Long time-integration adjoints | Revolve schedule | binomial checkpointing | working, [documented](docs/products.md) |
 | Higher order | Taylor coefficients | generated kernels | planned |
 

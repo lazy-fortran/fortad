@@ -260,8 +260,11 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 ## Phase 4 — Second order and higher
 
 - [x] **P4.1 Forward-over-reverse HVPs.** Default Hessian route.
-- [ ] **P4.2 Dense Hessians** by `n` HVPs; **sparse Hessians** by star-coloring
-      compression.
+- [~] **P4.2 Dense Hessians** by `n` HVPs are done. **Sparse Hessians**
+      compress correctly with the existing column colouring; star colouring,
+      which would use fewer colours, is not implemented. The current colour
+      count is pinned by a test so a later star colouring must demonstrate the
+      improvement.
 - [ ] **P4.3 edge_pushing** as a competing sparse-Hessian candidate. Keep only if
       it wins measurably.
 - [ ] **P4.4 Higher-order Taylor kernels**, generated at fixed order, Rapsodia
