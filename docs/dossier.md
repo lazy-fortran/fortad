@@ -161,7 +161,7 @@ constrains a source-level AD tool. Relevant to fortad's interface design.
 ### 3.2 Where it is structurally weak, and what we measured
 
 From our own VMEC++ integration (`upstream/vmecpp`, header comments quoted in
-`docs/upstreams.toml`):
+fortad-bench's `docs/upstreams.toml`):
 
 - **It forces the code to be written for it.** Enzyme's allocation analysis does
   not track Eigen's aligned allocator, so any heap temporary crossing the
