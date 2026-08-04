@@ -293,6 +293,15 @@ contains
                     names(n) = trim(primal%params(i))//suffix
                     call add_tangent_decl(tangent, primal%decls(di), suffix, &
                                           FAD_INTENT_OUT, vector, ndir)
+                    ! Dropped from the signature but still written by the primal
+                    ! statements, so it stays as a local. Whether those writes
+                    ! survive is dead-store elimination's decision, not this
+                    ! routine's - and an undeclared name would not compile.
+                    d = primal%decls(di)
+                    d%intent = FAD_INTENT_NONE
+                    d%is_result = .false.
+                    ignored = tangent%add_decl(d)
+                    d = fad_decl_t()
                     cycle
                 end if
             end if
