@@ -94,6 +94,14 @@ module fortad_ir
         !! see might not be, and claiming purity it cannot verify would be a
         !! promise to the compiler that the compiler will act on.
         logical :: is_pure = .true.
+        !! `use` statements copied verbatim from the primal.
+        !!
+        !! The derivative names the same kinds and calls the same helpers as the
+        !! primal, so it needs the same imports. Reproducing the text rather
+        !! than resolving it keeps fortad out of the business of module lookup,
+        !! which is the consumer's compiler's job.
+        character(len=:), allocatable :: uses(:)
+        integer :: n_uses = 0
         type(fad_decl_t), allocatable :: decls(:)
         character(len=:), allocatable :: params(:)
         type(fad_expr_t), allocatable :: exprs(:)

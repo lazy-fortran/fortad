@@ -48,13 +48,16 @@ program fortad_cli
         ! must be absent too, not present and empty.
         if (len_trim(proc_name) > 0 .and. len(directions) > 0) then
             res = fad_jvp(source, independents, name=trim(proc_name), &
+                          with_primal=with_primal, &
                           n_directions=directions)
         else if (len_trim(proc_name) > 0) then
-            res = fad_jvp(source, independents, name=trim(proc_name))
+            res = fad_jvp(source, independents, name=trim(proc_name), &
+                          with_primal=with_primal)
         else if (len(directions) > 0) then
-            res = fad_jvp(source, independents, n_directions=directions)
+            res = fad_jvp(source, independents, n_directions=directions, &
+                          with_primal=with_primal)
         else
-            res = fad_jvp(source, independents)
+            res = fad_jvp(source, independents, with_primal=with_primal)
         end if
     end if
 
@@ -242,8 +245,8 @@ contains
             "direction-count argument"
         write (*, '(a)') "      --name f_jvp      name of the generated procedure"
         write (*, '(a)') "  -o, --output path     write here instead of stdout"
-        write (*, '(a)') "      --no-primal       reverse mode: return the "// &
-            "gradient only, not the primal value"
+        write (*, '(a)') "      --no-primal       return the derivative only, "// &
+            "not the primal value"
         write (*, '(a)') "      --roundtrip       parse and re-emit, do not "// &
             "differentiate"
         write (*, '(a)') "      --version         print version and exit"

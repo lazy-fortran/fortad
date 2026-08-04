@@ -11,7 +11,7 @@ module fortad_lower
                         assignment_node, binary_op_node, identifier_node, &
                         literal_node, call_or_subscript_node, declaration_node, &
                         do_loop_node, if_node, parameter_declaration_node, &
-                        subroutine_call_node, &
+                        subroutine_call_node, use_statement_node, &
                         INPUT_MODE_STANDARD
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
                         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
@@ -220,6 +220,13 @@ contains
         if (.not. allocated(arena%entries(idx)%node)) return
 
         select type (n => arena%entries(idx)%node)
+        type is (use_statement_node)
+            ! The derivative names the same kinds and calls the same helpers as
+            ! the primal, so it needs the same imports. They are reproduced as
+            ! text: resolving them is the consumer's compiler's job, and fortad
+            ! guessing at module contents would be a second, worse answer.
+            call add_use(proc, n)
+
         type is (declaration_node)
             if (n%is_multi_declaration .and. allocated(n%var_names)) then
                 do k = 1, size(n%var_names)
@@ -385,6 +392,53 @@ contains
                    simple_expr_text(arena, n%right_index)
         end select
     end function simple_expr_text
+
+    subroutine add_use(proc, n)
+        !! Record one `use` statement, rendered back to source text.
+        type(fad_proc_t), intent(inout) :: proc
+        type(use_statement_node), intent(in) :: n
+        character(len=:), allocatable :: line, items
+        character(len=256), allocatable :: grown(:)
+        integer :: k
+
+        if (.not. allocated(n%module_name)) return
+        line = "use"
+        if (n%is_intrinsic) line = line//", intrinsic"
+        line = line//" :: "//trim(n%module_name)
+
+        ! fortfront stores a rename flat, as consecutive local and remote
+        ! entries - see `append_rename_pair` in its import parser - so the list
+        ! is walked two at a time.
+        items = ""
+        if (allocated(n%rename_list)) then
+            do k = 1, size(n%rename_list) - 1, 2
+                if (.not. allocated(n%rename_list(k)%s)) cycle
+                if (.not. allocated(n%rename_list(k + 1)%s)) cycle
+                if (len(items) > 0) items = items//", "
+                items = items//trim(n%rename_list(k)%s)//" => "// &
+                        trim(n%rename_list(k + 1)%s)
+            end do
+        end if
+        if (allocated(n%only_list)) then
+            do k = 1, size(n%only_list)
+                if (.not. allocated(n%only_list(k)%s)) cycle
+                if (len(items) > 0) items = items//", "
+                items = items//trim(n%only_list(k)%s)
+            end do
+        end if
+        if (n%has_only .and. len(items) > 0) line = line//", only: "//items
+
+        if (.not. allocated(proc%uses)) then
+            allocate (character(len=256) :: proc%uses(8))
+            proc%n_uses = 0
+        else if (proc%n_uses >= size(proc%uses)) then
+            allocate (character(len=256) :: grown(2*size(proc%uses)))
+            grown(1:proc%n_uses) = proc%uses(1:proc%n_uses)
+            call move_alloc(grown, proc%uses)
+        end if
+        proc%n_uses = proc%n_uses + 1
+        proc%uses(proc%n_uses) = line
+    end subroutine add_use
 
     subroutine lower_target(arena, idx, proc, s, status)
         !! Lower an assignment target: a plain name or an array element.

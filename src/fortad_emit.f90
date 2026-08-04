@@ -97,6 +97,9 @@ contains
         integer :: i, indent
 
         call write_header(b, p)
+        do i = 1, p%n_uses
+            call b%line(indent_of(1)//trim(p%uses(i)))
+        end do
         call b%line("    implicit none")
         do i = 1, p%n_decls
             call b%line(indent_of(1)//emit_decl_line(p%decls(i)))

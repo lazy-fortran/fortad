@@ -69,7 +69,7 @@ contains
     end function fad_version
 
     function fad_jvp(source, independents, name, suffix, n_directions, &
-                     module_name) result(res)
+                     module_name, with_primal) result(res)
         !! Forward mode. Returns a subroutine computing the primal and its
         !! Jacobian-vector product in one sweep.
         !!
@@ -92,6 +92,11 @@ contains
         !! consumer then gets a compiler-checked interface instead of an
         !! external declaration nobody verifies.
         character(len=*), intent(in), optional :: module_name
+        !! Also return the primal value. Default `.true.`.
+        !!
+        !! Set this `.false.` for a tangent-only contract. Everything the primal
+        !! value alone kept alive is then dead and is removed.
+        logical, intent(in), optional :: with_primal
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal, tangent
         type(lower_status_t) :: lstat
@@ -120,6 +125,7 @@ contains
             spec%vector = .true.
             spec%ndir_name = n_directions
         end if
+        if (present(with_primal)) spec%with_primal = with_primal
 
         call differentiate_forward(primal, spec, tangent, fstat)
         if (.not. fstat%ok) then
@@ -129,6 +135,8 @@ contains
         end if
 
         call fold_zero_accumulations(tangent)
+        call eliminate_dead_stores(tangent)
+        call eliminate_dead_loops(tangent)
         call eliminate_dead_stores(tangent)
         ! The same passes pay off in forward mode: a tangent loop carries
         ! invariant coefficients just as an adjoint one does.
