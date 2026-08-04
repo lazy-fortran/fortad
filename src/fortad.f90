@@ -25,6 +25,9 @@ module fortad
                              recover_entries
     use fortad_revolve, only: revolve_t, revolve_action_t, revolve_schedule, &
                               REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
+    use fortad_taylor, only: tay_const, tay_var, tay_add, tay_sub, tay_scale, &
+                             tay_mul, tay_div, tay_exp, tay_log, tay_sqrt, &
+                             tay_sin_cos, tay_pow_int, tay_derivative
     implicit none
     private
 
@@ -33,6 +36,8 @@ module fortad
     public :: sparsity_t, colour_columns, seed_matrix, recover_entries
     public :: revolve_t, revolve_action_t, revolve_schedule
     public :: REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
+    public :: tay_const, tay_var, tay_add, tay_sub, tay_scale, tay_mul, tay_div
+    public :: tay_exp, tay_log, tay_sqrt, tay_sin_cos, tay_pow_int, tay_derivative
 
     character(len=*), parameter :: FORTAD_VERSION = "0.1.0"
 
