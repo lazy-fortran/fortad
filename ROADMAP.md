@@ -598,3 +598,26 @@ Recorded so they are not rediscovered as good ideas:
   fortad's output, not an alternative to it.
 - Replacing Enzyme. Enzyme stays in fortnum as a competing `autodiff` candidate
   and as the benchmark baseline. If Enzyme wins a workload, Enzyme is selected.
+
+## fci_polygon_edge_area tangent sits at 1.28x Enzyme
+
+The only measurement above 20% of Enzyme across all three suites. The
+cause is measured, not guessed.
+
+Per two inputs, Enzyme's loop does three `mulpd`, one `addpd` and one
+`subpd` - five vector ALU ops. fortad's does four `mulpd`, three
+`subpd` and two `addpd` - nine. Total instruction counts are almost
+equal (38 against 39), so this is not extra work in the usual sense.
+
+Enzyme gathers strided lanes with `movsd` plus `movhpd` rather than
+reading the four adjacent inputs as one `movupd` pair. That lane
+pairing lets the primal and the tangent share partial products. flang
+does not find the same pairing from the expression shape fortad emits,
+and no algebraic identity is missing on fortad's side - the arithmetic
+is already minimal as written.
+
+Closing this needs fortad to emit the tangent with an operand order
+that makes the shared products adjacent in a lane, which is a
+vectorisation concern rather than a differentiation one. Seven measured
+attempts put the ceiling for the current shape near 1.29x, and the
+contiguous slice read brought it from 1.40x to 1.28x.
