@@ -181,6 +181,19 @@ Recovery is **exact**, not approximate: compression is a rearrangement.
 and inventing one would be worse than asking. Be conservative: an over-full
 pattern costs sweeps, an under-full one silently loses derivative entries.
 
+### Sparse Hessians
+
+The same colouring works on a Hessian unchanged, applied to the
+Hessian-vector-product seeds instead of the tangent seeds. Compression only
+needs "no two columns of a colour share a row", which knows nothing about
+symmetry, so a symmetric tridiagonal Hessian takes three colours exactly as a
+tridiagonal Jacobian does.
+
+It is not *optimal* for a symmetric matrix. Star colouring exploits symmetry to
+use strictly fewer colours, and is the right next step here; it is not
+implemented, and the current cost is pinned by a test so that a later star
+colouring can be shown to beat it rather than merely claimed to.
+
 ## Adjoints of long time integrations
 
 The adjoint of an `n`-step integration needs each step's input state again, in

@@ -31,6 +31,7 @@ program test_sparse_oracle
     call test_arrowhead(failures)
     call test_diagonal_is_one_colour(failures)
     call test_dense_column_forces_many(failures)
+    call test_symmetric_hessian(failures)
     call test_malformed_pattern_is_refused(failures)
 
     if (failures == 0) then
@@ -145,6 +146,62 @@ contains
         call check_pattern("dense", pattern, dense, failures, expect_max=n, &
                            expect_min=n)
     end subroutine test_dense_column_forces_many
+
+    subroutine test_symmetric_hessian(failures)
+        !! A Hessian is symmetric, and column colouring works on it unchanged:
+        !! the compression only needs "no two columns of a colour share a row",
+        !! which knows nothing about symmetry.
+        !!
+        !! It is not *optimal* for a symmetric matrix - star colouring exploits
+        !! symmetry to use fewer colours - and this test pins the current cost
+        !! so that a later star colouring can be shown to beat it rather than
+        !! merely claimed to.
+        integer, intent(inout) :: failures
+        type(sparsity_t) :: pattern
+        real(dp), allocatable :: dense(:, :)
+        integer, parameter :: n = 9
+        integer :: i, j, k, nnz
+
+        ! A symmetric tridiagonal Hessian, as a separable-plus-coupling
+        ! objective would produce.
+        nnz = 0
+        do j = 1, n
+            do i = max(1, j - 1), min(n, j + 1)
+                nnz = nnz + 1
+            end do
+        end do
+
+        pattern%n_rows = n
+        pattern%n_cols = n
+        allocate (pattern%col_start(n + 1), pattern%rows(nnz))
+        allocate (dense(n, n))
+        dense = 0.0_dp
+        k = 0
+        do j = 1, n
+            pattern%col_start(j) = k + 1
+            do i = max(1, j - 1), min(n, j + 1)
+                k = k + 1
+                pattern%rows(k) = i
+                ! Symmetric by construction: the value depends only on the
+                ! unordered pair.
+                dense(i, j) = 1.0_dp + 0.5_dp*(i + j) - 0.25_dp*abs(i - j)
+            end do
+        end do
+        pattern%col_start(n + 1) = k + 1
+
+        do j = 1, n
+            do i = 1, n
+                if (dense(i, j) /= dense(j, i)) then
+                    print *, "FAIL symmetric_hessian: test matrix is not symmetric"
+                    failures = failures + 1
+                    return
+                end if
+            end do
+        end do
+
+        call check_pattern("symmetric_hessian", pattern, dense, failures, &
+                           expect_max=3)
+    end subroutine test_symmetric_hessian
 
     subroutine test_malformed_pattern_is_refused(failures)
         !! A pattern whose indices do not line up must be reported, not used.
