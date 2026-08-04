@@ -448,7 +448,8 @@ contains
                 else
                     status%ok = .false.
                     status%message = "no derivative rule for '"//pe%text// &
-                                     "'; add one to fortad_rules or mark it inactive"
+                        "'; register one with fad_add_rule, or keep it out of "// &
+                        "the active path"
                     return
                 end if
             end select
