@@ -416,6 +416,20 @@ caller's `intent(in)` argument.
 
 ## Open defects
 
+- **The reassociations cost accuracy where the exact arithmetic cancels.**
+  Factoring, distribution and reciprocal strength reduction are all things a
+  Fortran compiler may not do, and fortad does them because the derivative is
+  an approximation of a limit either way. On fortfem's quintic Lagrange
+  weights, whose weights sum to one, an entry whose true derivative is exactly
+  zero comes out as `-1.5e-8`. Enzyme returns zero there and so do central
+  differences of the primal, so this is fortad's error and not a disagreement
+  about the answer - roughly eight digits where the kernel could give sixteen.
+
+  The benchmark reports it rather than hiding it behind a tolerance. What is
+  not yet known is which pass is responsible; the honest options are to find
+  and restrict that one, or to offer the reassociations as something a caller
+  turns on.
+
 - **The optimiser is superlinear in the size of a loop body.** fortfem's
   degree-eleven Bezier edge area has a four-thousand-statement adjoint, and
   fortad does not finish it in five minutes. `share_in_body` counted uses per
