@@ -176,6 +176,8 @@ source. **[docs/products.md](docs/products.md)** works back from the product you
 want - gradient, Hessian-vector product, linear UQ, sensitivity, Gauss-Newton -
 to the call that gets it, with the cost of each. Passing `module_name` is recommended: the consumer then gets a
 compiler-checked interface rather than an external declaration nobody verifies.
+The complete frozen module and CLI surface is listed in
+**[docs/design/public-api.md](docs/design/public-api.md)**.
 
 Generated procedures are `pure` and hold no state, so they are thread-safe by
 construction, and the reduction adjoint loop carries no loop-carried dependence
