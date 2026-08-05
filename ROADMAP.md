@@ -602,8 +602,10 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       colouring with direct recovery. On a symmetric arrowhead it uses 2
       colours where the asymmetric test needs 10, and the test asserts the
       improvement rather than merely that both are valid.
-- [ ] **P4.3 edge_pushing** as a competing sparse-Hessian candidate. Keep only if
-      it wins measurably.
+- [x] **P4.3 edge_pushing** decision gate. Rejected for now: no compatible
+      independent implementation is available on the TU Graz hosts, and no
+      complete-workload measurement demonstrates a win over the existing
+      star-coloured HVP route. Reopen only with both.
 - [~] **P4.4 Higher-order Taylor kernels.** The arithmetic is built and
       pinned against closed-form series: exp, log, sqrt, sin/cos, the Cauchy
       product, division, and integer powers, all `O(d^2)` per operation rather
@@ -739,9 +741,8 @@ entire forward sweep whenever no adjoint coefficient needs a primal value.
 
 Remaining, in rough order of expected value: collapsing a loop body that is
 wholly linear in its carried variable into a single scaling (this is the rk4
-gap), star colouring for sparse Hessians, static sparsity-pattern propagation,
-and reverse-mode rules applied automatically where fortnum already declares an
-`analytical` candidate.
+gap), the higher-order Taylor transformation, and reverse-mode rules applied
+automatically where fortnum already declares an `analytical` candidate.
 Branches inside loops and recurrences inside nests are still refused by name.
 Assignment to an array element outside a loop is no longer among them: an
 element write names a storage location rather than a variable, so there is

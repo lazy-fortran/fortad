@@ -215,7 +215,7 @@ time and generated-code performance both weighted, per the brief.
 | Forward-over-forward | second-order, dense | tiny problems, Hessian columns | secondary |
 | **Forward-over-reverse** | `O(primal)` per HVP | HVPs, Newton-Krylov, `n` HVPs for a dense Hessian | **[PICK]** the default Hessian route. |
 | Reverse-over-forward | equivalent HVP, different storage profile | when the reverse tape is the binding constraint | keep as an alternative candidate. |
-| edge_pushing | direct second-order reverse sweep | *sparse* Hessians | **[PICK, phase 3]** genuinely better than `n` HVPs when the Hessian is sparse. Gower & Mello 2012. |
+| edge_pushing | direct second-order reverse sweep | *sparse* Hessians | **[REJECT, pending evidence]** no compatible independent implementation or complete-workload win over star-coloured HVPs. Reopen only with both. Gower & Mello 2012. |
 | Univariate Taylor propagation | `O(d²)` per operation for order `d` | order ≥ 3, Taylor-mode ODE integrators, singularity detection | **[PICK, phase 4]** via generated fixed-order kernels, Rapsodia-style. Never by nesting AD `d` times. |
 
 ### 4.2 Static analyses — where source level actually pays
@@ -429,8 +429,8 @@ If only these are implemented, fortad is competitive:
 6. **Chunked vector mode with a contiguous trailing tangent dimension**
    (ForwardDiff.jl, ADIFOR seed matrices).
 7. **Revolve checkpointing** for time stepping.
-8. **Forward-over-reverse HVPs**, then star-coloring-compressed Hessians, then
-   edge_pushing for sparse cases.
+8. **Forward-over-reverse HVPs**, then star-coloring-compressed Hessians.
+   Direct edge-pushing remains a measured candidate only, not a retained route.
 9. **An emitter that produces code gfortran vectorises**, verified by reading
    vectorisation reports in CI.
 10. **Inline and normalise before differentiating.** The cheapest way to buy back
