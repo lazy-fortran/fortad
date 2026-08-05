@@ -1,6 +1,8 @@
 # Dossier: source-level automatic differentiation, and how to beat Enzyme
 
-Status: research dossier, 2026-08-04. This is the reasoning behind
+Status: research dossier, 2026-08-04. The P0.8 decision gate on 2026-08-05
+rejected the universal runtime thesis for the hand-written VMEC++ comparison.
+This document remains the pre-gate research reasoning behind
 [`../ROADMAP.md`](../ROADMAP.md). It is opinionated on purpose: its job is to
 name the best-of-breed algorithm for each part of the problem and say why the
 alternatives lose, so that implementation work never revisits a settled

@@ -1,22 +1,25 @@
 # fortad roadmap
 
-The target is a source-transformation AD engine for Fortran that is **faster
-than every existing AD engine, at both build time and runtime, in every mode**.
+The P0.8 decision gate rejected the original universal performance thesis. The
+current target is a portable source-transformation AD engine for Fortran that
+emits standard Fortran, passes independent derivative checks, and reports
+performance per workload with build time, code size, runtime, and memory.
 
-Every engine means Enzyme, Tapenade, Clad, CoDiPack, ADOL-C, Adept, Sacado,
-JAX, PyTorch, Zygote, Mooncake and Enzyme.jl — not just Enzyme. Every mode means
-forward, reverse, vector forms of both, forward-over-reverse, sparse-compressed,
-and higher-order Taylor. Both metrics means the emitted derivative runs faster
-*and* the toolchain producing it builds faster.
+The engine matrix remains Enzyme, Tapenade, Clad, CoDiPack, ADOL-C, Adept,
+Sacado, JAX, PyTorch, Zygote, Mooncake, and Enzyme.jl. The mode matrix remains
+forward, reverse, vector forms of both, forward-over-reverse,
+sparse-compressed, and higher-order Taylor. A performance win is claimed only
+when the complete workload measurement supports it. A loss is recorded as a
+named optimization target or limitation.
 
-There is no workload class conceded in advance. Where a competing engine wins a
-benchmark, that is an open defect with an owner, not a documented limitation.
-Reasoning in [docs/dossier.md](docs/dossier.md).
+The decision record is [docs/design/go-no-go.md](docs/design/go-no-go.md), and
+the research reasoning remains in [docs/dossier.md](docs/dossier.md).
 
-Ordering principle: **measured win per unit of work**, not taxonomic
-completeness. Forward mode on one kernel that beats Enzyme is worth more than a
-complete but unmeasured mode matrix. The reasoning behind every choice below is
-in [docs/dossier.md](docs/dossier.md); this file does not re-argue it.
+Ordering principle: **independent correctness and measured value per unit of
+work**. A complete but unmeasured mode matrix is unfinished, and a benchmark
+win on one kernel is not generalized beyond its evidence. The reasoning behind
+every choice below is in [docs/dossier.md](docs/dossier.md); this file records
+the work order and its results.
 
 ## Hard execution rules
 
@@ -448,10 +451,11 @@ item is cheap and every item can kill or redirect the project.
       `harness/` and the `analytical`, finite-difference and Enzyme adapters,
       inheriting `differentiable-fortran`'s protocol and contract rather than
       reinventing them. Record build time alongside runtime from the first row.
-- [ ] **P0.8 Decision gate.** Write `docs/design/go-no-go.md`: given P0.4 and
-      P0.6, is the thesis intact? If fortfront cannot parse real kernels, or if
-      the hand-written Fortran JVP does not at least match C++/Enzyme, stop and
-      rewrite this roadmap before Phase 1.
+- [x] **P0.8 Decision gate.** The frontend and independent correctness gates
+      pass. The hand-written Fortran JVP and VJP are slower than C++/Enzyme on
+      the VMEC++ kernel, so the original universal performance thesis fails.
+      `docs/design/go-no-go.md` records the no-go result and this roadmap was
+      rewritten before continuing Phase 1 work.
 
 ## Phase 1 — Forward mode, one kernel, end to end
 

@@ -25,15 +25,17 @@ licensed, modern-Fortran source-transformation AD tool. fortad is that.
 
 ## The goal
 
-**Faster than every engine in the field — Enzyme, Tapenade, Clad, CoDiPack,
-ADOL-C, Adept, JAX, Zygote, Mooncake, Enzyme.jl — at both build time and
-runtime, in every mode.**
+The current goal is a portable source-transformation engine that emits standard
+Fortran, passes independent derivative checks, and reports measured
+performance per workload. The mode matrix covers forward, reverse, vector
+forms of both, forward-over-reverse, sparse-compressed, and higher-order
+Taylor.
 
-Not parity. Not "competitive on our workloads". Not "wins on solver codes and
-loses on scalar code". Every mode means forward, reverse, vector forms of both,
-forward-over-reverse, sparse-compressed, and higher-order Taylor. Both metrics
-means the generated derivative runs faster *and* the toolchain that produced it
-builds faster.
+The P0.8 VMEC++ gate rejected a universal claim of superiority. fortad records
+runtime, peak memory, build time, and generated-code size for each comparison.
+Any performance win is tied to the workload and compiler that produced the
+measurement. The decision is documented in
+[docs/design/go-no-go.md](docs/design/go-no-go.md).
 
 Enzyme is the hardest of those targets at runtime and is therefore the one the
 dossier argues against in detail; the overloading tools (CoDiPack, ADOL-C,
