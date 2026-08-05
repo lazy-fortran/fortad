@@ -184,10 +184,11 @@ and parallelises directly.
 ## Next
 
 See **[ROADMAP.md](ROADMAP.md)**, which also records what building the engine
-established. Next up: per-iteration storage for nonlinear recurrences in
-reverse mode, then BLAS/LAPACK and implicit-solve rules built on the registry,
-so a linear solve is differentiated as the operation it is rather than as the
-iterations that implement it.
+established. The next structural item is implicit differentiation of nonlinear
+solves and roots. The registry already contains an explicit `dgesv`
+BLAS/LAPACK rule, so a linear solve is differentiated as the operation it is
+rather than as the iterations that implement it; see
+**[docs/design/blas-lapack-rules.md](docs/design/blas-lapack-rules.md)**.
 
 ## Licence
 

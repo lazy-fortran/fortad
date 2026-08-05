@@ -26,6 +26,7 @@ module fortad
     use fortad_opt, only: optimise
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
                                fad_clear_rules
+    use fortad_linalg_rules, only: fad_register_blas_lapack_rules
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
                              recover_entries, star_colour_columns, &
                              recover_symmetric
@@ -39,7 +40,8 @@ module fortad
 
     public :: fad_jvp, fad_vjp, fad_hvp, fad_taylor, fad_roundtrip, &
               fad_result_t, &
-              fad_version, fad_add_rule, fad_add_call_rule, fad_clear_rules
+              fad_version, fad_add_rule, fad_add_call_rule, fad_clear_rules, &
+              fad_register_blas_lapack_rules
     public :: sparsity_t, colour_columns, seed_matrix, recover_entries
     public :: star_colour_columns, recover_symmetric
     public :: revolve_t, revolve_action_t, revolve_schedule
