@@ -416,10 +416,14 @@ item is cheap and every item can kill or redirect the project.
       validated, three additional open-access landing pages were recorded but
       rejected as HTML, and the remaining 21 entries are marked for
       institutional/library retrieval. No title correction was needed.
-- [ ] **P0.3 Read the four primary sources.** Hascoët & Pascual 2013 (Tapenade
+- [x] **P0.3 Read the four primary sources.** Hascoët & Pascual 2013 (Tapenade
       specification), Hascoët et al. 2005 (TBR), Giering & Kaminski 1998 (adjoint
       recipes), Moses & Churavy 2020 (Enzyme). Write a one-page note per paper
-      into `docs/notes/`. This is a deliverable, not preparation.
+      into `docs/notes/`. Completed 2026-08-05: [Tapenade](docs/notes/hascoet-pascual-2013-tapenade.md),
+      [TBR](docs/notes/hascoet-naumann-pascual-2005-tbr.md),
+      [adjoint recipes](docs/notes/giering-kaminski-1998-recipes.md), and
+      [Enzyme](docs/notes/moses-churavy-2020-enzyme.md) were read from source
+      PDFs fetched and inspected on sCluster.
 - [x] **P0.4 fortfront coverage measurement.** Parse every file in fortnum's
       `src/` through fortfront. Report: files parsed, files failed, constructs
       unsupported, and whether the resolved-type and binding queries return
