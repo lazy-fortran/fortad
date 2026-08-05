@@ -555,9 +555,15 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       `docs/design/blas-lapack-rules.md` and `fortad-bench/results/`). The
       built-in rule is explicit opt-in; other mutating interfaces and calls
       inside loops remain outside this scoped path. Giles 2008.
-- [~] **P3.3 Implicit differentiation of nonlinear solves and roots.** Same
-      mechanism; the linear case is done and tested. IFT at the
-      converged point. Measure against Enzyme adjointing the iteration.
+- [x] **P3.3 Implicit differentiation of nonlinear solves and roots.** The
+      structured registry now has an explicit IFT contract for a converged
+      root: caller-supplied residual tangent and adjoint products are evaluated
+      at the root, with no Newton-iteration tape. A cubic scalar-root JVP/VJP
+      oracle passes complete-root finite differences and the adjoint identity
+      on the TU Graz `acluster`; the benchmark record compares the implicit
+      products with Enzyme differentiating the fixed Newton iteration. The
+      rule remains opt-in and does not infer residuals or certify convergence.
+      See `docs/design/implicit-root-rules.md`.
 - [ ] **P3.4 Fixed-point adjoints.** Christianson two-phase.
 - [ ] **P3.5 FFT, quadrature, interpolation, special-function rules.** Sourced
       from fortnum's analytical kernels and DLMF identities.
@@ -619,14 +625,12 @@ over straight-line code, branches, reduction loops and array-element writes,
 Hessian-vector products, a user-rule registry, the compiler matrix, and both
 halves of the performance goal on one kernel.
 
-**The largest predicted lever is still unbuilt.** The dossier argues that
+**The largest predicted lever is now built.** The dossier argues that
 differentiating a solve through the implicit function theorem, rather than
 through its iterations, is an asymptotic win that no loop-level cleverness
-recovers. The registry is the mechanism for it, but the registry currently
-carries scalar partials only. Structured rules that emit *statements* - solve
-with the existing factorisation, transpose a BLAS call, apply the IFT at a
-converged point - are the next substantial piece of work, and the one most
-likely to change the shape of the benchmark results.
+recovers. The registry is the mechanism for it: structured rules emit
+statements for a factor-reusing linear solve, BLAS/LAPACK calls, and a
+caller-supplied IFT residual at a converged point.
 
 Per-iteration storage, nested loops, and the product documentation are done.
 Structured rules that emit statements are built: `fad_add_call_rule` takes

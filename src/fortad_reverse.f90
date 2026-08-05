@@ -342,6 +342,20 @@ contains
         do while (changed)
             changed = .false.
             do j = 1, primal%n_stmts
+                if (primal%stmts(j)%kind == FAD_CALL_STMT) then
+                    if (.not. call_reads_any(primal, primal%stmts(j), varied)) cycle
+                    do i = 1, size(primal%stmts(j)%call_args)
+                        di = call_arg_decl_index(primal, &
+                                                 primal%stmts(j)%call_args(i))
+                        if (di <= 0) cycle
+                        if (.not. is_real_type(primal%decls(di))) cycle
+                        if (.not. varied(di)) then
+                            varied(di) = .true.
+                            changed = .true.
+                        end if
+                    end do
+                    cycle
+                end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 if (.not. reads_any(primal, primal%stmts(j)%value, varied)) cycle
                 ! An array-element target must resolve to its array, or the
@@ -363,6 +377,19 @@ contains
         do while (changed)
             changed = .false.
             do j = primal%n_stmts, 1, -1
+                if (primal%stmts(j)%kind == FAD_CALL_STMT) then
+                    if (.not. call_reads_any(primal, primal%stmts(j), useful)) cycle
+                    do i = 1, size(primal%stmts(j)%call_args)
+                        di = call_arg_decl_index(primal, &
+                                                 primal%stmts(j)%call_args(i))
+                        if (di <= 0) cycle
+                        if (.not. useful(di)) then
+                            useful(di) = .true.
+                            changed = .true.
+                        end if
+                    end do
+                    cycle
+                end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 di = primal%decl_index(target_base(primal%stmts(j)%target))
                 if (di == 0) cycle
@@ -401,6 +428,35 @@ contains
             end if
         end do
     end function reads_any
+
+    logical function call_reads_any(p, s, flags) result(yes)
+        !! True when any actual of an opaque call reads a flagged declaration.
+        type(fad_proc_t), intent(in) :: p
+        type(fad_stmt_t), intent(in) :: s
+        logical, intent(in) :: flags(:)
+        integer :: i
+
+        yes = .false.
+        if (.not. allocated(s%call_args)) return
+        do i = 1, size(s%call_args)
+            if (reads_any(p, s%call_args(i), flags)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function call_reads_any
+
+    integer function call_arg_decl_index(p, idx) result(di)
+        !! Declaration index for a simple structured-call actual.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+
+        di = 0
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (p%exprs(idx)%kind == FAD_VAR) then
+            di = p%decl_index(p%exprs(idx)%text)
+        end if
+    end function call_arg_decl_index
 
     recursive logical function mark_reads(p, idx, flags) result(changed)
         !! Flag every variable the expression reads. Returns whether anything
@@ -1363,8 +1419,7 @@ contains
                                       active, zero)
         end do
         do k = 1, n_calls
-            call zero_call_adjoints(primal, adjoint, ssa, calls(k), suffix, &
-                                    active, zero)
+            call zero_call_adjoints(primal, adjoint, ssa, calls(k), suffix, zero)
         end do
         do i = 1, size(spec%independents)
             di = primal%decl_index(trim(spec%independents(i)))
@@ -1444,14 +1499,13 @@ contains
         end if
     end subroutine build_reverse_sweep
 
-    subroutine zero_call_adjoints(primal, adjoint, ssa, rec, suffix, active, zero)
+    subroutine zero_call_adjoints(primal, adjoint, ssa, rec, suffix, zero)
         !! Declare and clear adjoints for the arguments of an opaque call.
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: adjoint
         type(ssa_map_t), intent(in) :: ssa
         type(call_record_t), intent(in) :: rec
         character(len=*), intent(in) :: suffix
-        logical, intent(in) :: active(:)
         integer, intent(in) :: zero
         type(fad_stmt_t) :: s
         integer :: i, di, ignored
@@ -1460,14 +1514,11 @@ contains
             di = primal%decl_index(trim(rec%args(i)))
             if (di == 0) cycle
             if (.not. is_real_type(primal%decls(di))) cycle
-            if (active(di)) then
-                call declare_adjoint(primal, adjoint, ssa, trim(rec%args(i)), &
-                                     suffix)
-                s%kind = FAD_ASSIGN
-                s%target = trim(rec%args(i))//suffix
-                s%value = zero
-                ignored = adjoint%add_stmt(s)
-            end if
+            call declare_adjoint(primal, adjoint, ssa, trim(rec%args(i)), suffix)
+            s%kind = FAD_ASSIGN
+            s%target = trim(rec%args(i))//suffix
+            s%value = zero
+            ignored = adjoint%add_stmt(s)
         end do
     end subroutine zero_call_adjoints
 
