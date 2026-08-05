@@ -573,8 +573,16 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       `fortad-bench/results/`. The rule is caller-supplied and requires a
       convergent map; automatic map extraction and general shaped interfaces
       remain outside this scope. See `docs/design/fixed-point-rules.md`.
-- [ ] **P3.5 FFT, quadrature, interpolation, special-function rules.** Sourced
-      from fortnum's analytical kernels and DLMF identities.
+- [x] **P3.5 FFT, quadrature, interpolation, special-function rules.** The
+      structured rule table is exercised across a real FFT pair, fixed
+      quadrature, four-node Lagrange interpolation, and `erf`, with tangent
+      and adjoint callbacks. A composite generated JVP/VJP passes complete
+      central finite differences, the adjoint identity, and component checks
+      on the TU Graz `acluster`. Existing fortnum records provide the
+      performance context; the generic rule remains explicit and does not
+      infer external ABIs. Complex FFT interfaces, adaptive quadrature,
+      general spline state, and the remaining special-function catalog remain
+      caller-supplied extensions. See `docs/design/library-rules.md`.
 - [x] **P3.6 Revolve checkpointing** for time-stepping adjoints. Griewank &
       Walther 2000. Schedules are executed against a simulated integration in
       the tests, not inspected, and the forward-step count is checked against

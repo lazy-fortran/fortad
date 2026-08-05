@@ -699,6 +699,7 @@ contains
                 allocate (calls(n_calls)%args(size(primal%stmts(i)%call_args)))
                 s%kind = FAD_CALL_STMT
                 s%target = primal%stmts(i)%target
+                if (allocated(s%call_args)) deallocate (s%call_args)
                 allocate (s%call_args(size(primal%stmts(i)%call_args)))
                 do k = 1, size(s%call_args)
                     if (primal%exprs(primal%stmts(i)%call_args(k))%kind /= &
