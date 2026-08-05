@@ -72,6 +72,7 @@ module fortad_ir
         character(len=:), allocatable :: name
         character(len=:), allocatable :: type_name   !! "real(dp)", "integer"
         integer :: intent = FAD_INTENT_NONE
+        logical :: is_value = .false.
         logical :: is_array = .false.
         logical :: is_contiguous = .false.
         logical :: is_result = .false.

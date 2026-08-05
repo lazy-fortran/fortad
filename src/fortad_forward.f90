@@ -376,6 +376,10 @@ contains
 
         d = primal_decl
         d%name = primal_decl%name//suffix
+        ! VALUE belongs to the primal dummy, not to its tangent. A tangent is
+        ! written by the generated routine, so VALUE would conflict with the
+        ! required INTENT(INOUT) contract.
+        d%is_value = .false.
         d%intent = intent_code
         d%is_result = .false.
         if (vec) then

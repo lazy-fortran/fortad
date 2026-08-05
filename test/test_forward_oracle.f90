@@ -36,6 +36,15 @@ program test_forward_oracle
                "end function f"//nl, &
                ["x", "y"], "1.3d0", "0.7d0", failures)
 
+    call check("value_arguments", &
+               "function f(x, y) result(z)"//nl// &
+               "    real(8), value :: x"//nl// &
+               "    real(8), value :: y"//nl// &
+               "    real(8) :: z"//nl// &
+               "    z = x*x + 2.0d0*y"//nl// &
+               "end function f"//nl, &
+               ["x", "y"], "1.3d0", "0.7d0", failures, value_args=.true.)
+
     call check("quotient_and_power", &
                "function f(x, y) result(z)"//nl// &
                "    real(8), intent(in) :: x, y"//nl// &
@@ -101,18 +110,21 @@ program test_forward_oracle
 
 contains
 
-    subroutine check(label, source, independents, xval, yval, failures)
+    subroutine check(label, source, independents, xval, yval, failures, value_args)
         !! Generate, compile, run, and compare against central differences.
         character(len=*), intent(in) :: label, source
         character(len=*), intent(in) :: independents(:)
         character(len=*), intent(in) :: xval, yval
         integer, intent(inout) :: failures
+        logical, intent(in), optional :: value_args
         type(fad_result_t) :: res
         character(len=:), allocatable :: dir, driver
         integer :: stat, unit
-        logical :: ok
+        logical :: ok, expects_value
 
         dir = "build/oracle/"//label
+        expects_value = .false.
+        if (present(value_args)) expects_value = value_args
         call execute_command_line("mkdir -p "//dir, exitstat=stat)
 
         res = fad_jvp(source, independents)
@@ -139,7 +151,7 @@ contains
         write (unit, '(a)') "end module fad_generated"
         close (unit)
 
-        driver = build_driver(size(independents), xval, yval)
+        driver = build_driver(size(independents), xval, yval, expects_value)
         open (newunit=unit, file=dir//"/driver.f90", status="replace", &
               action="write")
         write (unit, '(a)') driver
@@ -168,14 +180,15 @@ contains
         print *, "pass ", label
     end subroutine check
 
-    function build_driver(n_indep, xval, yval) result(text)
+    function build_driver(n_indep, xval, yval, value_args) result(text)
         !! A driver that seeds one tangent direction at a time, compares with
         !! central differences at two step sizes, and checks the error falls
         !! like h**2.
         integer, intent(in) :: n_indep
         character(len=*), intent(in) :: xval, yval
+        logical, intent(in) :: value_args
         character(len=:), allocatable :: text
-        character(len=:), allocatable :: call_line, ndir
+        character(len=:), allocatable :: call_line, ndir, f_interface
 
         ! The generated signature carries a tangent only for the independents
         ! that were requested, so the call must match it exactly.
@@ -187,6 +200,19 @@ contains
             ndir = "1"
         end if
 
+        if (value_args) then
+            f_interface = &
+                "    interface"//nl// &
+                "        function f(x, y) result(z)"//nl// &
+                "            real(8), value :: x"//nl// &
+                "            real(8), value :: y"//nl// &
+                "            real(8) :: z"//nl// &
+                "        end function f"//nl// &
+                "    end interface"//nl
+        else
+            f_interface = "    real(8), external :: f"//nl
+        end if
+
         text = &
             "program driver"//nl// &
             "    use fad_generated, only: f_jvp"//nl// &
@@ -194,7 +220,7 @@ contains
             "    real(8) :: x, y, z, zd, zp, zm, fd1, fd2, e1, e2, h"//nl// &
             "    real(8) :: xd, yd"//nl// &
             "    integer :: k"//nl// &
-            "    real(8), external :: f"//nl// &
+            f_interface// &
             "    logical :: bad"//nl// &
             "    bad = .false."//nl// &
             "    x = "//xval//nl// &

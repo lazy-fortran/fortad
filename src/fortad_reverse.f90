@@ -457,6 +457,9 @@ contains
             names(n) = trim(spec%independents(i))//suffix
             d = primal%decls(di)
             d%name = trim(spec%independents(i))//suffix
+            ! VALUE belongs to the primal argument. An outgoing adjoint is
+            ! written by this routine and must remain a normal dummy.
+            d%is_value = .false.
             d%intent = FAD_INTENT_OUT
             d%is_result = .false.
             ignored = adjoint%add_decl(d)

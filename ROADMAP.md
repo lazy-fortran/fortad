@@ -465,10 +465,12 @@ Smallest thing that is genuinely useful and genuinely measurable.
       three-address, explicit control flow, arena-indexed. Round-trips to Fortran
       through fortfront's emitter with no semantic change — tested by running the
       round-tripped primal against the original on fortnum's test suite.
-- [~] **P1.2 Normalisation passes.** Inlining, loop normalisation, canonical
+- [x] **P1.2 Normalisation passes.** Inlining, loop normalisation, canonical
       three-address form, constant propagation. This is the pass set that buys
       back Enzyme's post-optimisation advantage (dossier §5.6) and it is worth
-      doing well.
+      doing well. The three previously blocked vector-Newton routines now pass
+      independent central-FD checks; focused runtime, build, size and memory
+      records are in `fortad-bench/results/vector_newton_fortad.csv`.
 - [x] **P1.3 Activity analysis.** Forward "varied" ∧ backward "useful". Report
       the fraction of statements eliminated on the VMEC++ kernel.
 - [x] **P1.4 JVP rule table.** Operators, intrinsics, `real(dp)` arithmetic. The
@@ -955,8 +957,10 @@ now differentiate end to end, and whether their numbers are within the
 
 ## Outstanding (2026-08-05)
 
-- Verify the three vector-Newton routines now that the hoisting loop
-  terminates, and record their forward, reverse, and gradient numbers.
+- The three vector-Newton routines are verified and recorded in
+  `fortad-bench/results/vector_newton_fortad.csv`. This is a focused fortad
+  record because the acluster has no compatible Enzyme toolchain; no
+  same-machine 30% comparison is claimed.
 - Forward-mode vectorisation, below, remains the largest systematic gap
   against Enzyme and is the one worth solving properly rather than
   case by case.
