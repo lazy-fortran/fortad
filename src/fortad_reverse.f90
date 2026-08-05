@@ -26,6 +26,7 @@ module fortad_reverse
                         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
                         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
                         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
+                        FAD_DIRECTIVE, &
                         FAD_INTENT_OUT, &
                         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
@@ -1663,6 +1664,7 @@ contains
         character(len=*), intent(in) :: suffix
         type(fad_stmt_t), allocatable :: fused(:)
         integer :: i, rev_do, rev_end, n_new
+        type(fad_stmt_t) :: directive
 
         rev_do = 0
         do i = rec%end_do_stmt + 1, adjoint%n_stmts
@@ -1721,9 +1723,64 @@ contains
             fused(n_new) = adjoint%stmts(i)
         end do
 
+        ! Put the directive immediately before the actual loop. Statements
+        ! generated after the forward body (constant partials, for example)
+        ! may otherwise land between the directive and its loop and make the
+        ! OpenMP construct invalid.
+        if (can_parallelize_fused(rec)) then
+            ! Fortran forbids OpenMP parallel regions in PURE procedures. The
+            ! generated arithmetic remains side-effect free apart from its
+            ! declared outputs, but the directive requires the procedure to
+            ! carry the non-pure OpenMP contract.
+            adjoint%is_pure = .false.
+            do i = 1, n_new
+                if (fused(i)%kind /= FAD_DO) cycle
+                block
+                    integer :: j
+                    do j = n_new, i, -1
+                        fused(j + 1) = fused(j)
+                    end do
+                end block
+                directive%kind = FAD_DIRECTIVE
+                directive%target = omp_fused_directive(rec)
+                fused(i) = directive
+                n_new = n_new + 1
+                exit
+            end do
+        end if
+
         adjoint%stmts(1:n_new) = fused(1:n_new)
         adjoint%n_stmts = n_new
     end subroutine fuse_loop
+
+    logical function can_parallelize_fused(rec) result(yes)
+        !! Whether a fused reduction loop has a race-free OpenMP form.
+        type(loop_record_t), intent(in) :: rec
+        integer :: i
+
+        yes = rec%n_levels == 1 .and. rec%n_carried == 0
+        if (.not. yes) return
+        do i = 1, rec%n_body
+            if (rec%body_is_accum(i) .and. rec%body_sign(i) < 0) then
+                yes = .false.
+                return
+            end if
+        end do
+    end function can_parallelize_fused
+
+    function omp_fused_directive(rec) result(text)
+        !! Mark a fused reduction loop for late OpenMP clause emission.
+        type(loop_record_t), intent(in) :: rec
+        character(len=:), allocatable :: text
+        integer :: i
+
+        text = "!$omp parallel do"
+        do i = 1, rec%shape%n_accumulators
+            if (.not. allocated(rec%accum_names)) cycle
+            if (len_trim(rec%accum_names(i)) == 0) cycle
+            text = text//"|"//trim(rec%accum_names(i))
+        end do
+    end function omp_fused_directive
 
     logical function is_adjoint_setup(s, suffix) result(yes)
         !! True for an assignment whose target is an adjoint variable, which is

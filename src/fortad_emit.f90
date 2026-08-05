@@ -14,6 +14,7 @@ module fortad_emit
                         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
                         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
                         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
+                        FAD_DIRECTIVE, &
                         FAD_INTENT_IN, FAD_INTENT_OUT, &
                         FAD_INTENT_INOUT
     use fortgen_buffer, only: buffer_t
@@ -98,10 +99,13 @@ contains
         integer, intent(in), optional :: nested
         character(len=:), allocatable :: text
         type(buffer_t) :: b
+        type(fad_stmt_t) :: pending_directive
+        logical :: has_pending_directive
         integer :: i, indent, limit
 
         limit = DEFAULT_LINE_LIMIT
         if (present(nested)) limit = limit - nested
+        has_pending_directive = .false.
 
         call write_header(b, p, limit)
         do i = 1, p%n_uses
@@ -115,6 +119,16 @@ contains
 
         indent = 1
         do i = 1, p%n_stmts
+            if (p%stmts(i)%kind == FAD_DIRECTIVE) then
+                pending_directive = p%stmts(i)
+                has_pending_directive = .true.
+                cycle
+            end if
+            if (has_pending_directive .and. p%stmts(i)%kind == FAD_DO) then
+                call write_omp_directive(b, p, pending_directive, i, &
+                                         indent_of(indent), limit)
+                has_pending_directive = .false.
+            end if
             select case (p%stmts(i)%kind)
             case (FAD_END_DO, FAD_END_IF, FAD_ELSE)
                 indent = max(1, indent - 1)
@@ -246,10 +260,207 @@ contains
             call b%put("else")
         case (FAD_END_IF)
             call b%put("end if")
+        case (FAD_DIRECTIVE)
+            call b%put(s%target)
         case default
             call b%put("! unsupported statement")
         end select
     end subroutine write_stmt
+
+    subroutine write_omp_directive(b, p, s, directive_index, indent, limit)
+        !! Add race-free data-sharing clauses from the final IR.
+        type(buffer_t), intent(inout) :: b
+        type(fad_proc_t), intent(in) :: p
+        type(fad_stmt_t), intent(in) :: s
+        integer, intent(in) :: directive_index, limit
+        character(len=*), intent(in) :: indent
+        character(len=:), allocatable :: text, candidates, reductions
+        character(len=:), allocatable :: shared_names, name
+        integer :: do_stmt, end_stmt, depth, i, pos
+
+        text = "!$omp parallel do"
+        candidates = ""
+        if (index(s%target, "|") > 0) then
+            candidates = s%target(index(s%target, "|") + 1:)
+        end if
+        do_stmt = directive_index
+        if (do_stmt <= 0 .or. do_stmt > p%n_stmts .or. &
+            p%stmts(do_stmt)%kind /= FAD_DO) then
+            do_stmt = 0
+            do i = directive_index + 1, p%n_stmts
+                if (p%stmts(i)%kind == FAD_DO) then
+                    do_stmt = i
+                    exit
+                end if
+            end do
+        end if
+        if (do_stmt == 0) then
+            call write_directive(b, text, indent, limit)
+            return
+        end if
+        end_stmt = do_stmt
+        depth = 0
+        do i = do_stmt, p%n_stmts
+            select case (p%stmts(i)%kind)
+            case (FAD_DO)
+                depth = depth + 1
+            case (FAD_END_DO)
+                depth = depth - 1
+                if (depth == 0) then
+                    end_stmt = i
+                    exit
+                end if
+            end select
+        end do
+
+        reductions = ""
+        pos = 1
+        do while (next_name(candidates, pos, name))
+            if (has_assignment_target(p, do_stmt, end_stmt, name)) then
+                call append_name(reductions, name)
+            end if
+        end do
+        if (len_trim(reductions) > 0) then
+            pos = 1
+            do while (next_name(reductions, pos, name))
+                text = text//" reduction(+:"//trim(name)//")"
+            end do
+        end if
+
+        text = text//" default(firstprivate)"
+        shared_names = ""
+        if (allocated(p%params)) then
+            do i = 1, size(p%params)
+                call append_name(shared_names, p%params(i))
+            end do
+        end if
+        if (len_trim(shared_names) > 0) then
+            text = text//" shared("//trim(shared_names)//")"
+        end if
+        call write_directive(b, text, indent, limit)
+    end subroutine write_omp_directive
+
+    logical function next_name(list, pos, name) result(found)
+        character(len=*), intent(in) :: list
+        integer, intent(inout) :: pos
+        character(len=:), allocatable, intent(out) :: name
+        integer :: comma, start
+
+        found = .false.
+        name = ""
+        do while (pos <= len_trim(list))
+            do while (pos <= len_trim(list) .and. list(pos:pos) == " ")
+                pos = pos + 1
+            end do
+            if (pos > len_trim(list)) return
+            start = pos
+            comma = index(list(pos:), ",")
+            if (comma == 0) then
+                name = trim(list(start:))
+                pos = len(list) + 1
+            else
+                name = trim(list(start:pos + comma - 2))
+                pos = pos + comma
+            end if
+            if (len_trim(name) > 0) then
+                found = .true.
+                return
+            end if
+        end do
+    end function next_name
+
+    subroutine append_name(list, name)
+        character(len=:), allocatable, intent(inout) :: list
+        character(len=*), intent(in) :: name
+
+        if (len_trim(list) > 0) list = list//","
+        list = list//trim(name)
+    end subroutine append_name
+
+    logical function has_assignment_target(p, first, last, name) result(found)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        found = .false.
+        do i = first + 1, last - 1
+            if (p%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (base_name(p%stmts(i)%target) == trim(name)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function has_assignment_target
+
+    function base_name(target) result(base)
+        character(len=*), intent(in) :: target
+        character(len=:), allocatable :: base
+        integer :: paren
+
+        paren = index(target, "(")
+        if (paren > 0) then
+            base = trim(target(:paren - 1))
+        else
+            base = trim(target)
+        end if
+    end function base_name
+
+    subroutine write_directive(b, line, indent, limit)
+        !! Wrap a free-form OpenMP directive with directive continuations.
+        type(buffer_t), intent(inout) :: b
+        character(len=*), intent(in) :: line, indent
+        integer, intent(in) :: limit
+        integer :: start, remaining, room, cut
+
+        room = limit - len(indent)
+        if (len(line) <= room) then
+            call b%line(indent//line)
+            return
+        end if
+
+        start = 1
+        do
+            remaining = len(line) - start + 1
+            if (remaining <= room) then
+                if (start == 1) then
+                    call b%line(indent//line(start:))
+                else
+                    call b%line(indent//"!$omp& "//line(start:))
+                end if
+                return
+            end if
+            cut = directive_break(line, start, start + room - 3)
+            if (cut < start) then
+                call b%line(indent//line(start:))
+                return
+            end if
+            if (start == 1) then
+                call b%line(indent//line(start:cut)//" &")
+            else
+                call b%line(indent//"!$omp& "//line(start:cut)//" &")
+            end if
+            start = cut + 1
+            do while (start <= len(line))
+                if (line(start:start) /= " ") exit
+                start = start + 1
+            end do
+        end do
+    end subroutine write_directive
+
+    integer function directive_break(line, lo, hi) result(cut)
+        character(len=*), intent(in) :: line
+        integer, intent(in) :: lo, hi
+        integer :: i
+
+        cut = lo - 1
+        do i = min(hi, len(line)), lo + 1, -1
+            if (line(i:i) == " ") then
+                cut = i - 1
+                return
+            end if
+        end do
+    end function directive_break
 
     recursive subroutine write_expr(b, p, idx)
         !! One expression, parenthesised only where precedence requires it.

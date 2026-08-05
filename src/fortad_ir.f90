@@ -37,6 +37,8 @@ module fortad_ir
     !! `target`. fortad never differentiates the body of such a call - it
     !! applies a registered rule or refuses.
     integer, parameter, public :: FAD_CALL_STMT = 7
+    !! A compiler directive, verbatim in `target` (currently OpenMP).
+    integer, parameter, public :: FAD_DIRECTIVE = 8
 
     ! Argument intents, mirroring fortfront's constants.
     integer, parameter, public :: FAD_INTENT_NONE = 0
