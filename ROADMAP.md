@@ -648,8 +648,12 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 
 ## Phase 6 — Reach
 
-- [x] **P6.1 Compiler matrix.** gfortran, ifx, flang-new, nvfortran, LFortran,
-      NAG. Emitted code builds and vectorises on all of them, in CI.
+- [ ] **P6.1 Compiler matrix.** The available TU Graz hosts currently compile
+      the generated scalar and vector procedures with gfortran, ifx, flang-new,
+      ifort, nvfortran and LFortran; the current reports do not prove
+      vectorisation on all of them. NAG is not installed or licensed, and no
+      CI workflow exists yet. The complete audit and exact remaining gate are
+      in `fortad-bench/results/p61_compiler_matrix_validation.txt`.
 - [x] **P6.2 GPU.** Fused one-level positive reduction loops now emit adjacent
       OpenMP target and OpenACC loop directives with IR-derived data clauses.
       On TU Graz `acluster` (Tesla T4), NVIDIA HPC SDK 26.5 with CUDA 12.9
