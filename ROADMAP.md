@@ -629,7 +629,19 @@ arithmetic. It also unbalanced sums whose signs are lopsided and cost
 the degree-eleven Bezier adjoint eleven points. Both results are worth
 keeping in mind before anyone tries the same thing again.
 
-## hoist_subexpressions does not terminate on a large inlined body
+## hoist_subexpressions does not terminate on a large inlined body (fixed)
+
+Fixed. `insert_before(p, first, s)` shifts every following body statement
+down by one, and the loop kept scanning from the old index, so it re-visited
+the statement it had just displaced and hoisted forever. The cursor now
+advances alongside `first` and `last`. Two needless `invalidate_invariance()`
+calls were removed at the same time, which is what made the re-sweep
+described below expensive rather than merely wasteful.
+
+The analysis kept below is still accurate about the cache behaviour and is
+worth reading before changing the invariance cache again.
+
+## Original analysis: hoist_subexpressions on a large inlined body
 
 Differentiating fortnum's `fixed_newton_solve` after inlining its two
 residuals runs for over two minutes and was killed. Sampling the stack
@@ -648,9 +660,24 @@ nodes to the arena as it goes. On the small kernels the corpus had
 before inlining this never showed; a body with several inlined callees
 is the first thing large enough to expose it.
 
-What this blocks: three of fortnum's vector-Newton routines, which are
-the last of Enzyme's corpus that fortad cannot yet do for a reason that
-is fortad's own rather than a missing rule.
+What this blocked: three of fortnum's vector-Newton routines, which were
+the last of Enzyme's corpus that fortad could not do for a reason that
+was fortad's own rather than a missing rule. Re-check whether those three
+now differentiate end to end, and whether their numbers are within the
+30% band; that verification has not been done since the fix.
+
+## Outstanding (2026-08-05)
+
+- Verify the three vector-Newton routines now that the hoisting loop
+  terminates, and record their forward, reverse, and gradient numbers.
+- Forward-mode vectorisation, below, remains the largest systematic gap
+  against Enzyme and is the one worth solving properly rather than
+  case by case.
+- Slice packing on wide operators, below, is a narrower instance of the
+  same theme: the emitted shape rather than the derivative.
+- Coverage in `fortad-bench` now stands at 59 operators across fortnum and
+  fortfem. Every kernel Enzyme covers that fortad also covers has numbers
+  recorded there; keep new rules paired with a benchmark case.
 
 ## Slice packing pays twice on a wide operator
 
