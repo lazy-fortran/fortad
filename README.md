@@ -118,7 +118,7 @@ wrong derivative.
 | Sparse Jacobians | compressed | column colouring | working, [documented](docs/products.md) |
 | Sparse Hessians | compressed | star colouring | working, [documented](docs/products.md) |
 | Long time-integration adjoints | Revolve schedule | binomial checkpointing | working, [documented](docs/products.md) |
-| Higher order | Taylor coefficients to order d | arithmetic working; codegen not built | [documented](docs/products.md) |
+| Higher order | Taylor coefficients to order d | generated straight-line scalar kernels | working, [documented](docs/products.md) |
 
 ## Where it fits
 
