@@ -507,7 +507,12 @@ Smallest thing that is genuinely useful and genuinely measurable.
       case, is recorded in
       `fortad-bench/results/p21_tbr_fortad.csv` and
       `fortad-bench/results/p21_tbr_validation.txt`. Hascoët et al. 2005.
-- [ ] **P2.2 Linearity analysis.** Report additional bytes saved.
+- [x] **P2.2 Linearity analysis.** The strict carried-variable test removes
+      the state tape from the affine RK4 recurrence: 8000 bytes at `n=1000`,
+      with an independent directional finite-difference check. The
+      counterfactual and emitted-source record are in
+      `fortad-bench/results/p22_linearity_fortad.csv` and
+      `fortad-bench/results/p22_linearity_validation.txt`.
 - [x] **P2.3 Transposition of the linear part.** Derive VJP from the JVP rules by
       transposition (dossier §6.1) rather than writing a second rule table. If
       this proves impractical for Fortran's mutation, record why in
