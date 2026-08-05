@@ -606,12 +606,12 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       independent implementation is available on the TU Graz hosts, and no
       complete-workload measurement demonstrates a win over the existing
       star-coloured HVP route. Reopen only with both.
-- [~] **P4.4 Higher-order Taylor kernels.** The arithmetic is built and
-      pinned against closed-form series: exp, log, sqrt, sin/cos, the Cauchy
-      product, division, and integer powers, all `O(d^2)` per operation rather
-      than the `O(2^d)` of nesting a first-order tool. The **transformation**
-      that rewrites a kernel into calls to these routines is not built; what
-      exists is the piece whose correctness can be pinned exactly.
+- [x] **P4.4 Higher-order Taylor kernels.** The arithmetic and source
+      transformation are built and pinned against closed-form series: exp, log,
+      sqrt, sin/cos, the Cauchy product, division, and integer powers, all
+      `O(d^2)` per operation rather than the `O(2^d)` of nesting a first-order
+      tool. The generated mode is deliberately limited to straight-line scalar
+      kernels; arrays, loops, and branches are refused by name.
 
 ## Phase 5 — Products
 

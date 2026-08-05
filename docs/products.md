@@ -270,13 +270,14 @@ call tay_mul(e, s, z)               ! z = exp(x)*sin(x)
 print *, tay_derivative(z, 5)       ! the fifth derivative
 ```
 
-**What is and is not built.** The arithmetic is here and pinned against
-closed-form series — `exp(t)` giving `1/k!`, `1/(1-t)` giving all ones,
-`log(1+t)`, `sqrt(1+t)`, the sine and cosine series, and integer powers at a
-negative base where an `exp(p log a)` implementation would fail. The
-transformation that rewrites a Fortran kernel into calls to these routines is
-**not** built. Write the calls yourself, or use forward-over-reverse for second
-order, which is generated.
+**What is and is not built.** The arithmetic and the source transformation are
+both here and pinned against closed-form series — `exp(t)` giving `1/k!`,
+`1/(1-t)` giving all ones, `log(1+t)`, `sqrt(1+t)`, the sine and cosine series,
+and integer powers at a negative base where an `exp(p log a)` implementation
+would fail. `fad_taylor` rewrites straight-line scalar kernels into calls to
+these routines. Arrays, loops, and branches are refused by name because their
+coefficient-array storage needs a separate transformation; use forward or
+reverse mode for those cases.
 
 ## Which mode, mechanically
 
