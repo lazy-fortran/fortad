@@ -621,9 +621,17 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 - [x] **P5.2 Sensitivity analysis driver.** Documented and tested as a
       shape rule rather than a wrapper; see docs/products.md. Mode selected automatically from
       input count, output count, and sparsity.
-- [~] **P5.3 Optimiser integration.** Gradients and HVPs exist and are
-      tested; the driver layer does not. Gradients, Gauss-Newton `JᵀJv`,
-      Newton-Krylov `Hv`, full Hessians, wired to fortnum's optimisers.
+- [x] **P5.3 Optimiser integration boundary.** Fortad's gradients, JVPs,
+      VJPs, and HVPs are wired to fortnum's backend-opaque optimiser contract:
+      flat named active vectors, value/product callbacks, provenance and
+      quality status, and validated candidate selection. Gauss-Newton `JᵀJv`
+      is the matrix-free JVP-then-VJP composition; Newton-Krylov consumes
+      `Hv`; a full Hessian is obtained from repeated HVPs or the existing
+      star-coloured recovery. No generic optimiser loop is added: storage,
+      constraints, line search, convergence, and calling conventions belong
+      to the downstream application. The boundary and its independent
+      gradient, JVP/VJP, layout, and registry checks pass remotely; see the
+      P5.3 evidence record.
 - [ ] **P5.4 Public API freeze.** ADOL-C's driver set is the model for the
       surface: `jacobian`, `hessian`, `jac_vec`, `vec_jac`, `hess_vec`, and the
       sparse variants.

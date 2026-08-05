@@ -10,6 +10,13 @@ generated routine plus a few lines of ordinary Fortran. A wrapper hiding those
 lines would have to guess your storage layout, your covariance representation,
 and your optimiser's calling convention, and it would be wrong for someone.
 
+For downstream fortnum users, `fortnum_active_vector` and
+`fortnum_ad_interfaces` provide the stable boundary around those routines:
+named blocks pack into the optimiser's flat vector, while value, JVP, VJP,
+gradient, and HVP callbacks carry backend and quality status. The outer
+optimiser remains caller-owned; Gauss-Newton composes JVP with VJP, and
+Newton-Krylov consumes HVPs without requiring a materialised Hessian.
+
 | You want | Object | Mode | Cost |
 |---|---|---|---|
 | A gradient for an optimiser | `∇f` | reverse | one sweep, any number of inputs |
