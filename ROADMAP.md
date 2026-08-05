@@ -471,8 +471,14 @@ Smallest thing that is genuinely useful and genuinely measurable.
       doing well. The three previously blocked vector-Newton routines now pass
       independent central-FD checks; focused runtime, build, size and memory
       records are in `fortad-bench/results/vector_newton_fortad.csv`.
-- [x] **P1.3 Activity analysis.** Forward "varied" ∧ backward "useful". Report
-      the fraction of statements eliminated on the VMEC++ kernel.
+- [x] **P1.3 Activity analysis.** Forward "varied" ∧ backward "useful". On the
+      plain-array arithmetic form of the VMEC++ half-grid kernel, activity
+      removes 1 of 9 candidate derivative sites (11.11%); the directional
+      central-FD oracle, build time, generated size, memory and vectorisation
+      record are in `fortad-bench/results/p13_activity_validation.txt`. The
+      derived-type allocation wrapper remains outside fortad's supported
+      source subset, so this measures the exact kernel arithmetic rather than
+      pretending the wrapper was transformed.
 - [x] **P1.4 JVP rule table.** Operators, intrinsics, `real(dp)` arithmetic. The
       table is declarative and separate from the transformation, in the shape of
       ChainRules' `frule` (dossier §6.1). Rules for array expressions, not only
