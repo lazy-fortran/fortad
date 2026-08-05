@@ -48,6 +48,13 @@ Work through this file one checkbox at a time.
 11. Update committed benchmark evidence when an item affects performance.
 12. Check off the item, commit implementation + tests + evidence + this file
     together, push, and only then select the next item.
+13. **Report to Zulip whenever something is finished.** DM krystophny with the
+    updated results for *all* benchmarks, not only the ones the item touched:
+    the full fortnum table, the full fortfem table, Enzyme's own suite, and
+    the worst ratio in each. A finished item that has not been reported is
+    not finished. Use the plot URLs from the upload script rather than local
+    paths, and post the numbers even when they did not move — an unchanged
+    table is itself the result.
 
 A mechanism name never selects a winner. Production selection requires an
 independent oracle plus measured application runtime and peak memory — the same
@@ -57,6 +64,266 @@ Do not combine checklist items. If an item contains several independent changes,
 split it into smaller checkboxes before writing code.
 
 ---
+
+## Current work order: fortad integrated everywhere, at the current feature set
+
+This section is self-contained and actionable. It is the whole task: fortad
+is the derivative engine for every repository that needs one, everything
+downstream builds and tests cleanly on it, every benchmark is recorded, and
+the upstream defects that stop any of that are fixed. An agent should be able
+to work from this section alone.
+
+Scope note: this is about integrating the **current** feature set flawlessly,
+not about extending it. New modes and new rules are out of scope here — they
+belong in the phase sections below. If a downstream operator needs a rule
+fortad does not have, that is a new item, not part of this one.
+
+### Definition of done
+
+1. `fortnum` and `fortfem` both build, test, and lint clean with
+   `AD_ENGINE = FORTAD`, on `main`, with green CI.
+2. Enzyme is reachable only as the correctness oracle in tests. It is not a
+   user-facing backend anywhere, and anything it covers that fortad does not
+   is marked unsupported rather than quietly routed to Enzyme.
+3. Every operator both engines can differentiate has forward, reverse and
+   gradient numbers committed in `fortad-bench`, all within 30% of Enzyme,
+   with the exceptions named and explained rather than omitted.
+4. `fo` builds and tests every one of these repositories from a cold cache
+   without silently dropping a source.
+5. The results are posted to Zulip per hard execution rule 13.
+
+### Current feature set — what must keep working
+
+This is the surface the integration has to hold up. Any change here is a
+regression, not a refactor.
+
+Modes: forward (tangent), reverse (adjoint), reverse with `--no-primal` for
+the gradient-only contract Tapenade also offers, vector forms of both via
+`--directions`, forward-over-reverse for Hessian-vector products,
+sparse-compressed, and higher-order Taylor.
+
+CLI: `--mode`, `--indep`, `--dep`, `--name`, `--output`, `--directions`,
+`--no-primal`, `--module`, `--proc`, `--roundtrip`, `--rule`, `--call-rule`,
+`--version`, `--help`.
+
+- `--proc NAME` differentiates one procedure inside a module. `lower_source`
+  lowers the target first and then follows the call graph, deliberately:
+  lowering everything segfaults `collect_params` on a benchmark driver.
+- `--rule NAME:partial;partial` registers a scalar derivative rule.
+- `--call-rule NAME:n_args:tangent;...|adjoint;...` registers a structured
+  rule that emits statements — this is what the linear-solve and IFT cases
+  use, and it is the mechanism the dossier's largest predicted lever needs.
+
+Structural passes in `fortad_opt`, all of which a Fortran compiler is not
+permitted to run because reassociation changes rounding: `propagate_copies`,
+`substitute_temps`, `propagate_loop_zeros`, `coalesce_element_updates`,
+`rename_bodies`, `factor_self_update`, `rotate_carried`, `hoist_invariants`,
+`hoist_subexpressions`, `share_subexpressions`, `pack_adjacent_reads`,
+`canonicalise_division_signs`, `reciprocate_divisions`, `regroup_products`,
+`fold_identities`, `fold_negations`, `balance_sums`, `drop_self_assignments`,
+`eliminate_dead_stores`.
+
+IR-level inlining of same-file callees (`fortad_inline.f90`), bounded at
+`MAX_SPLICES = 256`, with registered rules winning over inlining.
+
+Affine recurrence collapse, which is what makes a linear ODE's adjoint
+tape-free. This is a general transformation, not a special case fitted to
+`rk4`; Tapenade reaches the same result through its to-be-recorded analysis.
+
+### Downstream integration
+
+**fortnum — done.** PR #63 merged, five checks green. `FORTNUM_AD_ENGINE` is
+`FORTNUM_AD_FORTAD`. Two traps worth not rediscovering: `inv2` must
+differentiate the closed-form inverse in terms of `a`, not `ainv`, because
+the fortsym rule takes the inverse entries as its input while fortad
+differentiates the closed form; and fpm and CMake keep separate source
+lists, so a new source needs adding in four places or CI fails on a missing
+module while the local fpm build stays green.
+
+Remaining: three vector-Newton routines were the last of Enzyme's fortnum
+corpus fortad could not do, blocked by the `hoist_subexpressions`
+non-termination. That defect is fixed and they have not been re-measured
+since. Do that, and add them to the corpus.
+
+**fortfem — PR #63 open, CI red.** Green locally: 733 passed, 0 failed,
+`fo lint` clean. Both CI failures are described under fortfem below.
+
+### Upstream blockers
+
+These are not fortad bugs, but fortad's integration cannot be called done
+while they stand. Fix them in this order — the first one makes the rest fail
+loudly instead of silently, which is worth more than it sounds.
+
+#### 1. fo silently drops sources it cannot scan
+
+The highest-value fix in the whole set, and a correctness bug rather than a
+convenience one.
+
+`scan_dir` calls `scan_file` per source. On failure it prints the diagnostic,
+removes the unit from the list, and **leaves `ierr` at zero**. The file then
+has no module name and no program name, so `build_dag_from_units` gives it no
+node, so it is never compiled. The compiler never sees it, never reports its
+syntax error, and the build is declared successful with the file missing.
+
+Reproduce with two files:
+
+```
+fpm.toml      name = "p"
+src/ok.f90    any valid module
+src/broken.f90  a module whose body contains the statement `x =`
+```
+
+`fo check` prints a parse diagnostic, then reports
+`Build: OK (1 modules, 0 cached, 1 changed, 1 affected)` and exits 0. Only
+`ok.f90` was compiled.
+
+How it actually shows up: as an undefined reference at link time to a symbol
+the dropped file defined, never as a parse error. Cold-building fortfront
+with `fo` produced `parse_range`, then
+`keyword_should_parse_as_identifier`, then `get_standardizer_input_mode` —
+one per file, each revealed only after the previous was fixed. `fo`'s own
+`test_backend` and `test_backend_gfortran` fail from a cold cache for the
+same reason, confirmed present before any of the recent work, so it is not a
+regression.
+
+A warm scan cache hides all of it. **Always `rm -rf build` before trusting a
+result here**, in fo and in whatever it is building.
+
+What was tried and reverted: making a scan failure a hard build error. It is
+the obvious fix and it is wrong as stated, because `fo` then cannot build
+itself — fortfront cannot yet parse some of fo's own sources. A subtlety any
+fix must preserve: a missing `app/` or `example/` directory *also* returns a
+nonzero status from `scan_dir` and is entirely routine, so a fix cannot treat
+any nonzero status as fatal. The attempt introduced a distinct
+`SCAN_ERR_UNSCANNABLE` code for exactly this reason; that part was sound.
+
+Likely correct fix: keep the unscannable unit in the build with a node of its
+own so it still reaches the compiler and the compiler reports the real error.
+That also degrades gracefully while fortfront has parser gaps — a file `fo`
+cannot scan but gfortran can compile still builds.
+
+Related and already fixed, recorded because the lesson generalises:
+`parse_test_results` filled a fixed 256-entry array and stopped, dropping
+every later result **including failures**. `fo test` on a 738-target project
+printed `Tests: 256 passed`, exited 1, and showed nothing about what failed.
+A cap that silently discards results is worse than no cap, because the output
+still looks like a complete answer.
+
+#### 2. fortfront: 15 sources still do not parse
+
+These are what `fo` drops, so they are the direct cause of blocker 1's
+visible symptoms. Full list with line numbers is in `fortfront/ROADMAP.md`.
+Grouped:
+
+- Ten report a bare `end` or `end block`, meaning a construct slice still
+  ends before its terminator on some path: `parser_array_constructs.f90:426`,
+  `parser_result_types.f90:253`, `parser_statement_data_module.f90:605`,
+  `parser_statement_utilities.f90:564`, `semantic_binary_operations.f90:145`,
+  `semantic_procedure_signature.f90:164`, `type_hierarchy.f90:205`,
+  `standardizer_declarations_inference.f90:180`,
+  `standardizer_parameter.f90:128`, `fortfront_utils.f90:454`.
+- `app/fortfront.f90:377` — `flush (output_unit)` unrecognized.
+- `frontend_compiler_queries.f90:565` and
+  `frontend_compiler_type_queries.f90:1008` — a statement beginning
+  `operator` unrecognized.
+- `semantic_external_declaration_names.f90:138` — an identifier beginning
+  `block_` mistaken for the `block` keyword.
+- `path_validation.f90:296` — reported as an IF construct missing its `then`.
+
+**Critical caveat.** Minimal reproductions of the obvious shapes all pass: a
+`block` holding a `do` inside a `do`, and an `if` inside a `select type` arm
+both parse. These are *not* one shared cause and will not be closed by
+another fallback registration. Each needs per-file bisection down to the
+construct that actually fails. Do not assume otherwise — that assumption cost
+real time already.
+
+Also open, both legal Fortran that gfortran accepts:
+
+- A full-line comment between continuation lines of one statement. Reported
+  as "Unexpected token newline in expression".
+- A character literal continued across lines. The continued part comes back
+  as code tokens; hits fortfem's
+  `example/iga_polar_feec/iga_polar_feec.f90:328` and `:344`, where a `write`
+  format string is split across a continuation. Predates the recent parser
+  work.
+
+And 25 failing tests on `main`, pre-existing and unrelated, grouped by theme
+in `fortfront/ROADMAP.md`. `test_variable_usage_block_construct` is worth
+trying first now that BLOCK reaches a parser from nested bodies.
+
+Already fixed and not to be re-done: `select type` / `select case`, `block`,
+`use` inside `block`, and F2018 `stop ..., quiet=` were all unreachable from
+nested bodies. That took fortfront's own unparseable sources from about 100
+to 15.
+
+#### 3. fortfem CI
+
+Two failures, neither reproducible:
+
+- `fo` builds all 733 targets, then every test fails to compile with
+  `f951: Fatal Error: Reading module build/fo/mod/fortfem_feec.mod at line
+  181 column 54: Expected right parenthesis` — a truncated module file
+  written by gfortran 13.3 under fo's build. The workflow already sets
+  `FO_JOBS: 1` for exactly this class of problem and it still happens.
+- The workflow's fpm retry path then gets through the whole suite with one
+  failure: `test_equation_objective_registry`, exit 2.
+
+Neither reproduces in an `ubuntu:24.04` container with the runner's exact
+gfortran 13.3.0: the project builds and that test passes 18/18. All 733 pass
+locally through `fo`. **Local gfortran here is 16.1.1**, which is why the
+container check was necessary and should be the first step for anyone
+continuing. Note `main` is separately red on a line-truncation error that
+this branch already fixes.
+
+#### Dependency order
+
+`fo` pins fortfront `main`, so a fortfront gap becomes an `fo` scan failure,
+and an `fo` scan failure becomes a silently missing object downstream. fpm
+caches the dependency clone: `rm -rf build/dependencies build/cache.toml`
+before reinstalling `fo` after a fortfront change, or the old fortfront is
+silently reused and the fix appears not to work.
+
+### What belongs in fortad-bench
+
+The corpus repository, never this one — hard execution rule 10. Currently 59
+operators: 17 fortnum, 42 fortfem, plus Enzyme's own suite.
+
+Add for every item:
+
+- The kernel as plain Fortran in `cases/<suite>/kernels/`, plus the `_c.f90`
+  C-bound variant Enzyme differentiates. Both engines are compiled by the
+  same flang deliberately, so the comparison is of derivative code and not of
+  two compilers.
+- A batch loop. One evaluation of these kernels is far below timer
+  resolution, and batching is how fortfem and fortnum actually call them —
+  once per cell or per quadrature point.
+- Registration in the harness `ARITY` table and dispatcher, the `NW` count,
+  and the engine wrapper macros.
+- Forward, reverse and gradient-only numbers, plus build time and generated
+  code size per rule 6, and the vectorisation report per rule 8.
+- Regenerated plots, and the results tables in `README.md`.
+
+Open there: `cases/fortfem/kernels/` holds 43 sources against the harness's
+`NW = 42` — reconcile. Tapenade is not wired in and is the honest comparison
+for the `rk4` reverse margin. Build time is unmeasured although the stated
+goal covers it. Three result caveats stand unresolved and are named in
+`fortad-bench/ROADMAP.md`.
+
+### Verification conventions
+
+Learned the hard way in this work; each one caught a wrong conclusion:
+
+- Compare failing **sets**, not counts, before and after a change. Equal
+  counts have hidden a swap here more than once.
+- Establish the baseline on the same clean tree you will measure. Stale
+  artifacts have produced both a false improvement and a false regression.
+- Reproduce CI in an `ubuntu:24.04` container when the runner disagrees with
+  local. Runner is gfortran 13.3, this box is 16.1, and defects exist that
+  appear on only one.
+- Check the frontend's parse result, not the process exit status.
+- When reducing a file, preserve the original error signature or the
+  reduction converges on a different bug.
+- `gh pr checks` reporting `MERGEABLE` means "no conflicts", not green.
 
 ## What the implementation has established so far
 
