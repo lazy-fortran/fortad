@@ -526,11 +526,15 @@ Smallest thing that is genuinely useful and genuinely measurable.
       registers. Hogan 2014. Measure against the non-preaccumulated adjoint.
 - [x] **P2.6 Reverse-mode benchmark vs Enzyme.** Gradient of a fortnum workload
       with many inputs. Runtime, peak memory, build time.
-- [~] **P2.7 Adjoint of parallel loops.** The generated reduction adjoint
-      already carries no loop-carried dependence and measures 7.4x on 8
-      threads; explicit OpenMP directives are not yet emitted. OpenMP reductions, race-free
-      accumulation, index-set transposition that does not serialise. Hückelheim &
-      Hascoët 2022; Paszke et al. 2021.
+- [x] **P2.7 Adjoint of parallel loops.** One-level fused positive reduction
+      loops now emit `parallel do` with explicit reduction,
+      `default(firstprivate)` scalar scope, and shared procedure dummies. The
+      generated form passed serial/eight-thread independent directional-FD
+      checks for `erfsum`; records are in
+      `fortad-bench/results/p27_openmp_fortad.csv` and
+      `fortad-bench/results/p27_openmp_validation.txt`. Negative accumulations,
+      carried and nested loops, and general index-set transposition remain
+      outside this scoped path. Hückelheim & Hascoët 2022; Paszke et al. 2021.
 
 ## Phase 3 — The structural wins
 
