@@ -31,6 +31,9 @@ module fortad_reverse
                         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
                             fad_add, fad_mul, fad_neg, fad_real
+    use fortad_registry, only: call_rule_has, call_rule_lines, &
+                               call_rule_substitute
+    use fortad_emit, only: emit_expr
     use fortad_reverse_loop, only: loop_shape_t, analyse_loop, LOOP_OK, &
                                    split_accumulation, target_base
     implicit none
@@ -107,6 +110,13 @@ module fortad_reverse
     integer, parameter :: ORDER_STMT = 1
     integer, parameter :: ORDER_LOOP = 2
     integer, parameter :: ORDER_BRANCH = 3
+    integer, parameter :: ORDER_CALL = 4
+
+    type :: call_record_t
+        !! An opaque call whose registered rule is applied in reverse.
+        character(len=:), allocatable :: name
+        character(len=512), allocatable :: args(:)
+    end type call_record_t
 
     type :: branch_record_t
         !! What the reverse sweep needs to invert one if/else construct.
@@ -151,8 +161,9 @@ contains
         integer, allocatable :: rhs_exprs(:)
         type(loop_record_t), allocatable :: loops(:)
         type(branch_record_t), allocatable :: branches(:)
+        type(call_record_t), allocatable :: calls(:)
         integer, allocatable :: order_kind(:), order_index(:)
-        integer :: n_rec, n_loops, n_branches, n_order
+        integer :: n_rec, n_loops, n_branches, n_calls, n_order
 
         status%ok = .true.
         suffix = "_b"
@@ -193,12 +204,14 @@ contains
         call build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
                                  is_element, &
                                  n_rec, loops, n_loops, branches, n_branches, &
+                                 calls, n_calls, &
                                  order_kind, order_index, n_order, active, &
                                  status)
         if (.not. status%ok) return
         call build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
                                  is_element, &
                                  n_rec, loops, n_loops, branches, n_branches, &
+                                 calls, n_calls, &
                                  order_kind, order_index, n_order, &
                                  spec, dependent, suffix, active, status)
     end subroutine differentiate_reverse
@@ -278,6 +291,20 @@ contains
                 ! Branches are handled by re-evaluating the condition in the
                 ! reverse sweep; see emit_branch_forward.
                 continue
+            case (FAD_CALL_STMT)
+                if (.not. call_rule_has(primal%stmts(i)%target)) then
+                    status%ok = .false.
+                    status%message = "no reverse rule for the call to '"// &
+                                     primal%stmts(i)%target// &
+                                     "'; register one with fad_add_call_rule"
+                    return
+                end if
+                if (depth > 0) then
+                    status%ok = .false.
+                    status%message = "reverse mode: structured calls inside "// &
+                                     "loops are not supported"
+                    return
+                end if
             end select
         end do
     end subroutine check_supported
@@ -472,6 +499,7 @@ contains
     subroutine build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
                                    is_element, &
                                    n_rec, loops, n_loops, branches, n_branches, &
+                                   calls, n_calls, &
                                    order_kind, order_index, n_order, active, &
                                    status)
         !! Emit the primal, renaming straight-line assignments into static
@@ -494,6 +522,8 @@ contains
         integer, intent(out) :: n_loops
         type(branch_record_t), allocatable, intent(out) :: branches(:)
         integer, intent(out) :: n_branches
+        type(call_record_t), allocatable, intent(out) :: calls(:)
+        integer, intent(out) :: n_calls
         !! Blocks in forward program order, so the reverse sweep can walk them
         !! backwards. Reversing all straight-line statements and only then the
         !! loops and branches is wrong whenever a construct sits between two
@@ -503,6 +533,7 @@ contains
         logical, intent(in) :: active(:)
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
+        character(len=:), allocatable :: actual
         type(fad_decl_t) :: d
         character(len=:), allocatable :: fresh, current
         type(loop_shape_t) :: shape
@@ -515,11 +546,13 @@ contains
         is_element = .false.
         allocate (loops(max(1, primal%n_stmts)))
         allocate (branches(max(1, primal%n_stmts)))
+        allocate (calls(max(1, primal%n_stmts)))
         allocate (order_kind(max(1, primal%n_stmts)))
         allocate (order_index(max(1, primal%n_stmts)))
         n_rec = 0
         n_loops = 0
         n_branches = 0
+        n_calls = 0
         n_order = 0
 
         i = 1
@@ -593,6 +626,42 @@ contains
                 order_kind(n_order) = ORDER_BRANCH
                 order_index(n_order) = n_branches
                 i = after
+
+            case (FAD_CALL_STMT)
+                ! Calls are opaque, but a registered rule makes their primal
+                ! statement and reverse statement sequence explicit. Keep the
+                ! current SSA names in both records so a call after a scalar
+                ! assignment still refers to the value that reaches it.
+                if (.not. call_rule_has(primal%stmts(i)%target)) then
+                    status%ok = .false.
+                    status%message = "no reverse rule for the call to '"// &
+                                     primal%stmts(i)%target//"'"
+                    return
+                end if
+                n_calls = n_calls + 1
+                calls(n_calls)%name = primal%stmts(i)%target
+                allocate (calls(n_calls)%args(size(primal%stmts(i)%call_args)))
+                s%kind = FAD_CALL_STMT
+                s%target = primal%stmts(i)%target
+                allocate (s%call_args(size(primal%stmts(i)%call_args)))
+                do k = 1, size(s%call_args)
+                    if (primal%exprs(primal%stmts(i)%call_args(k))%kind /= &
+                        FAD_VAR) then
+                        status%ok = .false.
+                        status%message = "reverse mode: structured call arguments "// &
+                                         "must be simple variables"
+                        return
+                    end if
+                    s%call_args(k) = copy_renamed( &
+                        primal, adjoint, primal%stmts(i)%call_args(k), ssa)
+                    actual = emit_expr(adjoint, s%call_args(k))
+                    calls(n_calls)%args(k) = trim(actual)
+                end do
+                ignored = adjoint%add_stmt(s)
+                n_order = n_order + 1
+                order_kind(n_order) = ORDER_CALL
+                order_index(n_order) = n_calls
+                i = i + 1
 
             case default
                 i = i + 1
@@ -1207,6 +1276,7 @@ contains
     subroutine build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
                                    is_element, &
                                    n_rec, loops, n_loops, branches, n_branches, &
+                                   calls, n_calls, &
                                    order_kind, order_index, n_order, &
                                    spec, dependent, suffix, active, status)
         !! Walk backwards, accumulating adjoints.
@@ -1225,6 +1295,8 @@ contains
         integer, intent(in) :: n_loops
         type(branch_record_t), intent(in) :: branches(:)
         integer, intent(in) :: n_branches
+        type(call_record_t), intent(in) :: calls(:)
+        integer, intent(in) :: n_calls
         integer, intent(in) :: order_kind(:), order_index(:), n_order
         type(reverse_spec_t), intent(in) :: spec
         character(len=*), intent(in) :: dependent, suffix
@@ -1290,6 +1362,10 @@ contains
             call zero_branch_adjoints(primal, adjoint, ssa, branches(k), suffix, &
                                       active, zero)
         end do
+        do k = 1, n_calls
+            call zero_call_adjoints(primal, adjoint, ssa, calls(k), suffix, &
+                                    active, zero)
+        end do
         do i = 1, size(spec%independents)
             di = primal%decl_index(trim(spec%independents(i)))
             if (di == 0) cycle
@@ -1348,6 +1424,9 @@ contains
                 call emit_loop_reverse(primal, adjoint, ssa, &
                                        loops(order_index(k)), suffix, &
                                        active, n_tmp, status)
+            case (ORDER_CALL)
+                call emit_call_reverse(adjoint, calls(order_index(k)), &
+                                       suffix, status)
             end select
             if (.not. status%ok) return
         end do
@@ -1364,6 +1443,68 @@ contains
             call fuse_loop(adjoint, loops(1), suffix)
         end if
     end subroutine build_reverse_sweep
+
+    subroutine zero_call_adjoints(primal, adjoint, ssa, rec, suffix, active, zero)
+        !! Declare and clear adjoints for the arguments of an opaque call.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(in) :: ssa
+        type(call_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: active(:)
+        integer, intent(in) :: zero
+        type(fad_stmt_t) :: s
+        integer :: i, di, ignored
+
+        do i = 1, size(rec%args)
+            di = primal%decl_index(trim(rec%args(i)))
+            if (di == 0) cycle
+            if (.not. is_real_type(primal%decls(di))) cycle
+            if (active(di)) then
+                call declare_adjoint(primal, adjoint, ssa, trim(rec%args(i)), &
+                                     suffix)
+                s%kind = FAD_ASSIGN
+                s%target = trim(rec%args(i))//suffix
+                s%value = zero
+                ignored = adjoint%add_stmt(s)
+            end if
+        end do
+    end subroutine zero_call_adjoints
+
+    subroutine emit_call_reverse(adjoint, rec, suffix, status)
+        !! Emit the registered reverse statements for one opaque call.
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(call_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: suffix
+        type(reverse_status_t), intent(inout) :: status
+        character(len=512), allocatable :: args(:), tangents(:), adjoints(:)
+        character(len=:), allocatable :: line
+        type(fad_stmt_t) :: s
+        integer :: i, ignored, n_lines
+
+        n_lines = call_rule_lines(rec%name, "adjoint")
+        if (n_lines == 0) then
+            status%ok = .false.
+            status%message = "no reverse rule body for the call to '"// &
+                             rec%name//"'"
+            return
+        end if
+        allocate (args(size(rec%args)), tangents(size(rec%args)), &
+                  adjoints(size(rec%args)))
+        do i = 1, size(rec%args)
+            args(i) = rec%args(i)
+            tangents(i) = trim(rec%args(i))//suffix
+            adjoints(i) = trim(rec%args(i))//suffix
+        end do
+        do i = 1, n_lines
+            line = call_rule_substitute(rec%name, "adjoint", i, args, tangents, &
+                                        adjoints)
+            s%kind = FAD_ASSIGN
+            s%target = "!fad_raw"
+            s%value = adjoint%add_expr(expr_const(line))
+            ignored = adjoint%add_stmt(s)
+        end do
+    end subroutine emit_call_reverse
 
     subroutine zero_branch_adjoints(primal, adjoint, ssa, rec, suffix, active, &
                                     zero)
@@ -2103,6 +2244,13 @@ contains
                 status%message = "no derivative rule for '"//node_text// &
                     "'; register one with fad_add_rule, or keep it out of "// &
                     "the active path"
+                return
+            end if
+            if (trim(node_text) == "sum") then
+                if (size(node_args) > 0) then
+                    call accumulate(primal, adjoint, node_args(1), seed, ssa, &
+                                    suffix, active, n_tmp, status)
+                end if
                 return
             end if
             one = fad_real(adjoint, "1.0")

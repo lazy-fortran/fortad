@@ -544,10 +544,17 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 - [x] **P3.1 Custom-rule registry.** `frule`/`rrule`, projection, explicit
       opt-out. Wire it to fortnum's existing `fortnum_derivative_registry` so a
       kernel's `analytical` candidate becomes fortad's rule automatically.
-- [~] **P3.2 BLAS and LAPACK rules.** The mechanism exists and is tested on a
-      linear solve; the rule table itself is not yet written. Giles 2008. Reverse of a linear solve
-      reuses the existing factorisation. Measure against Enzyme differentiating
-      through `dgesv`.
+- [x] **P3.2 BLAS and LAPACK rules.** The registry now exposes an explicit
+      `dgesv` rule table: the tangent applies `dB-dA*X` with `dgemm` and reuses
+      the primal LU factorisation with `dgetrs`; the reverse applies the
+      transposed solve and `A_b -= lambda*X^T`. The generated forward and
+      reverse routines pass complete-solve finite-difference and adjoint-
+      identity checks against real LAPACK/BLAS on the TU Graz `acluster`.
+      The existing TU Graz direct-solve fixture records the Enzyme comparison
+      (the cross-record limitation is documented in
+      `docs/design/blas-lapack-rules.md` and `fortad-bench/results/`). The
+      built-in rule is explicit opt-in; other mutating interfaces and calls
+      inside loops remain outside this scoped path. Giles 2008.
 - [~] **P3.3 Implicit differentiation of nonlinear solves and roots.** Same
       mechanism; the linear case is done and tested. IFT at the
       converged point. Measure against Enzyme adjointing the iteration.
