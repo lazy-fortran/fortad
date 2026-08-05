@@ -286,9 +286,9 @@ contains
         inner_name = "fad_inner_vjp"
         if (present(dependent)) then
             adjoint = fad_vjp(source, independents, dependent=dependent, &
-                              name=inner_name)
+                              name=inner_name, from=from)
         else
-            adjoint = fad_vjp(source, independents, name=inner_name)
+            adjoint = fad_vjp(source, independents, name=inner_name, from=from)
         end if
         if (.not. adjoint%ok) then
             res%ok = .false.

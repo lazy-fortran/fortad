@@ -453,7 +453,7 @@ contains
         type(binding_t), intent(in) :: binds(:)
         integer, intent(in) :: n_binds
         type(fad_decl_t) :: d
-        integer :: i, k, ignored
+        integer :: i, k, ignored, actual_index
 
         do i = 1, callee%n_decls
             do k = 1, n_binds
@@ -463,6 +463,13 @@ contains
                 d%name = binds(k)%renamed
                 d%intent = FAD_INTENT_NONE
                 d%is_result = .false.
+                actual_index = target%decl_index(binds(k)%renamed)
+                if (actual_index > 0) then
+                    ! The actual belongs to the caller. Preserve interface
+                    ! properties such as VALUE when the callee dummy is
+                    ! copied over that declaration during inlining.
+                    d%is_value = target%decls(actual_index)%is_value
+                end if
                 ignored = target%add_decl(d)
                 exit
             end do

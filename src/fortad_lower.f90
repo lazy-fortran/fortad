@@ -8,6 +8,7 @@ module fortad_lower
     use fortfront, only: compile_frontend_from_string, &
                         compiler_frontend_options_t, compiler_frontend_result_t, &
                         ast_arena_t, function_def_node, subroutine_def_node, &
+                        module_node, &
                         assignment_node, binary_op_node, identifier_node, &
                         literal_node, call_or_subscript_node, declaration_node, &
                         do_loop_node, if_node, parameter_declaration_node, &
@@ -181,6 +182,8 @@ contains
             return
         end if
         if (.not. status%ok) return
+
+        call inherit_module_uses(res%arena, chosen, proc)
 
         ! Pull in the callees, and the callees of those, until nothing new is
         ! named. A procedure that fails to lower is simply not available to
@@ -500,6 +503,7 @@ contains
 
         d%name = name
         d%type_name = n%type_name
+        d%is_value = n%is_value
         if (n%has_kind .and. n%kind_value > 0) then
             d%type_name = n%type_name//"("//itoa(n%kind_value)//")"
         end if
@@ -520,6 +524,42 @@ contains
             d%dims = dims_text(arena, n%dimension_indices)
         end if
     end subroutine fill_decl
+
+    subroutine inherit_module_uses(arena, procedure_index, proc)
+        !! A module-level USE is visible to every contained procedure.
+        !!
+        !! The selected procedure's body does not contain those declaration
+        !! nodes, so copying only its local specification part loses imports
+        !! such as iso_c_binding from a module procedure. Keep the original
+        !! USE text in the derivative just as we do for procedure-local USEs.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: procedure_index
+        type(fad_proc_t), intent(inout) :: proc
+        integer :: i, j, index
+
+        do i = 1, arena%size
+            if (.not. allocated(arena%entries(i)%node)) cycle
+            select type (m => arena%entries(i)%node)
+            type is (module_node)
+                if (.not. allocated(m%procedure_indices)) cycle
+                if (.not. any(m%procedure_indices == procedure_index)) cycle
+                if (.not. allocated(m%declaration_indices)) cycle
+                do j = 1, size(m%declaration_indices)
+                    index = m%declaration_indices(j)
+                    if (index <= 0 .or. index > arena%size) cycle
+                    if (.not. allocated(arena%entries(index)%node)) cycle
+                    select type (n => arena%entries(index)%node)
+                    type is (use_statement_node)
+                        call add_use(proc, n)
+                    class default
+                        cycle
+                    end select
+                end do
+            class default
+                cycle
+            end select
+        end do
+    end subroutine inherit_module_uses
 
     function dims_text(arena, indices) result(text)
         !! Reproduce a dimension list as source text.

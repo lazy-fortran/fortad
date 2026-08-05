@@ -185,7 +185,8 @@ contains
         type(fad_result_t) :: res
 
         res = fad_vjp(source, independents, dependent=dep_name, name=proc_name, &
-                      module_name=module_name, with_primal=with_primal)
+                      module_name=module_name, with_primal=with_primal, &
+                      from=from_name)
     end function run_reverse
 
     function run_hessian(source, independents, proc_name, module_name, &
@@ -197,7 +198,7 @@ contains
         type(fad_result_t) :: res
 
         res = fad_hvp(source, independents, name=proc_name, &
-                      module_name=module_name)
+                      module_name=module_name, from=from_name)
     end function run_hessian
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
