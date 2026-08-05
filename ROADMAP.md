@@ -500,10 +500,13 @@ Smallest thing that is genuinely useful and genuinely measurable.
 
 ## Phase 2 — Reverse mode
 
-- [~] **P2.1 TBR analysis.** Not needed yet: SSA, recomputation and loop
-      fusion have kept every case so far tape-free, so there is nothing to
-      decide about recording. Revisit with per-iteration storage. Hascoët et al. 2005. Report bytes stored with and
-      without it on each Phase 1 kernel.
+- [x] **P2.1 TBR analysis.** The loop analysis now makes the recording choice
+      explicit: reduction accumulators and recomputable temporaries are not
+      stored, while nonlinear carried states get typed per-loop storage. The
+      Phase 1 byte comparison, including the nonlinear recurrence boundary
+      case, is recorded in
+      `fortad-bench/results/p21_tbr_fortad.csv` and
+      `fortad-bench/results/p21_tbr_validation.txt`. Hascoët et al. 2005.
 - [ ] **P2.2 Linearity analysis.** Report additional bytes saved.
 - [x] **P2.3 Transposition of the linear part.** Derive VJP from the JVP rules by
       transposition (dossier §6.1) rather than writing a second rule table. If
@@ -838,11 +841,12 @@ A competitor winning a benchmark is a defect with an owner, not a limitation to
 document. Currently open:
 
 - **Taped recurrences are about 3.5% slower than Enzyme.** Measured on
-  `fortad-bench/cases/recurrence`; was 10-12% before the square rule. What
-  remains is store-versus-recompute: fortad recomputes the statement it taped
-  the input of, where Enzyme appears to store more. fortad has no cost model
-  for that choice and always prefers recomputation, which is right for the
-  bandwidth-bound cases it was chosen for and wrong here. Dossier section 4.3.
+  `fortad-bench/cases/recurrence`; was 10-12% before the square rule. The TBR
+  boundary is now explicit, but the remaining store-versus-recompute choice
+  inside a taped recurrence has no cost model: fortad recomputes the statement
+  whose input it taped, where Enzyme appears to store more. That is right for
+  the bandwidth-bound cases it was chosen for and wrong here. Dossier section
+  4.3.
 
 - **rk4 with the primal is 10% behind Enzyme, which is within tolerance.** 21.15 ns/input against 19.13,
   on a primal costing 13.44; the reverse sweeps are 7.71 and 5.69. The whole rk4
