@@ -587,9 +587,13 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       Walther 2000. Schedules are executed against a simulated integration in
       the tests, not inspected, and the forward-step count is checked against
       the binomial bound.
-- [~] **P3.7 Sparsity.** Distance-2 column colouring and compressed Jacobians
-      are done and tested. Static pattern propagation and star colouring for
-      Hessians are not; the pattern is supplied by the caller.
+- [x] **P3.7 Sparsity.** Static structural dependency propagation now supplies
+      conservative patterns from lowered procedures; distance-2 column
+      colouring, compressed Jacobian recovery, and star-coloured symmetric
+      Hessian recovery are independently tested. Opaque calls are propagated
+      conservatively across their actual arguments; callers may still supply a
+      more precise pattern when external state or an unmodelled interface is
+      involved.
 
 ## Phase 4 — Second order and higher
 
