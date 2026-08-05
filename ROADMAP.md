@@ -434,11 +434,16 @@ item is cheap and every item can kill or redirect the project.
       is missing to build and splice nodes (see dossier §8.2). Decide: extend
       `transformation_api.f90` upstream, or build a fortad IR lowered from the
       AST. Write the decision and its reasoning into `docs/design/ir.md`.
-- [ ] **P0.6 VMEC++ Jacobian kernel, Fortran port, hand-differentiated.** Port
-      `ComputeHalfGridJacobian` to idiomatic Fortran. Hand-write its JVP and VJP.
-      Validate against finite differences and the adjoint identity. Benchmark
-      against the existing C++/Enzyme numbers on the same machine. **This is the
-      number fortad must beat, and the hand-written version is the ceiling.**
+- [x] **P0.6 VMEC++ Jacobian kernel, Fortran port, hand-differentiated.** Ported
+      `ComputeHalfGridJacobian` to idiomatic Fortran and hand-wrote its JVP and
+      VJP. The central-difference step sweep and arbitrary-cotangent adjoint
+      identity both pass. On the same pinned AMD EPYC 7282 core, hand Fortran
+      takes 16.50 us/JVP and 20.50 us/VJP versus the existing C++/Enzyme
+      reference at 8.66 us/forward and 13.68 us/reverse; peak RSS is 3348 kB
+      versus 3280 kB. The hand version is therefore the measured ceiling that
+      fortad must beat, not a claimed win. Full source, validation, compiler
+      diagnostics, build timing and size records are in fortad-bench commit
+      `eafcd1c`.
 - [x] **P0.7 Establish the benchmark harness in fortad-bench.** Stand up
       `harness/` and the `analytical`, finite-difference and Enzyme adapters,
       inheriting `differentiable-fortran`'s protocol and contract rather than
