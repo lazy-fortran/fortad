@@ -409,9 +409,13 @@ item is cheap and every item can kill or redirect the project.
       2026-08-05: 33 reachable checkouts have recorded revisions and licence files;
       six historical or unavailable sources are explicit metadata-only entries;
       the inventory has no unresolved `VERIFY`, `NOT FETCHED`, or `NONE FOUND` rows.
-- [ ] **P0.2 Resolve the bibliography.** `scripts/fetch_literature.py --resolve`,
+- [x] **P0.2 Resolve the bibliography.** `scripts/fetch_literature.py --resolve`,
       then `--fetch`. Fix titles that Crossref cannot match. Record which papers
-      are open access and which need institutional retrieval.
+      are open access and which need institutional retrieval. Completed
+      2026-08-05: all 33 entries were resolved remotely; nine arXiv PDFs were
+      validated, three additional open-access landing pages were recorded but
+      rejected as HTML, and the remaining 21 entries are marked for
+      institutional/library retrieval. No title correction was needed.
 - [ ] **P0.3 Read the four primary sources.** Hascoët & Pascual 2013 (Tapenade
       specification), Hascoët et al. 2005 (TBR), Giering & Kaminski 1998 (adjoint
       recipes), Moses & Churavy 2020 (Enzyme). Write a one-page note per paper
