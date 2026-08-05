@@ -394,7 +394,10 @@ contains
             call add_use(proc, n)
 
         type is (declaration_node)
-            if (n%is_multi_declaration .and. allocated(n%var_names)) then
+            ! The list is authoritative whenever fortfront retains it;
+            ! dropping later names leaves valid declarations invisible to
+            ! differentiation.
+            if (allocated(n%var_names)) then
                 do k = 1, size(n%var_names)
                     call fill_decl(n, trim(n%var_names(k)), arena, d)
                     ignored = proc%add_decl(d)

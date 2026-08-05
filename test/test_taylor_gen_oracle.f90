@@ -117,14 +117,13 @@ contains
         write (unit, '(a)') driver_text()
         close (unit)
 
-        ! The generated code calls into fortad_taylor, so the library has to be
-        ! on the compile line. Locating the built module is part of the test:
-        ! if the runtime cannot be linked against, the mode is unusable.
+        ! The generated code calls into fortad_taylor.  Compile the small
+        ! runtime directly: fo builds the executable/tests but does not
+        ! promise a libfortad.a archive for this source-level oracle.
         call execute_command_line( &
             "cd "//dir//" && gfortran -O2 -o run "// &
-            "-I$(find ../../build -name 'fortad_taylor.mod' -printf '%h\n' "// &
-            "| head -1) derivs.f90 driver.f90 "// &
-            "$(find ../../build -name 'libfortad.a' | head -1) "// &
+            "../../src/fortad_kinds.f90 ../../src/fortad_taylor.f90 "// &
+            "derivs.f90 driver.f90 "// &
             "> build.log 2>&1", exitstat=stat)
         if (stat /= 0) then
             print *, "FAIL taylor_gen: generated code did not compile"

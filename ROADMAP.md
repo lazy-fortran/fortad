@@ -644,15 +644,12 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 
 - [x] **P6.1 Compiler matrix.** gfortran, ifx, flang-new, nvfortran, LFortran,
       NAG. Emitted code builds and vectorises on all of them, in CI.
-- [x] **P6.2 GPU decision gate.** Parked pending a validated TU Graz
-      toolchain/device path. `acluster` has a Tesla T4, but no NVHPC or
-      released LLVM Flang 23+; `scluster` has no GPU. GCC 12.2 OpenMP-target
-      and OpenACC probes compile but fail the device-execution oracle, even
-      with mandatory OpenMP offload, and the current emitter has only host
-      `!$omp parallel do` support. Reopen only with both OpenMP target and
-      OpenACC compilers, device-mandatory generated-derivative tests, and
-      transfer-inclusive timing plus host/device memory evidence. See the
-      P6.2 decision record.
+- [x] **P6.2 GPU.** Fused one-level positive reduction loops now emit adjacent
+      OpenMP target and OpenACC loop directives with IR-derived data clauses.
+      On TU Graz `acluster` (Tesla T4), NVIDIA HPC SDK 26.5 with CUDA 12.9
+      compiles both forms for `cc75`; mandatory device oracles and the
+      analytic VJP check pass for both, with transfer-inclusive timings and
+      memory measurements recorded in the companion benchmark result.
 - [x] **P6.3 Standalone CLI.** `fortad --mode=reverse --dep=f --indep=x kernel.f90`
       so fortad is usable outside the lazy-fortran stack.
 
