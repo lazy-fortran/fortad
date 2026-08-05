@@ -29,6 +29,7 @@ module fortad_emit
     !! where a reader of the generated file will actually see it.
     character(len=*), parameter :: OUTPUT_LICENCE_NOTE = &
         "This is a derivative of your program, under your own licence."
+    character(len=*), parameter :: ACC_MARKER = "!"//achar(36)//"acc"
 
 
     !! Unary minus binds tighter than the binary arithmetic operators but
@@ -274,11 +275,12 @@ contains
         type(fad_stmt_t), intent(in) :: s
         integer, intent(in) :: directive_index, limit
         character(len=*), intent(in) :: indent
-        character(len=:), allocatable :: text, candidates, reductions
-        character(len=:), allocatable :: shared_names, name
+        character(len=:), allocatable :: text, acc_text, candidates, reductions
+        character(len=:), allocatable :: to_names, tofrom_names, name
         integer :: do_stmt, end_stmt, depth, i, pos
 
-        text = "!$omp parallel do"
+        text = "!$omp target teams distribute parallel do"
+        acc_text = ACC_MARKER//" parallel loop"
         candidates = ""
         if (index(s%target, "|") > 0) then
             candidates = s%target(index(s%target, "|") + 1:)
@@ -327,17 +329,34 @@ contains
             end do
         end if
 
-        text = text//" default(firstprivate)"
-        shared_names = ""
+        to_names = ""
+        tofrom_names = ""
         if (allocated(p%params)) then
             do i = 1, size(p%params)
-                call append_name(shared_names, p%params(i))
+                name = trim(p%params(i))
+                if (loop_writes_param(p, do_stmt, end_stmt, name)) then
+                    call append_name(tofrom_names, name)
+                else if (loop_reads_param(p, do_stmt, end_stmt, name)) then
+                    call append_name(to_names, name)
+                end if
             end do
         end if
-        if (len_trim(shared_names) > 0) then
-            text = text//" shared("//trim(shared_names)//")"
+        if (len_trim(to_names) > 0) then
+            text = text//" map(to:"//trim(to_names)//")"
+            acc_text = acc_text//" copyin("//trim(to_names)//")"
+        end if
+        if (len_trim(tofrom_names) > 0) then
+            text = text//" map(tofrom:"//trim(tofrom_names)//")"
+            acc_text = acc_text//" copy("//trim(tofrom_names)//")"
+        end if
+        if (len_trim(reductions) > 0) then
+            pos = 1
+            do while (next_name(reductions, pos, name))
+                acc_text = acc_text//" reduction(+:"//trim(name)//")"
+            end do
         end if
         call write_directive(b, text, indent, limit)
+        call write_directive(b, acc_text, indent, limit, ACC_MARKER)
     end subroutine write_omp_directive
 
     logical function next_name(list, pos, name) result(found)
@@ -349,9 +368,10 @@ contains
         found = .false.
         name = ""
         do while (pos <= len_trim(list))
-            do while (pos <= len_trim(list) .and. list(pos:pos) == " ")
+            if (list(pos:pos) == " ") then
                 pos = pos + 1
-            end do
+                cycle
+            end if
             if (pos > len_trim(list)) return
             start = pos
             comma = index(list(pos:), ",")
@@ -376,6 +396,77 @@ contains
         if (len_trim(list) > 0) list = list//","
         list = list//trim(name)
     end subroutine append_name
+
+    logical function loop_reads_param(p, first, last, name) result(found)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        character(len=*), intent(in) :: name
+        integer :: i, k
+
+        found = .false.
+        do i = first + 1, last - 1
+            select case (p%stmts(i)%kind)
+            case (FAD_ASSIGN, FAD_IF)
+                if (expression_mentions(p, p%stmts(i)%value, name)) then
+                    found = .true.
+                    return
+                end if
+            case (FAD_DO)
+                if (expression_mentions(p, p%stmts(i)%lo, name) .or. &
+                    expression_mentions(p, p%stmts(i)%hi, name) .or. &
+                    expression_mentions(p, p%stmts(i)%step, name)) then
+                    found = .true.
+                    return
+                end if
+            case (FAD_CALL_STMT)
+                if (allocated(p%stmts(i)%call_args)) then
+                    do k = 1, size(p%stmts(i)%call_args)
+                        if (expression_mentions(p, p%stmts(i)%call_args(k), name)) then
+                            found = .true.
+                            return
+                        end if
+                    end do
+                end if
+            end select
+        end do
+    end function loop_reads_param
+
+    logical function loop_writes_param(p, first, last, name) result(found)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        found = .false.
+        do i = first + 1, last - 1
+            if (p%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (base_name(p%stmts(i)%target) == trim(name)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function loop_writes_param
+
+    recursive logical function expression_mentions(p, idx, name) result(found)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        found = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (trim(p%exprs(idx)%text) == trim(name)) then
+            found = .true.
+            return
+        end if
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            if (expression_mentions(p, p%exprs(idx)%args(i), name)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function expression_mentions
 
     logical function has_assignment_target(p, first, last, name) result(found)
         type(fad_proc_t), intent(in) :: p
@@ -406,12 +497,17 @@ contains
         end if
     end function base_name
 
-    subroutine write_directive(b, line, indent, limit)
-        !! Wrap a free-form OpenMP directive with directive continuations.
+    subroutine write_directive(b, line, indent, limit, prefix)
+        !! Wrap a free-form directive with directive continuations.
         type(buffer_t), intent(inout) :: b
         character(len=*), intent(in) :: line, indent
         integer, intent(in) :: limit
+        character(len=*), intent(in), optional :: prefix
+        character(len=:), allocatable :: continuation
         integer :: start, remaining, room, cut
+
+        continuation = "!$omp&"
+        if (present(prefix)) continuation = trim(prefix)//"&"
 
         room = limit - len(indent)
         if (len(line) <= room) then
@@ -426,7 +522,7 @@ contains
                 if (start == 1) then
                     call b%line(indent//line(start:))
                 else
-                    call b%line(indent//"!$omp& "//line(start:))
+                    call b%line(indent//continuation//" "//line(start:))
                 end if
                 return
             end if
@@ -438,7 +534,7 @@ contains
             if (start == 1) then
                 call b%line(indent//line(start:cut)//" &")
             else
-                call b%line(indent//"!$omp& "//line(start:cut)//" &")
+                call b%line(indent//continuation//" "//line(start:cut)//" &")
             end if
             start = cut + 1
             do while (start <= len(line))
