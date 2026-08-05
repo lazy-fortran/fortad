@@ -490,9 +490,13 @@ Smallest thing that is genuinely useful and genuinely measurable.
       width tuned to SIMD width. Measure the scaling in direction count against
       Enzyme's `BatchDuplicated` and against `k` separate scalar JVPs. Dossier
       §5.4 predicts this is the largest forward-mode win; verify or retract.
-- [~] **P1.9 Second and third kernels.** One from fortnum `special/`, one from
+- [x] **P1.9 Second and third kernels.** One from fortnum `special/`, one from
       `quadrature/` or `interp/`. Fix whatever breaks. Do not generalise before
-      three kernels have demanded the same generalisation.
+      three kernels have demanded the same generalisation. `erfsum` and
+      `fixed_quadrature_integrand` now pass independent central-FD checks and
+      have complete runtime, memory, build and size records in
+      `fortad-bench/results/p19_kernels_fortad.csv`. The wide quadrature
+      access pattern remains the separately named slice-packing limitation.
 
 ## Phase 2 — Reverse mode
 
