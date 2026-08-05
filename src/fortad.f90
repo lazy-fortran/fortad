@@ -30,6 +30,7 @@ module fortad
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
                              recover_entries, star_colour_columns, &
                              recover_symmetric
+    use fortad_pattern, only: pattern_from_proc
     use fortad_revolve, only: revolve_t, revolve_action_t, revolve_schedule, &
                               REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
     use fortad_taylor, only: tay_const, tay_var, tay_add, tay_sub, tay_scale, &
@@ -44,6 +45,7 @@ module fortad
               fad_register_blas_lapack_rules
     public :: sparsity_t, colour_columns, seed_matrix, recover_entries
     public :: star_colour_columns, recover_symmetric
+    public :: fad_static_pattern
     public :: revolve_t, revolve_action_t, revolve_schedule
     public :: REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
     public :: tay_const, tay_var, tay_add, tay_sub, tay_scale, tay_mul, tay_div
@@ -62,6 +64,45 @@ module fortad
     end type fad_result_t
 
 contains
+
+    subroutine fad_static_pattern(source, independents, dependents, pattern, &
+                                  stat, message, from)
+        !! Infer a conservative structural Jacobian pattern from source.
+        character(len=*), intent(in) :: source
+        character(len=*), intent(in) :: independents(:), dependents(:)
+        type(sparsity_t), intent(out) :: pattern
+        integer, intent(out), optional :: stat
+        character(len=:), allocatable, intent(out), optional :: message
+        character(len=*), intent(in), optional :: from
+        type(fad_proc_t) :: primal
+        type(lower_status_t) :: lstat
+        integer :: local_stat
+
+        call lower_source(source, primal, lstat, from)
+        if (.not. lstat%ok) then
+            call empty_public_pattern(pattern)
+            local_stat = 1
+            if (present(message)) then
+                if (allocated(lstat%message)) message = lstat%message
+            end if
+        else
+            call pattern_from_proc(primal, independents, dependents, pattern, &
+                                   local_stat)
+            if (present(message)) then
+                if (local_stat /= 0) message = "static pattern propagation failed"
+            end if
+        end if
+        if (present(stat)) stat = local_stat
+    end subroutine fad_static_pattern
+
+    subroutine empty_public_pattern(pattern)
+        type(sparsity_t), intent(out) :: pattern
+
+        pattern%n_rows = 0
+        pattern%n_cols = 0
+        allocate (pattern%col_start(1), pattern%rows(0))
+        pattern%col_start = 1
+    end subroutine empty_public_pattern
 
     !! Every optional character argument follows one convention: absent, or
     !! present and blank, both mean "use the default". A caller assembling

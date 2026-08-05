@@ -177,9 +177,11 @@ nothing to compress and the method says so rather than losing entries.
 
 Recovery is **exact**, not approximate: compression is a rearrangement.
 
-**You supply the pattern.** fortad cannot infer it from the source in general,
-and inventing one would be worse than asking. Be conservative: an over-full
-pattern costs sweeps, an under-full one silently loses derivative entries.
+For supported lowered procedures, `fad_static_pattern` can infer a conservative
+pattern from the source before colouring. It unions assignments across control
+flow, so an over-full pattern costs sweeps but an under-full one never silently
+loses a possible derivative. For external state or an unmodelled interface,
+you can still supply the pattern explicitly.
 
 ### Sparse Hessians
 
