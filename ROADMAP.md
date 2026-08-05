@@ -564,7 +564,15 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       products with Enzyme differentiating the fixed Newton iteration. The
       rule remains opt-in and does not infer residuals or certify convergence.
       See `docs/design/implicit-root-rules.md`.
-- [ ] **P3.4 Fixed-point adjoints.** Christianson two-phase.
+- [x] **P3.4 Fixed-point adjoints.** The structured registry now covers the
+      Christianson two-phase boundary: a converged fixed-point tangent and a
+      transpose linearized-map adjoint phase use the converged state without
+      recording the forward iteration history. The two-state tanh-map JVP/VJP
+      oracle passes complete-resolve finite differences and the adjoint
+      identity on the TU Graz `acluster`; fixed-point timing records are in
+      `fortad-bench/results/`. The rule is caller-supplied and requires a
+      convergent map; automatic map extraction and general shaped interfaces
+      remain outside this scope. See `docs/design/fixed-point-rules.md`.
 - [ ] **P3.5 FFT, quadrature, interpolation, special-function rules.** Sourced
       from fortnum's analytical kernels and DLMF identities.
 - [x] **P3.6 Revolve checkpointing** for time-stepping adjoints. Griewank &
