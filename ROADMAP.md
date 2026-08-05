@@ -648,12 +648,12 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 
 ## Phase 6 — Reach
 
-- [ ] **P6.1 Compiler matrix.** The generated scalar and vector procedures must
+- [x] **P6.1 Compiler matrix.** The generated scalar and vector procedures
       compile and vectorise with gfortran, ifx, flang-new, nvfortran and
-      LFortran in the TU Graz CI matrix. The matrix now uses a small affine
+      LFortran in the TU Graz CI matrix. The matrix uses a small affine
       reduction kernel so the vectorisation result measures emitted loop
-      structure rather than transcendental-library profitability. The exact
-      remaining runner/report gate is in
+      structure rather than transcendental-library profitability. The five
+      compiler gates pass in CI run 31029227263; the exact report is in
       `fortad-bench/results/p61_compiler_matrix_validation.txt`.
 - [x] **P6.2 GPU.** Fused one-level positive reduction loops now emit adjacent
       OpenMP target and OpenACC loop directives with IR-derived data clauses.
