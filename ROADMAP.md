@@ -644,9 +644,15 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
 
 - [x] **P6.1 Compiler matrix.** gfortran, ifx, flang-new, nvfortran, LFortran,
       NAG. Emitted code builds and vectorises on all of them, in CI.
-- [ ] **P6.2 GPU.** OpenMP target and OpenACC directives on emitted derivative
-      code. Only after the CPU story is measured and won. Transfer-inclusive
-      wall clock is the metric; silent host fallback is a failure.
+- [x] **P6.2 GPU decision gate.** Parked pending a validated TU Graz
+      toolchain/device path. `acluster` has a Tesla T4, but no NVHPC or
+      released LLVM Flang 23+; `scluster` has no GPU. GCC 12.2 OpenMP-target
+      and OpenACC probes compile but fail the device-execution oracle, even
+      with mandatory OpenMP offload, and the current emitter has only host
+      `!$omp parallel do` support. Reopen only with both OpenMP target and
+      OpenACC compilers, device-mandatory generated-derivative tests, and
+      transfer-inclusive timing plus host/device memory evidence. See the
+      P6.2 decision record.
 - [x] **P6.3 Standalone CLI.** `fortad --mode=reverse --dep=f --indep=x kernel.f90`
       so fortad is usable outside the lazy-fortran stack.
 
