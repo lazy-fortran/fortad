@@ -632,9 +632,13 @@ are asymptotic advantages Enzyme cannot obtain by seeing more IR.
       to the downstream application. The boundary and its independent
       gradient, JVP/VJP, layout, and registry checks pass remotely; see the
       P5.3 evidence record.
-- [ ] **P5.4 Public API freeze.** ADOL-C's driver set is the model for the
-      surface: `jacobian`, `hessian`, `jac_vec`, `vec_jac`, `hess_vec`, and the
-      sparse variants.
+- [x] **P5.4 Public API freeze.** The source-transforming `fortad` surface is
+      frozen at `0.1.0`: `fad_jvp`, `fad_vjp`, `fad_hvp`, `fad_taylor`, the
+      round-trip and rule-registration calls, static-pattern and sparse
+      recovery helpers, and the Revolve/Taylor runtime helpers. ADOL-C's
+      `jacobian`, `hessian`, `jac_vec`, `vec_jac`, `hess_vec`, and sparse names
+      are the product taxonomy and are mapped to these calls; literal runtime
+      tape aliases are not exposed. See docs/design/public-api.md.
 
 ## Phase 6 — Reach
 
