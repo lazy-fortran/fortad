@@ -402,10 +402,13 @@ needing no matching LLVM and no plugin, which this benchmark does not capture.
 The purpose of this phase is to find out early whether the thesis is wrong. Every
 item is cheap and every item can kill or redirect the project.
 
-- [ ] **P0.1 Fetch and licence-verify the study corpus.** Run
+- [x] **P0.1 Fetch and licence-verify the study corpus.** Run
       fortad-bench's `scripts/fetch_upstreams.py` and `--licenses`. Resolve every `VERIFY` in
       fortad-bench's `docs/upstreams.toml` against the actual checkout. Any entry with no
-      discoverable licence drops to metadata-only. Record the revisions.
+      discoverable licence drops to metadata-only. Record the revisions. Completed
+      2026-08-05: 33 reachable checkouts have recorded revisions and licence files;
+      six historical or unavailable sources are explicit metadata-only entries;
+      the inventory has no unresolved `VERIFY`, `NOT FETCHED`, or `NONE FOUND` rows.
 - [ ] **P0.2 Resolve the bibliography.** `scripts/fetch_literature.py --resolve`,
       then `--fetch`. Fix titles that Crossref cannot match. Record which papers
       are open access and which need institutional retrieval.
