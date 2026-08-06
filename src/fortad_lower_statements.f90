@@ -614,8 +614,23 @@ contains
         end if
         type_name = canonical_type_name(object_type)
         if (.not. allocated(type_name)) then
-            call refuse_type_bound(status, node%name, &
-                "the receiver must be a concrete type(t) object")
+            if (is_polymorphic_type(object_type)) then
+                call refuse_type_bound(status, node%name, &
+                    "the concrete type is not defined in this source")
+            else
+                call refuse_type_bound(status, node%name, &
+                    "the receiver must be a concrete type(t) object")
+            end if
+            return
+        end if
+        if (len_trim(type_name) == 0) then
+            if (is_polymorphic_type(object_type)) then
+                call refuse_type_bound(status, node%name, &
+                    "the concrete type is not defined in this source")
+            else
+                call refuse_type_bound(status, node%name, &
+                    "the receiver must be a concrete type(t) object")
+            end if
             return
         end if
         method = trim(access%component_name)
@@ -729,7 +744,14 @@ contains
         call static_object_type(arena, access%base_node_index, object_type)
         if (.not. allocated(object_type)) return
         type_name = canonical_type_name(object_type)
-        if (.not. allocated(type_name)) return
+        if (.not. allocated(type_name)) then
+            found = is_polymorphic_type(object_type)
+            return
+        end if
+        if (len_trim(type_name) == 0) then
+            found = is_polymorphic_type(object_type)
+            return
+        end if
         do i = 1, arena%size
             if (.not. arena%has_node_at(i)) cycle
             if (trim(arena%entries(i)%node_type) /= "derived_type") cycle
@@ -833,6 +855,22 @@ contains
         if (len(compact) <= 6) return
         name = compact(6:len(compact) - 1)
     end function canonical_type_name
+
+    logical function is_polymorphic_type(raw) result(found)
+        character(len=*), intent(in) :: raw
+        character(len=:), allocatable :: compact
+        integer :: i
+
+        compact = ""
+        do i = 1, len_trim(raw)
+            if (raw(i:i) == " " .or. raw(i:i) == achar(9)) cycle
+            compact = compact//lower_char(raw(i:i))
+        end do
+        found = .false.
+        if (len(compact) >= 6) then
+            found = compact(:6) == "class("
+        end if
+    end function is_polymorphic_type
 
     logical function same_name(a, b) result(equal)
         character(len=*), intent(in) :: a, b
