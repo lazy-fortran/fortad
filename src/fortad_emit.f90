@@ -10,13 +10,14 @@ module fortad_emit
     !! recursive function returning a deferred-length allocatable would be the
     !! obvious shape and is the one that silently corrupted output here, so the
     !! append form is deliberate, not incidental.
-    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-                        FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
-                        FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
-                        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
-                        FAD_DIRECTIVE, &
-                        FAD_INTENT_IN, FAD_INTENT_OUT, &
-                        FAD_INTENT_INOUT
+    use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_decl_t, &
+        FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
+        FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
+        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
+        FAD_DIRECTIVE, FAD_SELECT_TYPE, FAD_TYPE_IS, &
+        FAD_CLASS_IS, FAD_CLASS_DEFAULT, FAD_END_SELECT, &
+        FAD_INTENT_IN, FAD_INTENT_OUT, &
+        FAD_INTENT_INOUT
     use fortgen_buffer, only: buffer_t
     use fortgen_layout, only: put_wrapped, indent_of, DEFAULT_LINE_LIMIT
     use fortgen_banner, only: put_banner
@@ -127,11 +128,12 @@ contains
             end if
             if (has_pending_directive .and. p%stmts(i)%kind == FAD_DO) then
                 call write_omp_directive(b, p, pending_directive, i, &
-                                         indent_of(indent), limit)
+                    indent_of(indent), limit)
                 has_pending_directive = .false.
             end if
             select case (p%stmts(i)%kind)
-            case (FAD_END_DO, FAD_END_IF, FAD_ELSE)
+            case (FAD_END_DO, FAD_END_IF, FAD_ELSE, FAD_TYPE_IS, &
+                    FAD_CLASS_IS, FAD_CLASS_DEFAULT, FAD_END_SELECT)
                 indent = max(1, indent - 1)
             end select
             block
@@ -140,7 +142,8 @@ contains
                 call put_wrapped(b, indent_of(indent), line%str(), limit)
             end block
             select case (p%stmts(i)%kind)
-            case (FAD_DO, FAD_IF, FAD_ELSE)
+            case (FAD_DO, FAD_IF, FAD_ELSE, FAD_SELECT_TYPE, FAD_TYPE_IS, &
+                    FAD_CLASS_IS, FAD_CLASS_DEFAULT)
                 indent = indent + 1
             end select
         end do
@@ -261,6 +264,18 @@ contains
             call b%put("else")
         case (FAD_END_IF)
             call b%put("end if")
+        case (FAD_SELECT_TYPE)
+            call b%put("select type (")
+            call write_expr(b, p, s%value)
+            call b%put(")")
+        case (FAD_TYPE_IS)
+            call b%put("type is ("//s%target//")")
+        case (FAD_CLASS_IS)
+            call b%put("class is ("//s%target//")")
+        case (FAD_CLASS_DEFAULT)
+            call b%put("class default")
+        case (FAD_END_SELECT)
+            call b%put("end select")
         case (FAD_DIRECTIVE)
             call b%put(s%target)
         case default
@@ -576,12 +591,12 @@ contains
             call b%put(p%exprs(idx)%text)
         case (FAD_BINOP)
             call write_operand(b, p, p%exprs(idx)%args(1), &
-                               prec(p%exprs(idx)%text), .false.)
+                prec(p%exprs(idx)%text), .false.)
             call b%put(" ")
             call b%put(trim(p%exprs(idx)%text))
             call b%put(" ")
             call write_operand(b, p, p%exprs(idx)%args(2), &
-                               prec(p%exprs(idx)%text), .true.)
+                prec(p%exprs(idx)%text), .true.)
         case (FAD_UNOP)
             call b%put(trim(p%exprs(idx)%text))
             call write_operand(b, p, p%exprs(idx)%args(1), PREC_UNARY, .false.)

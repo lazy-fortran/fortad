@@ -23,6 +23,7 @@ of what was actually on disk.
 | Adjoint (reverse) statement construction | Giering & Kaminski, TOMS 24(4), 1998 | Tapenade docs; OpenAD/xaifBooster docs | per-statement adjoint templates | no |
 | Reverse mode as JVP + transposition | JAX `interpreters/ad.py` design (Apache-2.0), Frostig et al. | JAX source read for design only | single linear-rule table serving both modes | no |
 | SSA-form adjoint with control flow | Innes 2019, *Don't Unroll Adjoint* | Zygote.jl (MIT) read for design | block-argument stacking for reversed control flow | no |
+| Runtime type dispatch | Chain rule on the selected smooth branch; the type switch itself is discrete | Enzyme `virtualshadow3.cpp` (Apache-2.0) read for design | preserve `select type` and differentiate the guard chosen at runtime | no |
 | Activity analysis | Hascoët, Naumann & Pascual, FGCS 21, 2005 | xaifBooster, Enzyme `ActivityAnalysis.cpp` | forward/backward dataflow over fortfront AST | no |
 | To-be-recorded (TBR) analysis | Hascoët, Naumann & Pascual, FGCS 21, 2005 | xaifBooster `TBR` docs | decides which values the forward sweep stores | no |
 | Linearity analysis | Naumann 2012, ch. 4 | xaifBooster | avoids storing operands of linear operations | no |

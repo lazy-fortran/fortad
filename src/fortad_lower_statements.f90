@@ -3,12 +3,16 @@ module fortad_lower_statements
     use fortfront, only: ast_arena_t, module_node, assignment_node, &
         binary_op_node, identifier_node, literal_node, call_or_subscript_node, &
         declaration_node, do_loop_node, if_node, parameter_declaration_node, &
-        subroutine_call_node, use_statement_node, comment_node
+        subroutine_call_node, use_statement_node, comment_node, &
+        get_select_type_info, get_type_guard_info, component_access_query_t, &
+        query_component_access
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
         FAD_END_IF, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
-        FAD_INTENT_IN, FAD_INTENT_OUT, FAD_INTENT_INOUT
+        FAD_INTENT_IN, FAD_INTENT_OUT, FAD_INTENT_INOUT, &
+        FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT, &
+        FAD_END_SELECT
     use fortad_lower_types, only: lower_status_t
     use fortad_use_store, only: ensure_use_capacity
     implicit none
@@ -47,6 +51,10 @@ contains
         status%ok = .true.
         if (idx <= 0 .or. idx > arena%size) return
         if (.not. arena%has_node_at(idx)) return
+        if (trim(arena%entries(idx)%node_type) == "select_type") then
+            call lower_select_type(arena, idx, proc, status)
+            return
+        end if
         select type (n => arena%entries(idx)%node)
             type is (comment_node)
             return
@@ -149,6 +157,84 @@ contains
             status%message = "unsupported statement at line "//itoa(node_line(arena, idx))
         end select
     end subroutine lower_stmt
+
+    subroutine lower_select_type(arena, idx, proc, status)
+        !! Preserve a SELECT TYPE as structural IR. Its selector is discrete:
+        !! differentiation happens only inside the runtime-selected guard.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(out) :: status
+        integer, allocatable :: guards(:), body(:)
+        character(len=:), allocatable :: guard_kind
+        type(fad_stmt_t) :: s
+        integer :: selector, default_index, type_index, i, ignored
+
+        status%ok = .true.
+        call get_select_type_info(arena, idx, selector, guards, default_index)
+        if (selector <= 0) then
+            status%ok = .false.
+            status%message = "select type at line "//itoa(node_line(arena, idx))// &
+                " has no selector"
+            return
+        end if
+
+        s%kind = FAD_SELECT_TYPE
+        s%value = lower_expr(arena, selector, proc, status)
+        if (.not. status%ok) return
+        ignored = proc%add_stmt(s)
+
+        do i = 1, size(guards)
+            call get_type_guard_info(arena, guards(i), guard_kind, type_index, body)
+            if (type_index <= 0 .or. .not. arena%has_node_at(type_index)) then
+                status%ok = .false.
+                status%message = "select type guard at line "// &
+                    itoa(node_line(arena, guards(i)))//" has no type name"
+                return
+            end if
+            select case (trim(guard_kind))
+            case ("type_is")
+                s%kind = FAD_TYPE_IS
+            case ("class_is")
+                s%kind = FAD_CLASS_IS
+            case default
+                status%ok = .false.
+                status%message = "unsupported select type guard '"// &
+                    trim(guard_kind)//"' at line "// &
+                    itoa(node_line(arena, guards(i)))
+                return
+            end select
+            select type (name => arena%entries(type_index)%node)
+                type is (identifier_node)
+                s%target = name%name
+            class default
+                status%ok = .false.
+                status%message = "select type guard at line "// &
+                    itoa(node_line(arena, guards(i)))// &
+                    " has an unsupported type name"
+                return
+            end select
+            s%value = 0
+            ignored = proc%add_stmt(s)
+            call lower_body(arena, body, proc, status)
+            if (.not. status%ok) return
+        end do
+
+        if (default_index > 0) then
+            call get_type_guard_info(arena, default_index, guard_kind, &
+                type_index, body)
+            s%kind = FAD_CLASS_DEFAULT
+            s%value = 0
+            if (allocated(s%target)) deallocate (s%target)
+            ignored = proc%add_stmt(s)
+            call lower_body(arena, body, proc, status)
+            if (.not. status%ok) return
+        end if
+
+        s%kind = FAD_END_SELECT
+        s%value = 0
+        ignored = proc%add_stmt(s)
+    end subroutine lower_select_type
 
     subroutine fill_decl(n, name, arena, d)
         !! Translate a fortfront declaration node into a fortad declaration.
@@ -347,8 +433,12 @@ contains
             e%args = subs
             s%target = render_index(proc, e)
         class default
-            status%ok = .false.
-            status%message = "unsupported assignment target"
+            if (trim(arena%entries(idx)%node_type) == "component_access") then
+                s%target = render_component_access(arena, idx, proc, status)
+            else
+                status%ok = .false.
+                status%message = "unsupported assignment target"
+            end if
         end select
     end subroutine lower_target
 
@@ -390,6 +480,16 @@ contains
             return
         end if
 
+        if (trim(arena%entries(idx)%node_type) == "component_access") then
+            block
+                character(len=:), allocatable :: component
+                component = render_component_access(arena, idx, proc, status)
+                if (.not. status%ok) return
+                out = proc%add_expr(expr_var(component))
+            end block
+            return
+        end if
+
         select type (n => arena%entries(idx)%node)
             type is (identifier_node)
             out = proc%add_expr(expr_var(n%name))
@@ -424,6 +524,31 @@ contains
                 itoa(node_line(arena, idx))
         end select
     end function lower_expr
+
+    recursive function render_component_access(arena, idx, proc, status) &
+            result(text)
+        !! Render a component chain through FortFront's compiler-facing query.
+        use fortad_emit, only: emit_expr
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+        character(len=:), allocatable :: text
+        type(component_access_query_t) :: query
+        integer :: base
+
+        text = ""
+        query = query_component_access(arena, idx)
+        if (.not. query%found .or. query%base_node_index <= 0) then
+            status%ok = .false.
+            status%message = "unsupported component access at line "// &
+                itoa(node_line(arena, idx))
+            return
+        end if
+        base = lower_expr(arena, query%base_node_index, proc, status)
+        if (.not. status%ok) return
+        text = emit_expr(proc, base)//"%"//trim(query%component_name)
+    end function render_component_access
 
     logical function is_array_name(proc, name) result(yes)
         !! True when `name` was declared as an array in this procedure.

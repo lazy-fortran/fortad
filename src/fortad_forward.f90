@@ -6,12 +6,14 @@ module fortad_forward
     !! rule needs it and no value has to be saved. Statements whose tangent is a
     !! structural zero produce no code at all: that is activity analysis falling
     !! out of the zero-aware rule builders rather than being a separate pass.
-    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
+    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, &
         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
-        FAD_INTENT_OUT, FAD_INTENT_INOUT, FAD_INTENT_NONE
+        FAD_INTENT_OUT, FAD_INTENT_INOUT, FAD_INTENT_NONE, &
+        FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT, &
+        FAD_END_SELECT
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule
     use fortad_registry, only: call_rule_has, call_rule_lines, &
         call_rule_substitute
@@ -496,13 +498,20 @@ contains
                     if (ps%step /= 0) s%step = copy_expr(primal, tangent, ps%step)
                     ignored = tangent%add_stmt(s)
 
-                case (FAD_END_DO, FAD_END_IF, FAD_ELSE)
+                case (FAD_END_DO, FAD_END_IF, FAD_ELSE, FAD_TYPE_IS, &
+                        FAD_CLASS_IS, FAD_CLASS_DEFAULT, FAD_END_SELECT)
                     s%kind = ps%kind
                     s%value = 0
+                    if (allocated(ps%target)) s%target = ps%target
                     ignored = tangent%add_stmt(s)
 
                 case (FAD_IF)
                     s%kind = FAD_IF
+                    s%value = copy_expr(primal, tangent, ps%value)
+                    ignored = tangent%add_stmt(s)
+
+                case (FAD_SELECT_TYPE)
+                    s%kind = FAD_SELECT_TYPE
                     s%value = copy_expr(primal, tangent, ps%value)
                     ignored = tangent%add_stmt(s)
 

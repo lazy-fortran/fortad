@@ -26,7 +26,7 @@ module fortad_reverse
         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
-        FAD_DIRECTIVE, &
+        FAD_DIRECTIVE, FAD_SELECT_TYPE, &
         FAD_INTENT_OUT, &
         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
@@ -294,6 +294,10 @@ contains
                 ! Branches are handled by re-evaluating the condition in the
                 ! reverse sweep; see emit_branch_forward.
                 continue
+            case (FAD_SELECT_TYPE)
+                status%ok = .false.
+                status%message = "reverse mode: select type is not supported yet"
+                return
             case (FAD_CALL_STMT)
                 if (.not. call_rule_has(primal%stmts(i)%target)) then
                     status%ok = .false.
