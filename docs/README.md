@@ -16,6 +16,7 @@ defaults.
 | [Procedure interfaces](design/procedure-interfaces.md) | optional dummies, `present`, and generated call shape |
 | [Derived components](design/derived-components.md) | bounded scalar, nested, inherited, and array component derivatives |
 | [Complex values](design/complex-values.md) | real-coordinate JVP contract and reverse boundary |
+| [Aliasing and sections](design/aliasing.md) | explicit pointer, target, and noncontiguous-section refusal boundary |
 
 The worked gradient, Jacobian, and linear-UQ constructions in the product guide
 are executed by

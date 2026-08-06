@@ -4,6 +4,7 @@ module fortad_lower_statements
         binary_op_node, identifier_node, literal_node, call_or_subscript_node, &
         declaration_node, do_loop_node, if_node, parameter_declaration_node, &
         subroutine_call_node, use_statement_node, comment_node, &
+        pointer_assignment_node, &
         get_select_type_info, get_type_guard_info, component_access_query_t, &
         query_component_access, query_derived_type, query_type_binding, &
         derived_type_query_t, type_binding_query_t, query_program_unit, &
@@ -65,6 +66,16 @@ contains
             call add_use(proc, n)
 
             type is (declaration_node)
+            if (n%is_pointer .or. n%is_target) then
+                if (allocated(n%var_names)) then
+                    call refuse_alias_declaration(n%var_names(1), n%line, &
+                        n%is_pointer, n%is_target, status)
+                else
+                    call refuse_alias_declaration(n%var_name, n%line, &
+                        n%is_pointer, n%is_target, status)
+                end if
+                return
+            end if
             if (allocated(n%var_names)) then
                 do k = 1, size(n%var_names)
                     call fill_decl(n, trim(n%var_names(k)), arena, d)
@@ -134,6 +145,12 @@ contains
             end block
             ignored = proc%add_stmt(s)
 
+            type is (pointer_assignment_node)
+            status%ok = .false.
+            status%message = "unsupported pointer association at line "// &
+                itoa(n%line)//": storage identity is not tracked"
+            return
+
             type is (do_loop_node)
             s%kind = FAD_DO
             s%target = n%var_name
@@ -159,6 +176,33 @@ contains
             status%message = "unsupported statement at line "//itoa(node_line(arena, idx))
         end select
     end subroutine lower_stmt
+
+    subroutine refuse_alias_declaration(name, line, is_pointer, is_target, status)
+        !! Refuse declarations whose storage may be reached through aliases.
+        !!
+        !! The IR names values, not storage locations. Emitting a derivative
+        !! for a POINTER or TARGET declaration without tracking association
+        !! could silently send an update to the wrong object, so this boundary
+        !! is explicit until P7.3 adds storage-identity analysis.
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: line
+        logical, intent(in) :: is_pointer, is_target
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .false.
+        if (is_pointer) then
+            status%message = "unsupported aliasing declaration '"//trim(name)// &
+                "' at line "//itoa(line)//": pointer association storage "// &
+                "identity is not tracked"
+        else if (is_target) then
+            status%message = "unsupported aliasing declaration '"//trim(name)// &
+                "' at line "//itoa(line)//": TARGET alias storage identity "// &
+                "is not tracked"
+        else
+            status%message = "unsupported aliasing declaration '"//trim(name)// &
+                "' at line "//itoa(line)//": storage identity is not tracked"
+        end if
+    end subroutine refuse_alias_declaration
 
     subroutine lower_select_type(arena, idx, proc, status)
         !! Preserve a SELECT TYPE as structural IR. Its selector is discrete:
@@ -428,6 +472,10 @@ contains
             status%message = "empty assignment target"
             return
         end if
+        if (is_section_node(arena, idx)) then
+            call refuse_array_section(arena, idx, status)
+            return
+        end if
         select type (n => arena%entries(idx)%node)
             type is (identifier_node)
             s%target = n%name
@@ -502,6 +550,11 @@ contains
             return
         end if
 
+        if (is_section_node(arena, idx)) then
+            call refuse_array_section(arena, idx, status)
+            return
+        end if
+
         if (trim(arena%entries(idx)%node_type) == "component_access") then
             block
                 character(len=:), allocatable :: component
@@ -569,6 +622,32 @@ contains
                 itoa(node_line(arena, idx))
         end select
     end function lower_expr
+
+    logical function is_section_node(arena, idx) result(found)
+        !! Whether an AST node denotes an array section rather than an element.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        character(len=:), allocatable :: node_type
+
+        found = .false.
+        if (idx <= 0 .or. idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        node_type = trim(arena%entries(idx)%node_type)
+        found = index(node_type, "array_slice") > 0 .or. &
+            index(node_type, "range_subscript") > 0
+    end function is_section_node
+
+    subroutine refuse_array_section(arena, idx, status)
+        !! Refuse non-element sections until storage identity is tracked.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .false.
+        status%message = "unsupported array section at line "// &
+            itoa(node_line(arena, idx))//": noncontiguous and overlapping "// &
+            "storage identity is not tracked"
+    end subroutine refuse_array_section
 
     recursive integer function lower_type_bound_call(arena, node, proc, status) &
             result(out)
