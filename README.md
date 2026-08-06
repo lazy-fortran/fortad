@@ -51,6 +51,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
 | Derived components | bounded concrete scalar, nested, inherited, and array component paths |
 | Complex JVP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division |
+| Aliasing and sections | named refusal for `pointer`, `target`, pointer association, and noncontiguous sections |
 | GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |
 
 Forward vector mode places the direction index first. For an array `x(n)`, a
@@ -61,6 +62,8 @@ Complex forward examples and the real-coordinate contract are in
 [the complex-values design note](docs/design/complex-values.md).
 The bounded derived-component contract and its JVP/VJP oracle are in
 [the derived-components design note](docs/design/derived-components.md).
+The storage-identity boundary and its executable refusal oracle are in
+[the aliasing and sections design note](docs/design/aliasing.md).
 
 Same-file callees can be inlined before differentiation. A call whose body is
 unavailable needs a registered derivative rule. The built-in structured rules
