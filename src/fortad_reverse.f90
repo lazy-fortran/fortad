@@ -227,6 +227,7 @@ contains
         adjoint%name = primal%name//"_vjp"
         if (allocated(spec%name)) adjoint%name = spec%name
         adjoint%is_function = .false.
+        adjoint%is_elemental = primal%is_elemental
         adjoint%real_suffix = "d0"
         if (allocated(primal%real_suffix)) adjoint%real_suffix = primal%real_suffix
         ! The derivative names the same kinds as the primal, so it needs the

@@ -112,8 +112,9 @@ fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, bounded concrete type-bound calls with procedure
 scope-correct binding resolution, the real-coordinate complex JVP slice, the
 select-type reverse finite-difference closeout, the bounded derived-component
- slice, allocation-lifetime refusals, and alias/section refusals). Its GNU
- behavioral gate is green (408 build targets, 407 derivative targets, 33/33
+slice, allocation-lifetime refusals, alias/section refusals, and elemental
+JVP/VJP preservation). Its GNU behavioral gate is green (408 build targets,
+407 derivative targets, 33/33
 tests). The remaining lint diagnostics are the 106 array-temporary warnings
 listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
@@ -648,10 +649,16 @@ of selected child ends the fixed-path derivative contract.
       calls, and user-defined operators. FortAD remains a source transformer.
       Commit `0209b3a` now preserves optional dummies and `present` branches in
       generated JVP/VJP interfaces. Keyword mapping across inlined siblings,
-      generic resolution, elemental calls, and operator-overloaded inputs
-      remain open. Commit `08201bf` rejects active optional tangents/adjoints
-      explicitly and keeps optional metadata off generated locals and SSA
-      shadows.
+      generic resolution, and operator-overloaded inputs remain open. Commit
+      `08201bf` rejects active optional tangents/adjoints explicitly and keeps
+      optional metadata off generated locals and SSA shadows.
+      - [x] **P7.4a elemental procedure preservation.** The selected same-file
+        procedure's standalone `ELEMENTAL` prefix is carried into generated
+        JVP and VJP headers. The independent
+        [`test_elemental_interface_oracle.f90`](test/test_elemental_interface_oracle.f90)
+        compiles scalar and conformable rank-one calls, checks a central finite
+        difference, and verifies the componentwise reverse product. Generic
+        resolution and user-defined operators remain open.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.

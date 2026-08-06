@@ -17,4 +17,21 @@ compiled JVP/VJP check against finite differences.
 
 This is the supported subset of Phase 7.4.  Generic resolution, optional
 active tangents, and procedure-pointer callbacks remain explicit roadmap
-items; an unsupported call is refused rather than treated as constant.
+items. An unsupported call is refused rather than treated as constant.
+
+## Elemental procedures
+
+When the selected same-file procedure has an `elemental` prefix, FortAD keeps
+that prefix on both generated derivatives.  The resulting elemental JVP and
+VJP accept scalar or conformable array actuals, so the array call is still the
+compiler's elementwise operation rather than a loop synthesized by FortAD.
+
+```fortran
+elemental pure subroutine scale_jvp(x, x_d, z, z_d)
+```
+
+[`test_elemental_interface_oracle.f90`](../../test/test_elemental_interface_oracle.f90)
+compiles the primal and both derivatives, checks a scalar central difference,
+and calls the generated routines on rank-one arrays. Generic resolution by
+type, kind, or rank and user-defined operators remain open. These paths must
+resolve the selected implementation before derivative generation.

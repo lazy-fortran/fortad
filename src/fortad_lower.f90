@@ -234,6 +234,7 @@ contains
                 else
                     call lower_subroutine(res%arena, unit, source, proc, status)
                 end if
+                proc%is_elemental = header_has_attribute(source_header, "elemental")
                 chosen = i
             end if
             if (chosen > 0) exit
@@ -292,6 +293,42 @@ contains
         write (buffer, '(i0)') line
         text = trim(buffer)
     end function line_text
+
+    logical function header_has_attribute(header, attribute) result(found)
+        !! Return whether a procedure header contains a standalone prefix.
+        !! FortFront exposes procedure names and bodies through its stable
+        !! query, but not the ELEMENTAL prefix. The source header is already
+        !! assembled here for dummy-argument extraction.
+        character(len=*), intent(in) :: header, attribute
+        character(len=:), allocatable :: text, needle
+        integer :: i, last
+
+        text = " "//trim(lower_ascii(header))//" "
+        needle = " "//trim(attribute)//" "
+        found = .false.
+        last = len_trim(text) - len(needle) + 1
+        if (last < 1) return
+        do i = 1, last
+            if (text(i:i + len(needle) - 1) == needle) then
+                found = .true.
+                return
+            end if
+        end do
+    end function header_has_attribute
+
+    function lower_ascii(text) result(out)
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: out
+        integer :: i
+
+        allocate (character(len=len(text)) :: out)
+        out = text
+        do i = 1, len(text)
+            if (out(i:i) >= "A" .and. out(i:i) <= "Z") then
+                out(i:i) = achar(iachar(out(i:i)) + 32)
+            end if
+        end do
+    end function lower_ascii
 
     integer function procedure_arg_open(header) result(open)
         !! Find the argument list, skipping a kind selector in a return type.
@@ -459,6 +496,7 @@ contains
         if (allocated(proc%bucket_next)) deallocate (proc%bucket_next)
         proc%is_function = .false.
         proc%is_pure = .true.
+        proc%is_elemental = .false.
         proc%n_uses = 0
         proc%n_exprs = 0
         proc%n_stmts = 0
