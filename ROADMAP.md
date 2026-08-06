@@ -625,6 +625,14 @@ of selected child ends the fixed-path derivative contract.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.
+      - [x] **P7.5a real-coordinate forward slice.** Complex JVPs cover
+            multiplication, division, `conjg`, `real`, `aimag`, `cmplx`, and
+            `abs`, with a compiled hand/finite-difference oracle in
+            [`test_complex_intrinsic_oracle.f90`](test/test_complex_intrinsic_oracle.f90).
+            Active complex reverse paths now refuse before emission with a
+            named diagnostic rather than producing invalid Fortran.
+      Complex reverse rules, complex BLAS, and non-holomorphic objective
+      conventions remain open.
 - [ ] **P7.6 Source forms.** Accept fixed form, CPP and includes,
       semicolon-separated statements, mixed legacy modules, and generated
       interfaces on the same path used by the production build.

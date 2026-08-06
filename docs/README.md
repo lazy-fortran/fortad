@@ -14,6 +14,7 @@ defaults.
 | [Derivative products](products.md) | first-order products, HVPs, UQ, sparse recovery, checkpointing, and Taylor mode |
 | [Public API](design/public-api.md) | exported Fortran calls and types, with defaults and CLI syntax |
 | [Procedure interfaces](design/procedure-interfaces.md) | optional dummies, `present`, and generated call shape |
+| [Complex values](design/complex-values.md) | real-coordinate JVP contract and reverse boundary |
 
 The worked gradient, Jacobian, and linear-UQ constructions in the product guide
 are executed by
@@ -33,6 +34,7 @@ independent oracle.
 | [Implicit roots](design/implicit-root-rules.md) | caller-supplied products at a converged root | [`test_implicit_root_rule_oracle.f90`](../test/test_implicit_root_rule_oracle.f90) |
 | [Fixed points](design/fixed-point-rules.md) | Christianson two-phase rule boundary | [`test_fixed_point_rule_oracle.f90`](../test/test_fixed_point_rule_oracle.f90) |
 | [Library rules](design/library-rules.md) | FFT, quadrature, interpolation, and `erf` callbacks | [`test_library_rules_oracle.f90`](../test/test_library_rules_oracle.f90) |
+| [Complex values](design/complex-values.md) | complex intrinsic JVPs and explicit reverse refusal | [`test_complex_intrinsic_oracle.f90`](../test/test_complex_intrinsic_oracle.f90) |
 | [GPU emission](design/gpu.md) | restricted OpenMP target and OpenACC loop shape | external `fortad-bench` device record |
 
 ## Planning and evidence
