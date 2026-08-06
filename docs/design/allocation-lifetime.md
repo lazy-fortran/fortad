@@ -17,7 +17,7 @@ active allocation state is not represented yet
 The scanner recognises allocatable declarations/components and explicit
 `allocate`, `deallocate`, and `move_alloc` statements, including
 `allocate(source=...)` and `allocate(mold=...)`. Automatic reallocation and
-deep assignment are refused because the same source also carries allocatable
+deep assignment are refused because the same source also contains allocatable
 state. The oracle exercises both behaviors. Comments and quoted strings are
 ignored. This is a refusal contract, not a derivative approximation.
 
