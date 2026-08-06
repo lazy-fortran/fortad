@@ -85,6 +85,10 @@ module fortad_ir
         character(len=:), allocatable :: type_name !! "real(dp)", "integer"
         integer :: intent = FAD_INTENT_NONE
         logical :: is_value = .false.
+        !! Whether this is an optional dummy argument.  Keeping this bit in
+        !! the IR matters for generated interfaces: a copied `present(x)`
+        !! guard is only valid when the generated dummy is optional too.
+        logical :: is_optional = .false.
         logical :: is_array = .false.
         logical :: is_contiguous = .false.
         logical :: is_result = .false.
@@ -272,6 +276,7 @@ contains
         if (allocated(source%dims)) out%dims = source%dims
         out%intent = source%intent
         out%is_value = source%is_value
+        out%is_optional = source%is_optional
         out%is_array = source%is_array
         out%is_contiguous = source%is_contiguous
         out%is_result = source%is_result
@@ -279,7 +284,7 @@ contains
 
     integer function proc_add_decl_fields(self, name, type_name, intent, &
             is_value, is_array, is_contiguous, &
-            is_result, dims) result(idx)
+            is_result, dims, is_optional) result(idx)
         !! Append declaration scalars and strings directly. This is the
         !! compiler-neutral path for transformation code that repeatedly
         !! mirrors declarations; it avoids passing an allocatable-component
@@ -288,13 +293,18 @@ contains
         character(len=*), intent(in) :: name, type_name, dims
         integer, intent(in) :: intent
         logical, intent(in) :: is_value, is_array, is_contiguous, is_result
+        logical, intent(in), optional :: is_optional
         type(fad_decl_t), allocatable :: tmp(:)
         integer :: cap, existing
+        logical :: optional_arg
+
+        optional_arg = .false.
+        if (present(is_optional)) optional_arg = is_optional
 
         existing = self%decl_index(name)
         if (existing > 0) then
             call set_decl_fields(self%decls(existing), name, type_name, intent, &
-                is_value, is_array, is_contiguous, is_result, dims)
+                is_value, is_array, is_contiguous, is_result, dims, optional_arg)
             idx = existing
             return
         end if
@@ -307,16 +317,17 @@ contains
         end if
         self%n_decls = self%n_decls + 1
         call set_decl_fields(self%decls(self%n_decls), name, type_name, intent, &
-            is_value, is_array, is_contiguous, is_result, dims)
+            is_value, is_array, is_contiguous, is_result, dims, optional_arg)
         idx = self%n_decls
     end function proc_add_decl_fields
 
     subroutine set_decl_fields(out, name, type_name, intent, is_value, &
-            is_array, is_contiguous, is_result, dims)
+            is_array, is_contiguous, is_result, dims, is_optional)
         type(fad_decl_t), intent(inout) :: out
         character(len=*), intent(in) :: name, type_name, dims
         integer, intent(in) :: intent
         logical, intent(in) :: is_value, is_array, is_contiguous, is_result
+        logical, intent(in) :: is_optional
 
         if (allocated(out%name)) deallocate (out%name)
         if (allocated(out%type_name)) deallocate (out%type_name)
@@ -326,6 +337,7 @@ contains
         if (len_trim(dims) > 0) out%dims = trim(dims)
         out%intent = intent
         out%is_value = is_value
+        out%is_optional = is_optional
         out%is_array = is_array
         out%is_contiguous = is_contiguous
         out%is_result = is_result

@@ -13,6 +13,7 @@ defaults.
 | [Rosenbrock example](../example/README.md) | generate, compile, and check a reverse-mode derivative |
 | [Derivative products](products.md) | first-order products, HVPs, UQ, sparse recovery, checkpointing, and Taylor mode |
 | [Public API](design/public-api.md) | exported Fortran calls and types, with defaults and CLI syntax |
+| [Procedure interfaces](design/procedure-interfaces.md) | optional dummies, `present`, and generated call shape |
 
 The worked gradient, Jacobian, and linear-UQ constructions in the product guide
 are executed by

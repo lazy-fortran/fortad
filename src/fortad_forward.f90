@@ -127,7 +127,8 @@ contains
                     primal%decls(i)%is_array, &
                     primal%decls(i)%is_contiguous, &
                     decl_dims, suffix, &
-                    FAD_INTENT_NONE, spec%vector, ndir)
+                    FAD_INTENT_NONE, spec%vector, ndir, &
+                    is_optional=primal%decls(i)%is_optional)
             end if
         end do
     end subroutine differentiate_forward
@@ -333,14 +334,15 @@ contains
                     call add_tangent_decl(tangent, decl_name, decl_type, &
                         decl_value, decl_array, decl_contiguous, &
                         decl_dims, suffix, &
-                        FAD_INTENT_OUT, vector, ndir)
+                        FAD_INTENT_OUT, vector, ndir, &
+                        is_optional=primal%decls(di)%is_optional)
                     ! Dropped from the signature but still written by the primal
                     ! statements, so it stays as a local. Whether those writes
                     ! survive is dead-store elimination's decision, not this
                     ! routine's - and an undeclared name would not compile.
                     ignored = tangent%add_decl_fields(decl_name, decl_type, &
                         FAD_INTENT_NONE, decl_value, decl_array, decl_contiguous, &
-                        .false., decl_dims)
+                        .false., decl_dims, primal%decls(di)%is_optional)
                     cycle
                 end if
             end if
@@ -349,13 +351,15 @@ contains
             if (di == 0) cycle
             ignored = tangent%add_decl_fields(decl_name, decl_type, &
                 primal%decls(di)%intent, decl_value, decl_array, decl_contiguous, &
-                primal%decls(di)%is_result, decl_dims)
+                primal%decls(di)%is_result, decl_dims, &
+                primal%decls(di)%is_optional)
             if (.not. active(di)) cycle
             n = n + 1
             names(n) = trim(primal%params(i))//suffix
             call add_tangent_decl(tangent, decl_name, decl_type, decl_value, &
                 decl_array, decl_contiguous, decl_dims, suffix, &
-                tangent_intent(primal%decls(di)%intent), vector, ndir)
+                tangent_intent(primal%decls(di)%intent), vector, ndir, &
+                is_optional=primal%decls(di)%is_optional)
         end do
 
         if (primal%is_function) then
@@ -411,7 +415,7 @@ contains
 
     subroutine add_tangent_decl(tangent, name, type_name, is_value, is_array, &
             is_contiguous, dims, suffix, intent_code, &
-            vector, ndir)
+            vector, ndir, is_optional)
         !! Declare the tangent counterpart of a primal entity.
         !!
         !! In vector mode the direction axis goes **first**, because Fortran
@@ -426,11 +430,14 @@ contains
         integer, intent(in) :: intent_code
         logical, intent(in), optional :: vector
         character(len=*), intent(in), optional :: ndir
+        logical, intent(in), optional :: is_optional
         integer :: ignored
-        logical :: vec
+        logical :: vec, optional_arg
 
         vec = .false.
         if (present(vector)) vec = vector
+        optional_arg = .false.
+        if (present(is_optional)) optional_arg = is_optional
 
         ! VALUE belongs to the primal dummy, not to its tangent. A tangent is
         ! written by the generated routine, so VALUE would conflict with the
@@ -439,16 +446,18 @@ contains
             if (is_array .and. len_trim(dims) > 0) then
                 ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
                     intent_code, .false., .true., .false., .false., &
-                    ndir//", "//trim(dims))
+                    ndir//", "//trim(dims), optional_arg)
             else
                 ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
-                    intent_code, .false., .true., .false., .false., ndir)
+                    intent_code, .false., .true., .false., .false., ndir, &
+                    optional_arg)
             end if
             ! Contiguity of the primal says nothing about the tangent block,
             ! and a wrong `contiguous` is a promise the caller may not keep.
         else
             ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
-                intent_code, .false., is_array, is_contiguous, .false., dims)
+                intent_code, .false., is_array, is_contiguous, .false., dims, &
+                optional_arg)
         end if
     end subroutine add_tangent_decl
 

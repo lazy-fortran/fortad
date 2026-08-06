@@ -246,6 +246,7 @@ contains
         d%name = name
         d%type_name = n%type_name
         d%is_value = n%is_value
+        d%is_optional = n%is_optional
         if (n%has_kind .and. n%kind_value > 0) then
             d%type_name = n%type_name//"("//itoa(n%kind_value)//")"
         end if
