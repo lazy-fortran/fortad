@@ -102,7 +102,7 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `b38de65` (including the FortFront boundary
+The implementation snapshot is `338fc90` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, and bounded concrete type-bound calls). Its GNU bare
 gate is green (407/407 targets, 28/28 tests, lint), and the three previously
