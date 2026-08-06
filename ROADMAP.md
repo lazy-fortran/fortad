@@ -659,12 +659,15 @@ problem-specific rule.
       contains the hand-derived child JVP oracle, transform and build timings,
       generated source and object sizes, runtime and RSS, and the compiler
       optimization report.
-- [ ] **P8.2 `select type` VJP.** Replay the selected guard in reverse, merge
-      n-way SSA values, and propagate one seed through that guard only. Check
-      both children with component finite differences and the adjoint identity.
-      The current implementation covers fixed-shape arms with matching writes
-      and has a compiled adjoint-identity oracle. The broader n-way and finite-
-      difference closeout is still open.
+- [x] **P8.2 `select type` VJP.** Replay the selected guard in reverse, merge
+      n-way SSA values, and propagate one seed through the selected guard only.
+      The compiled [`test_runtime_select_type_oracle.f90`](test/test_runtime_select_type_oracle.f90)
+      exercises four runtime arms (three named children plus `class default`),
+      checks hand gradients, two-step central differences of the untouched
+      primal, and the reverse adjoint identity for every arm. The verified
+      scope is fixed-shape arms with matching writes and an active scalar input;
+      active derived components remain P7.1 work, while dynamic ownership and
+      dispatch-boundary diagnostics remain P8.5 and P8.7 work.
 - [ ] **P8.3 Concrete type-bound calls.** Resolve and transform `pass`, named
       `pass(arg)`, `nopass`, inherited bindings, overrides, and type-bound
       generics. A same-file implementation is inlined or emitted as a separate
