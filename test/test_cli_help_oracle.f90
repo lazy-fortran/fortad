@@ -2,11 +2,20 @@ program test_cli_help_oracle
     use, intrinsic :: iso_fortran_env, only: error_unit
     implicit none
 
-    character(len=1024) :: executable_buffer, line
+    character(len=1024) :: executable_buffer, environment_buffer, line
     character(len=:), allocatable :: executable_path, directory, separator
     character(len=:), allocatable :: cli_path, output_path, command, help_text
     integer :: path_length, separator_pos, unit, stat, ios
     logical :: exists
+
+    call get_environment_variable('FORTAD_CLI', environment_buffer, &
+        length=path_length)
+    if (path_length > 0) then
+        cli_path = environment_buffer(:path_length)
+        inquire (file=cli_path, exist=exists)
+    else
+        exists = .false.
+    end if
 
     call get_command_argument(0, executable_buffer, length=path_length)
     executable_path = executable_buffer(:path_length)
@@ -19,13 +28,24 @@ program test_cli_help_oracle
         separator = '/'
     end if
 
-    cli_path = directory//separator//'fortad'
-    inquire (file=cli_path, exist=exists)
     if (.not. exists) then
-        cli_path = cli_path//'.exe'
+        cli_path = directory//separator//'fortad'
         inquire (file=cli_path, exist=exists)
+        if (.not. exists) then
+            cli_path = directory//separator//'..'//separator//'app'// &
+                separator//'fortad'
+            inquire (file=cli_path, exist=exists)
+        end if
+        if (.not. exists) then
+            cli_path = cli_path//'.exe'
+            inquire (file=cli_path, exist=exists)
+        end if
     end if
-    if (.not. exists) call fail('fortad executable is not beside the test')
+    if (.not. exists) then
+        write (error_unit, '(a)') &
+            'SKIP: fortad CLI app is not built; set FORTAD_CLI to test it'
+        stop 0
+    end if
 
     output_path = directory//separator//'fortad-help-output.txt'
     command = '"'//cli_path//'" --help > "'//output_path//'" 2>&1'
