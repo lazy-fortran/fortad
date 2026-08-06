@@ -1037,10 +1037,12 @@ now differentiate end to end, and whether their numbers are within the
 The compiler matrix distinguishes Intel LLVM `ifx` from legacy `ifort`:
 `ifx` is a supported target and `ifort` is intentionally unsupported. GNU
 FortAD builds and the generated MLP product oracle pass. The downstream
-`nvfortran` 26.5 build now gets through FortFront but still terminates with an
-internal compiler error while compiling `src/fortad_lower.f90`, including at
-`-O0`; no NVIDIA runtime claim is made for FortAD until that gate is resolved
-or the affected source is isolated behind a supported compiler boundary.
+`nvfortran` 26.5 now compiles and links the split FortAD/FortFront lowering
+boundary, and a declaration-free lowering smoke test passes. The independent
+tangent-only oracle still exposes runtime heap corruption on returning from
+`lower_source` for declaration-bearing procedures such as `real(dp)`; no full
+NVIDIA runtime claim is made until that gate is resolved. Intel LLVM `ifx` is
+the supported Intel lane; legacy `ifort` is not supported.
 
 - The three vector-Newton routines are verified and recorded in
   `fortad-bench/results/vector_newton_fortad.csv`. This is a focused fortad
