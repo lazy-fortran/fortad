@@ -4,8 +4,7 @@ module fortad_lower_statements
         binary_op_node, identifier_node, literal_node, call_or_subscript_node, &
         declaration_node, do_loop_node, if_node, parameter_declaration_node, &
         subroutine_call_node, use_statement_node, comment_node, &
-        get_select_type_info, get_type_guard_info
-    use frontend_compiler_queries, only: component_access_query_t, &
+        get_select_type_info, get_type_guard_info, component_access_query_t, &
         query_component_access
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, &
