@@ -612,7 +612,10 @@ of selected child ends the fixed-path derivative contract.
 - [ ] **P7.4 Procedure interfaces.** Preserve optional and keyword arguments,
       `present` branches, generic resolution by type, kind, and rank, elemental
       calls, and user-defined operators. FortAD remains a source transformer.
-      This item handles operator-overloaded input programs.
+      Commit `0209b3a` now preserves optional dummies and `present` branches in
+      generated JVP/VJP interfaces; keyword mapping across inlined siblings,
+      generic resolution, elemental calls, and operator-overloaded inputs
+      remain open.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.
@@ -644,6 +647,9 @@ problem-specific rule.
 - [ ] **P8.2 `select type` VJP.** Replay the selected guard in reverse, merge
       n-way SSA values, and propagate one seed through that guard only. Check
       both children with component finite differences and the adjoint identity.
+      The current implementation covers fixed-shape arms with matching writes
+      and has a compiled adjoint-identity oracle; the broader n-way and finite-
+      difference closeout is still open.
 - [ ] **P8.3 Concrete type-bound calls.** Resolve and transform `pass`, named
       `pass(arg)`, `nopass`, inherited bindings, overrides, and type-bound
       generics. A same-file implementation is inlined or emitted as a separate
