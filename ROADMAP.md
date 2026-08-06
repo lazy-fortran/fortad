@@ -102,7 +102,8 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The current FortAD head is `d77a8a3`. Its GNU bare gate is green (407/407
+The implementation snapshot is `a85aab9`; the later commits in this status
+update documentation only. Its GNU bare gate is green (407/407
 targets, 24/24 tests, lint), and the three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
