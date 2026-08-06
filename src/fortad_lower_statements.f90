@@ -728,10 +728,10 @@ contains
         !! Lower one concrete same-file type-bound function call.
         !!
         !! The bounded contract is deliberately narrow: the receiver is a
-        !! statically declared `type(t)` object, the binding uses the default
-        !! implicit PASS argument, and the implementation is a local function.
-        !! Runtime dispatch, inherited bindings, named PASS, NOPASS, generic,
-        !! and deferred bindings remain explicit refusal cases.
+        !! statically declared `type(t)` object, the binding uses either the
+        !! default implicit PASS or NOPASS, and the implementation is a local
+        !! function. Runtime dispatch, inherited bindings, named PASS, generic,
+        !! deferred, and ambiguous bindings remain explicit refusals.
         type(ast_arena_t), intent(in) :: arena
         type(call_or_subscript_node), intent(in) :: node
         type(fad_proc_t), intent(inout) :: proc
@@ -901,8 +901,9 @@ contains
     logical function is_type_bound_reference(arena, base_idx, proc) result(found)
         !! Distinguish ``object%binding(args)`` from an array component
         !! ``object%values(i)`` before lowering either one.  A local binding is
-        !! enough to route the former through the existing explicit refusal
-        !! diagnostics (named PASS, NOPASS, generic, and deferred).
+        !! enough to route the former through the type-bound lowering and its
+        !! explicit refusal diagnostics (named PASS, generic, deferred, and
+        !! ambiguous bindings).
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: base_idx
         type(fad_proc_t), intent(in) :: proc
