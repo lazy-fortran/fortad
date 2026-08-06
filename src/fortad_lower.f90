@@ -146,12 +146,7 @@ contains
                     source_pos = source_pos + source_next
                     source_line = source_line + 1
                 end do
-                source_next = index(source(source_pos:), new_line('a'))
-                if (source_next == 0) then
-                    source_header = source(source_pos:)
-                else if (source_next > 1) then
-                    source_header = source(source_pos:source_pos + source_next - 2)
-                end if
+                call join_continued_statement(source, source_pos, source_header)
                 source_open = index(source_header, "(")
                 source_close = 0
                 source_depth = 0
@@ -269,6 +264,52 @@ contains
         status%ok = .true.
         status%message = ""
     end subroutine lower_source
+
+    subroutine join_continued_statement(source, start_pos, statement)
+        !! Return the whole logical statement starting at `start_pos`, joining
+        !! free-form continuation lines.
+        !!
+        !! A dummy-argument list that fortad emitted itself is wrapped at the
+        !! line limit, so reading only the first physical line finds no closing
+        !! parenthesis and leaves the procedure with no parameters. That is how
+        !! a forward-over-reverse pass over a wide adjoint used to lose every
+        !! argument of the routine it was differentiating.
+        character(len=*), intent(in) :: source
+        integer, intent(in) :: start_pos
+        character(len=*), intent(out) :: statement
+        character(len=4096) :: piece
+        integer :: pos, next, last
+        logical :: continued
+
+        statement = ""
+        pos = start_pos
+        do
+            if (pos > len(source)) exit
+            next = index(source(pos:), new_line('a'))
+            piece = ""
+            if (next == 0) then
+                piece = source(pos:)
+                pos = len(source) + 1
+            else
+                if (next > 1) piece = source(pos:pos + next - 2)
+                pos = pos + next
+            end if
+            piece = adjustl(piece)
+            if (len_trim(piece) > 0) then
+                if (piece(1:1) == "&") piece = adjustl(piece(2:))
+            end if
+            last = len_trim(piece)
+            continued = .false.
+            if (last > 0) continued = piece(last:last) == "&"
+            if (continued) then
+                statement = trim(statement)//" "//piece(:last - 1)
+                cycle
+            end if
+            statement = trim(statement)//" "//piece(:last)
+            exit
+        end do
+        statement = adjustl(statement)
+    end subroutine join_continued_statement
 
     subroutine inline_reachable(arena, chosen, source, proc, status)
         !! Lower and inline the sibling procedures actually reachable from proc.
