@@ -607,9 +607,10 @@ of selected child ends the fixed-path derivative contract.
       the primal layout needed by callees. Integer and logical components
       remain passive. Character and procedure components are passive.
       - [x] **P7.1a bounded concrete value slice.** Commits `dcf40a8` and
-        `2aa8e32` support component-named independents on a concrete `type(t)` value, preserving
+        `2aa8e32` support component-named independents on a concrete `type(t)`
+        value, preserving
         scalar, inherited, nested, and array component paths in JVP/VJP shadows.
-        The independent object itself is refused; allocation, alias, character,
+        The independent object itself is refused. Allocation, alias, character,
         logical, and procedure-component activity remain open.
 - [ ] **P7.2 Allocation lifetime.** Cover allocatable components,
       `allocate`, `deallocate`, `source=`, `mold=`, automatic reallocation,
