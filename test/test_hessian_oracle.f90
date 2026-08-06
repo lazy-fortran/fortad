@@ -21,27 +21,27 @@ program test_hessian_oracle
     failures = 0
 
     call check("hess_exp_product", &
-               "function f(x, y) result(z)"//nl// &
-               "    real(8), intent(in) :: x, y"//nl// &
-               "    real(8) :: z"//nl// &
-               "    z = exp(x*y) + sin(x)*y*y"//nl// &
-               "end function f"//nl, "0.4d0", "0.7d0", failures)
+        "function f(x, y) result(z)"//nl// &
+        "    real(8), intent(in) :: x, y"//nl// &
+        "    real(8) :: z"//nl// &
+        "    z = exp(x*y) + sin(x)*y*y"//nl// &
+        "end function f"//nl, "0.4d0", "0.7d0", failures)
 
     call check("hess_chain", &
-               "function f(x, y) result(z)"//nl// &
-               "    real(8), intent(in) :: x, y"//nl// &
-               "    real(8) :: t"//nl// &
-               "    real(8) :: z"//nl// &
-               "    t = x*x + y*y"//nl// &
-               "    z = log(1.0d0 + t)*tanh(x)"//nl// &
-               "end function f"//nl, "0.6d0", "0.9d0", failures)
+        "function f(x, y) result(z)"//nl// &
+        "    real(8), intent(in) :: x, y"//nl// &
+        "    real(8) :: t"//nl// &
+        "    real(8) :: z"//nl// &
+        "    t = x*x + y*y"//nl// &
+        "    z = log(1.0d0 + t)*tanh(x)"//nl// &
+        "end function f"//nl, "0.6d0", "0.9d0", failures)
 
     call check("hess_transcendental", &
-               "function f(x, y) result(z)"//nl// &
-               "    real(8), intent(in) :: x, y"//nl// &
-               "    real(8) :: z"//nl// &
-               "    z = sqrt(1.0d0 + x*x + y*y)*cos(x - y)"//nl// &
-               "end function f"//nl, "0.5d0", "1.1d0", failures)
+        "function f(x, y) result(z)"//nl// &
+        "    real(8), intent(in) :: x, y"//nl// &
+        "    real(8) :: z"//nl// &
+        "    z = sqrt(1.0d0 + x*x + y*y)*cos(x - y)"//nl// &
+        "end function f"//nl, "0.5d0", "1.1d0", failures)
 
     if (failures == 0) then
         print *, "test_hessian_oracle: all cases passed"
@@ -70,7 +70,7 @@ contains
             return
         end if
 
-        hvp = fad_hvp(source, ["x", "y"], name="f_hvp")
+        hvp = fad_hvp(source, ["x", "y"])
         if (.not. hvp%ok) then
             print *, "FAIL ", label, ": hvp generation failed: ", hvp%message
             failures = failures + 1
@@ -78,7 +78,7 @@ contains
         end if
 
         open (newunit=unit, file=dir//"/primal.f90", status="replace", &
-              action="write")
+            action="write")
         write (unit, '(a)') "module fad_primal"
         write (unit, '(a)') "    implicit none"
         write (unit, '(a)') "contains"
@@ -87,7 +87,7 @@ contains
         close (unit)
 
         open (newunit=unit, file=dir//"/derivs.f90", status="replace", &
-              action="write")
+            action="write")
         write (unit, '(a)') "module fad_generated"
         write (unit, '(a)') "    implicit none"
         write (unit, '(a)') "contains"
@@ -97,7 +97,7 @@ contains
         close (unit)
 
         open (newunit=unit, file=dir//"/driver.f90", status="replace", &
-              action="write")
+            action="write")
         write (unit, '(a)') driver_text(xval, yval)
         close (unit)
 
@@ -112,7 +112,7 @@ contains
         end if
 
         call execute_command_line("cd "//dir//" && ./run > out.txt 2>&1", &
-                                  exitstat=stat)
+            exitstat=stat)
         if (stat /= 0) then
             print *, "FAIL ", label, ": oracle mismatch"
             call show_file(dir//"/out.txt")
@@ -130,7 +130,7 @@ contains
 
         text = &
             "program driver"//nl// &
-            "    use fad_generated, only: f_vjp, f_hvp"//nl// &
+            "    use fad_generated, only: f_vjp, fad_hvp"//nl// &
             "    implicit none"//nl// &
             "    real(8) :: x, y, z, zb, xb, yb"//nl// &
             "    real(8) :: zd, xbd, ybd, xd, yd"//nl// &
@@ -141,18 +141,18 @@ contains
             "    bad = .false."//nl// &
             "    x = "//xval//nl// &
             "    y = "//yval//nl// &
-            ! Hessian columns via HVP with unit directions.
-            "    call f_hvp(x, 1.0d0, y, 0.0d0, z, zd, 1.0d0, xb, h11, yb, h21)"//nl// &
-            "    call f_hvp(x, 0.0d0, y, 1.0d0, z, zd, 1.0d0, xb, h12, yb, h22)"//nl// &
-            ! Gradient must still be right.
-            "    zb = 1.0d0"//nl// &
+        ! Hessian columns via HVP with unit directions.
+        "    call fad_hvp(x, 1.0d0, y, 0.0d0, z, zd, 1.0d0, xb, h11, yb, h21)"//nl// &
+            "    call fad_hvp(x, 0.0d0, y, 1.0d0, z, zd, 1.0d0, xb, h12, yb, h22)"//nl// &
+        ! Gradient must still be right.
+        "    zb = 1.0d0"//nl// &
             "    call f_vjp(x, y, z, zb, gx1, gy1)"//nl// &
             "    if (abs(gx1 - xb) > 1.0d-12*max(1.0d0, abs(gx1))) then"//nl// &
             "        print *, 'gradient from hvp disagrees', gx1, xb"//nl// &
             "        bad = .true."//nl// &
             "    end if"//nl// &
-            ! Second derivatives against central differences of the gradient.
-            "    h = 1.0d-5"//nl// &
+        ! Second derivatives against central differences of the gradient.
+        "    h = 1.0d-5"//nl// &
             "    zb = 1.0d0"//nl// &
             "    call f_vjp(x + h, y, z, zb, gx1, gy1)"//nl// &
             "    call f_vjp(x - h, y, z, zb, gx2, gy2)"//nl// &
@@ -173,11 +173,11 @@ contains
             "        print *, 'H(2,2) mismatch:', h22, (gy1 - gy2)/(2.0d0*h)"//nl// &
             "        bad = .true."//nl// &
             "    end if"//nl// &
-            ! Symmetry: u^T H v = v^T H u, which finite differences cannot check.
-            "    u1 = 0.83d0; u2 = -0.41d0"//nl// &
+        ! Symmetry: u^T H v = v^T H u, which finite differences cannot check.
+        "    u1 = 0.83d0; u2 = -0.41d0"//nl// &
             "    v1 = 1.27d0; v2 = 0.55d0"//nl// &
-            "    call f_hvp(x, v1, y, v2, z, zd, 1.0d0, xb, hv1, yb, hv2)"//nl// &
-            "    call f_hvp(x, u1, y, u2, z, zd, 1.0d0, xb, hu1, yb, hu2)"//nl// &
+            "    call fad_hvp(x, v1, y, v2, z, zd, 1.0d0, xb, hv1, yb, hv2)"//nl// &
+            "    call fad_hvp(x, u1, y, u2, z, zd, 1.0d0, xb, hu1, yb, hu2)"//nl// &
             "    lhs = u1*hv1 + u2*hv2"//nl// &
             "    rhs = v1*hu1 + v2*hu2"//nl// &
             "    if (abs(lhs - rhs) > 1.0d-11*max(1.0d0, abs(lhs))) then"//nl// &
