@@ -14,6 +14,7 @@ module fortad_lower
     use fortad_lower_body, only: lower_function, lower_subroutine, &
         inherit_module_uses
     use fortad_lower_types, only: lower_status_t
+    use fortad_boundaries, only: find_allocation_construct
     implicit none
     private
 
@@ -104,9 +105,21 @@ contains
         type(program_unit_query_t) :: unit
         logical :: has_callee
         character(len=4096) :: source_header, source_param_text, source_item
+        character(len=:), allocatable :: allocation_construct
         integer :: i, chosen, source_pos, source_next, source_line
         integer :: source_open, source_close, source_first, source_last
         integer :: source_comma, source_depth, source_n_params
+        integer :: allocation_line
+
+        if (find_allocation_construct(source, allocation_line, &
+                allocation_construct)) then
+            status%ok = .false.
+            status%message = "unsupported allocation lifetime construct '"// &
+                trim(allocation_construct)//"' at line "// &
+                line_text(allocation_line)//"; active allocation state is not "// &
+                "represented yet"
+            return
+        end if
 
         opts%input_mode = INPUT_MODE_STANDARD
         ! FortAD lowers from the parsed/query AST and performs its own
@@ -269,6 +282,16 @@ contains
         status%ok = .true.
         status%message = ""
     end subroutine lower_source
+
+    function line_text(line) result(text)
+        !! Integer to trimmed decimal text for source-boundary diagnostics.
+        integer, intent(in) :: line
+        character(len=:), allocatable :: text
+        character(len=32) :: buffer
+
+        write (buffer, '(i0)') line
+        text = trim(buffer)
+    end function line_text
 
     integer function procedure_arg_open(header) result(open)
         !! Find the argument list, skipping a kind selector in a return type.
