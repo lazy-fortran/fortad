@@ -49,11 +49,15 @@ library and command-line application, then runs the oracle suite. Run bare
 | Higher derivatives | univariate Taylor transformation for straight-line scalar kernels |
 | Long integrations | Revolve checkpoint schedules supplied to a caller-owned time loop |
 | Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
+| Complex JVP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division |
 | GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |
 
 Forward vector mode places the direction index first. For an array `x(n)`, a
 seed block has shape `(n_directions, n)`. Reverse vector mode is not
 implemented. Sparse Hessians therefore run one scalar HVP for each color.
+
+Complex forward examples and the real-coordinate contract are in
+[the complex-values design note](docs/design/complex-values.md).
 
 Same-file callees can be inlined before differentiation. A call whose body is
 unavailable needs a registered derivative rule. The built-in structured rules

@@ -16,7 +16,8 @@ module fortad_rules
     !! does not order argument evaluation, and the arena may reallocate under
     !! the outer call. Verbose, but the alternative is silently wrong output.
     use fortad_ir, only: fad_proc_t, expr_const, expr_binop, &
-                        expr_unop, expr_call, FAD_CONST
+                        expr_unop, expr_call, FAD_CONST, FAD_VAR, FAD_INDEX, &
+                        FAD_BINOP, FAD_UNOP, FAD_CALL
     use fortad_registry, only: registry_has, registry_n_args, registry_partial
     implicit none
     private
@@ -251,17 +252,31 @@ contains
             out = fad_neg(p, w)
 
         case ("abs")
-            ! sign(1, a)*da. Not differentiable at 0; matching Fortran's own
-            ! sign convention is the least surprising choice there.
-            one = fad_real(p, "1.0")
-            u = fad_fn2(p, "sign", one, a)
-            out = fad_mul(p, u, da)
+            ! For a complex argument the real-Jacobian directional derivative
+            ! is Re(conjg(a)*da)/abs(a).  `sign(1,a)` is only legal for real
+            ! arguments and silently generated invalid Fortran for complex
+            ! inputs, so select the contract from the primal expression type.
+            if (expr_is_complex(p, a)) then
+                u = fad_fn1(p, "conjg", a)
+                v = fad_mul(p, u, da)
+                u = fad_fn1(p, "real", v)
+                den = fad_fn1(p, "abs", a)
+                out = fad_div(p, u, den)
+            else
+                one = fad_real(p, "1.0")
+                u = fad_fn2(p, "sign", one, a)
+                out = fad_mul(p, u, da)
+            end if
 
         case ("sum")
             if (da /= 0) out = fad_fn1(p, "sum", da)
 
         case ("real", "dble")
-            out = da
+            if (expr_is_complex(p, a)) then
+                out = fad_fn1(p, "real", da)
+            else
+                out = da
+            end if
 
         case ("aimag", "conjg")
             ! Linear over the reals, so the tangent passes straight through.
@@ -351,6 +366,56 @@ contains
             out = jvp_registered(p, name, args, dargs)
         end select
     end function jvp_call
+
+    recursive logical function expr_is_complex(p, idx) result(yes)
+        !! Infer whether an IR expression has a complex value.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer :: di, i
+        character(len=:), allocatable :: name
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            di = p%decl_index(trim(p%exprs(idx)%text))
+            if (di > 0 .and. allocated(p%decls(di)%type_name)) then
+                yes = index(lower(p%decls(di)%type_name), "complex") == 1
+            end if
+        case (FAD_BINOP)
+            if (.not. allocated(p%exprs(idx)%args)) return
+            do i = 1, size(p%exprs(idx)%args)
+                if (expr_is_complex(p, p%exprs(idx)%args(i))) then
+                    yes = .true.
+                    return
+                end if
+            end do
+        case (FAD_UNOP)
+            if (allocated(p%exprs(idx)%args)) then
+                if (size(p%exprs(idx)%args) > 0) then
+                    yes = expr_is_complex(p, p%exprs(idx)%args(1))
+                end if
+            end if
+        case (FAD_CALL)
+            if (.not. allocated(p%exprs(idx)%text)) return
+            name = lower(p%exprs(idx)%text)
+            select case (name)
+            case ("conjg", "cmplx")
+                yes = .true.
+            case ("real", "dble", "aimag", "abs")
+                yes = .false.
+            case default
+                if (allocated(p%exprs(idx)%args)) then
+                    do i = 1, size(p%exprs(idx)%args)
+                        if (expr_is_complex(p, p%exprs(idx)%args(i))) then
+                            yes = .true.
+                            return
+                        end if
+                    end do
+                end if
+            end select
+        end select
+    end function expr_is_complex
 
     integer function jvp_registered(p, name, args, dargs) result(out)
         !! Tangent from a user-registered rule: sum of partial_i * d(arg_i).

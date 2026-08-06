@@ -204,6 +204,12 @@ contains
 
         call seed_activity(primal, spec, dependent, active, status)
         if (.not. status%ok) return
+        if (complex_reverse_path(primal, dependent, active)) then
+            status%ok = .false.
+            status%message = "reverse mode: active complex adjoints are not "// &
+                "supported yet; use forward mode for the real-coordinate complex path"
+            return
+        end if
         do i = 1, size(primal%params)
             di = primal%decl_index(trim(primal%params(i)))
             if (di <= 0) cycle
@@ -442,6 +448,43 @@ contains
         allocate (active(max(1, primal%n_decls)))
         active = varied .and. useful
     end subroutine seed_activity
+
+    logical function complex_reverse_path(primal, dependent, active) result(yes)
+        !! Reverse adjoints are currently real-only. Refuse a complex path
+        !! before emission instead of writing compiler-invalid `real`/`aimag`
+        !! partials into a complex cotangent.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: dependent
+        logical, intent(in) :: active(:)
+        integer :: i, di
+
+        yes = .false.
+        di = primal%decl_index(dependent)
+        if (di > 0) then
+            if (decl_is_complex(primal, di)) then
+                yes = .true.
+                return
+            end if
+        end if
+        do i = 1, primal%n_decls
+            if (.not. active(i)) cycle
+            if (decl_is_complex(primal, i)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function complex_reverse_path
+
+    logical function decl_is_complex(primal, di) result(yes)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: di
+
+        yes = .false.
+        if (di <= 0 .or. di > primal%n_decls) return
+        if (.not. allocated(primal%decls(di)%type_name)) return
+        yes = index(primal%decls(di)%type_name, "complex") == 1 .or. &
+            index(primal%decls(di)%type_name, "COMPLEX") == 1
+    end function decl_is_complex
 
     recursive logical function reads_any(p, idx, flags) result(yes)
         !! True when the expression reads any flagged variable.
