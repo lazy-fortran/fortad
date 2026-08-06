@@ -1,9 +1,9 @@
-# FFT, quadrature, interpolation, and special-function rules
+# Numerical-library rules
 
 P3.5 uses the same explicit statement-rule boundary for library operations.
-The library owns the mathematical identity and its Fortran interface; fortad
-substitutes the registered tangent and adjoint statements and does not invent
-an external ABI.
+The library owns the mathematical identity and its Fortran interface. fortad
+substitutes the registered tangent and adjoint statements without inventing an
+external ABI.
 
 The representative rule table exercised by
 `test/test_library_rules_oracle.f90` is:
@@ -26,27 +26,26 @@ call fad_add_call_rule("interp4", 4, &
              "call interp4_adjoint($1, $2, $3, $4b, $1b, $2b, $3b)"])
 ```
 
-The generated JVP/VJP contains the registered library calls, not a tape of the
-FFT loops, quadrature sum, interpolation basis, or special-function
-implementation. Multiple opaque calls are supported in one procedure; their
-real actual adjoints are declared and cleared at the call boundary.
+The generated JVP/VJP contains the registered library calls and omits the
+implementation trace. Multiple opaque calls are supported in one procedure.
+Their real actual adjoints are declared and cleared at the call boundary.
 
-## Evidence and boundary
+## Composite-rule oracle
 
 The oracle links the generated composite kernel to independent support
 implementations and checks the complete composite output by central finite
 differences, the VJP adjoint identity, and component finite differences. It
 passes on the TU Graz `acluster`.
 
-The committed TU Graz benchmark corpus supplies the performance context:
-length-8 FFT JVP/VJP products are 177.7106/169.9557 ns; four-direction fixed
+The committed TU Graz benchmark corpus supplies the performance context.
+Length-8 FFT JVP/VJP products are 177.7106/169.9557 ns. Four-direction fixed
 quadrature JVP is 1247.7167 ns for the explicit analytical product versus
-1263.4433 ns for the Enzyme-integrand candidate; one-cotangent VJP is 299.4435
-ns versus 317.5576 ns; and the generated `erf` products are 13.52566 ns (JVP)
-and 13.58756 ns (VJP). These are existing fortnum records, not same-binary
-timings of this generic fortad oracle.
+1263.4433 ns for the Enzyme-integrand candidate. One-cotangent VJP is
+299.4435 ns versus 317.5576 ns. The generated `erf` products are 13.52566 ns
+(JVP) and 13.58756 ns (VJP). These are existing fortnum records measured
+separately from this generic fortad oracle.
 
-The current boundary is representative real FFT, fixed quadrature, fixed-node
-or explicit-basis interpolation, and `erf`. Complex FFT ABI details, adaptive
-quadrature, general spline state, and the rest of the special-function catalog
-remain caller-supplied extensions rather than silently inferred rules.
+Registered rules cover the representative real FFT, fixed quadrature,
+fixed-node or explicit-basis interpolation, and `erf`. Complex FFT ABI details,
+adaptive quadrature, general spline state, and the rest of the special-function
+catalog remain caller-supplied extensions rather than silently inferred rules.

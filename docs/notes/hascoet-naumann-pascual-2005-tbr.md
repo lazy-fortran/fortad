@@ -20,7 +20,7 @@ instruction or structured block with two sets:
 - `Kill` contains variables whose incoming values are completely overwritten.
 - `AdjU` contains variables used by the adjoint of the block.
 
-For sequences, the required set is carried across the first block after values
+For sequences, the required set is propagated across the first block after values
 killed by the second block are removed. Branches union the requirements and
 intersect the values guaranteed to be killed. Loops are handled by fixed-point
 equations for general flow graphs and explicit equations for structured loops.
