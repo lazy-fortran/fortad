@@ -102,9 +102,10 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `0209b3a` (including the FortFront boundary
-fix, the portable CLI oracle, and optional-dummy preservation). Its GNU bare
-gate is green (407/407 targets, 27/27 tests, lint), and the three previously
+The implementation snapshot is `08201bf` (including the FortFront boundary
+fix, the portable CLI oracle, optional-dummy preservation, and the explicit
+active-optional refusal). Its GNU bare gate is green (407/407 targets, 27/27
+tests, lint), and the three previously
 failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
@@ -615,7 +616,9 @@ of selected child ends the fixed-path derivative contract.
       Commit `0209b3a` now preserves optional dummies and `present` branches in
       generated JVP/VJP interfaces; keyword mapping across inlined siblings,
       generic resolution, elemental calls, and operator-overloaded inputs
-      remain open.
+      remain open. Commit `08201bf` rejects active optional tangents/adjoints
+      explicitly and keeps optional metadata off generated locals and SSA
+      shadows.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.
