@@ -9,9 +9,9 @@ module fortad_lower_statements
         derived_type_query_t, type_binding_query_t, query_program_unit, &
         program_unit_query_t
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-        expr_const, expr_var, expr_binop, expr_call, &
+        expr_const, expr_var, expr_binop, expr_call, fad_base_name, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
-        FAD_END_IF, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
+        FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
         FAD_INTENT_IN, FAD_INTENT_OUT, FAD_INTENT_INOUT, &
         FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT, &
         FAD_END_SELECT
@@ -437,8 +437,21 @@ contains
                 subs(i) = lower_expr(arena, n%arg_indices(i), proc, status)
                 if (.not. status%ok) return
             end do
-            e%kind = FAD_INDEX
-            e%text = n%name
+            if (is_component_base(arena, n%base_expr_index)) then
+                if (size(n%arg_indices) == 0) then
+                    s%target = component_reference_text(arena, &
+                        n%base_expr_index, n%name, proc, status)
+                    if (.not. status%ok) return
+                    return
+                end if
+                e%kind = FAD_INDEX
+                e%text = component_reference_text(arena, &
+                    n%base_expr_index, n%name, proc, status)
+                if (.not. status%ok) return
+            else
+                e%kind = FAD_INDEX
+                e%text = n%name
+            end if
             e%args = subs
             s%target = render_index(proc, e)
         class default
@@ -520,8 +533,28 @@ contains
                 if (.not. status%ok) return
             end do
             if (n%base_expr_index > 0) then
-                out = lower_type_bound_call(arena, n, proc, status)
-                if (.not. status%ok) return
+                if (is_component_base(arena, n%base_expr_index)) then
+                    if (is_type_bound_reference(arena, n%base_expr_index)) then
+                        out = lower_type_bound_call(arena, n, proc, status)
+                        if (.not. status%ok) return
+                    else if (size(n%arg_indices) == 0) then
+                        e%kind = FAD_VAR
+                        e%text = component_reference_text(arena, &
+                            n%base_expr_index, n%name, proc, status)
+                        if (.not. status%ok) return
+                        out = proc%add_expr(e)
+                    else
+                        e%kind = FAD_INDEX
+                        e%text = component_reference_text(arena, &
+                            n%base_expr_index, n%name, proc, status)
+                        if (.not. status%ok) return
+                        e%args = args
+                        out = proc%add_expr(e)
+                    end if
+                else
+                    out = lower_type_bound_call(arena, n, proc, status)
+                    if (.not. status%ok) return
+                end if
             else if (is_array_name(proc, n%name)) then
                 e%kind = FAD_INDEX
                 e%text = n%name
@@ -672,6 +705,75 @@ contains
         out = proc%add_expr(expr_call(impl, args))
     end function lower_type_bound_call
 
+    logical function is_type_bound_reference(arena, base_idx) result(found)
+        !! Distinguish ``object%binding(args)`` from an array component
+        !! ``object%values(i)`` before lowering either one.  A local binding is
+        !! enough to route the former through the existing explicit refusal
+        !! diagnostics (named PASS, NOPASS, generic, and deferred).
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: base_idx
+        type(component_access_query_t) :: access
+        type(derived_type_query_t) :: dtype
+        type(type_binding_query_t) :: binding
+        character(len=:), allocatable :: object_type, type_name
+        integer :: i, j
+
+        found = .false.
+        access = query_component_access(arena, base_idx)
+        if (.not. access%found) return
+        if (access%base_node_index <= 0) return
+        if (access%base_node_index > arena%size) return
+        if (.not. arena%has_node_at(access%base_node_index)) return
+        if (trim(arena%entries(access%base_node_index)%node_type) /= &
+            "identifier") return
+        call static_object_type(arena, access%base_node_index, object_type)
+        if (.not. allocated(object_type)) return
+        type_name = canonical_type_name(object_type)
+        if (.not. allocated(type_name)) return
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) /= "derived_type") cycle
+            dtype = query_derived_type(arena, i)
+            if (.not. dtype%found .or. .not. same_name(dtype%name, type_name)) cycle
+            found = type_has_binding(arena, type_name, access%component_name)
+            return
+        end do
+    end function is_type_bound_reference
+
+    recursive logical function type_has_binding(arena, type_name, method) &
+            result(found)
+        type(ast_arena_t), intent(in) :: arena
+        character(len=*), intent(in) :: type_name, method
+        type(derived_type_query_t) :: dtype
+        type(type_binding_query_t) :: binding
+        character(len=:), allocatable :: parent
+        integer :: i, j
+
+        found = .false.
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) /= "derived_type") cycle
+            dtype = query_derived_type(arena, i)
+            if (.not. dtype%found .or. .not. same_name(dtype%name, type_name)) cycle
+            if (allocated(dtype%binding_indices)) then
+                do j = 1, size(dtype%binding_indices)
+                    binding = query_type_binding(arena, dtype%binding_indices(j))
+                    if (binding%found .and. same_name(binding%binding_name, method)) then
+                        found = .true.
+                        return
+                    end if
+                end do
+            end if
+            if (allocated(dtype%extends_parent)) then
+                parent = trim(dtype%extends_parent)
+                if (len_trim(parent) > 0) then
+                    found = type_has_binding(arena, parent, method)
+                end if
+            end if
+            return
+        end do
+    end function type_has_binding
+
     subroutine refuse_type_bound(status, name, reason)
         type(lower_status_t), intent(inout) :: status
         character(len=*), intent(in) :: name, reason
@@ -763,20 +865,81 @@ contains
         type(lower_status_t), intent(inout) :: status
         character(len=:), allocatable :: text
         type(component_access_query_t) :: query
-        integer :: base
+        character(len=:), allocatable :: base
+        integer :: base_index
 
         text = ""
         query = query_component_access(arena, idx)
-        if (.not. query%found .or. query%base_node_index <= 0) then
+        if (.not. query%found) then
             status%ok = .false.
             status%message = "unsupported component access at line "// &
                 itoa(node_line(arena, idx))
             return
         end if
-        base = lower_expr(arena, query%base_node_index, proc, status)
+        if (query%base_node_index <= 0 .or. query%base_node_index > &
+            arena%size) then
+            status%ok = .false.
+            status%message = "unsupported component access at line "// &
+                itoa(node_line(arena, idx))
+            return
+        end if
+        if (.not. arena%has_node_at(query%base_node_index)) then
+            status%ok = .false.
+            status%message = "unsupported component access at line "// &
+                itoa(node_line(arena, idx))
+            return
+        end if
+        if (trim(arena%entries(query%base_node_index)%node_type) == &
+            "component_access") then
+            base = render_component_access(arena, query%base_node_index, &
+                proc, status)
+        else
+            base_index = lower_expr(arena, query%base_node_index, proc, status)
+            if (.not. status%ok) return
+            base = emit_expr(proc, base_index)
+        end if
         if (.not. status%ok) return
-        text = emit_expr(proc, base)//"%"//trim(query%component_name)
+        text = base//"%"//trim(query%component_name)
     end function render_component_access
+
+    function component_reference_text(arena, base_idx, name, proc, status) &
+            result(text)
+        !! Render a component reference whose parser node may already include
+        !! the final component.  FortFront represents both ``s%inner%q`` and
+        !! ``s%values(i)`` with a component base plus a call/subscript node;
+        !! appending the name unconditionally would produce ``values%values``.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: base_idx
+        character(len=*), intent(in) :: name
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+        character(len=:), allocatable :: text, base, tail
+
+        base = render_component_access(arena, base_idx, proc, status)
+        if (.not. status%ok) then
+            text = ""
+            return
+        end if
+        tail = "%"//trim(name)
+        if (len_trim(base) >= len_trim(tail)) then
+            if (same_name(base(len_trim(base) - len_trim(tail) + 1:len_trim(base)), &
+                tail)) then
+                text = base
+                return
+            end if
+        end if
+        text = base//tail
+    end function component_reference_text
+
+    logical function is_component_base(arena, idx) result(yes)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+
+        yes = .false.
+        if (idx <= 0 .or. idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        yes = trim(arena%entries(idx)%node_type) == "component_access"
+    end function is_component_base
 
     logical function is_array_name(proc, name) result(yes)
         !! True when `name` was declared as an array in this procedure.

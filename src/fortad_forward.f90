@@ -8,6 +8,7 @@ module fortad_forward
     !! out of the zero-aware rule builders rather than being a separate pass.
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, &
         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
+        fad_base_name, fad_suffix_name, &
         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
@@ -80,6 +81,16 @@ contains
 
         call seed_activity(primal, spec, active, status)
         if (.not. status%ok) return
+        if (spec%vector) then
+            do i = 1, primal%n_decls
+                if (active(i) .and. is_derived_decl(primal, i)) then
+                    status%ok = .false.
+                    status%message = "vector mode for derived components is "// &
+                        "not supported; use scalar directions"
+                    return
+                end if
+            end do
+        end if
         do i = 1, size(primal%params)
             di = primal%decl_index(trim(primal%params(i)))
             if (di <= 0) cycle
@@ -156,17 +167,26 @@ contains
         type(forward_status_t), intent(inout) :: status
         integer :: i, j, di
         logical :: changed
-        integer :: target_open
 
         allocate (active(max(1, primal%n_decls)))
         active = .false.
 
         do i = 1, size(spec%independents)
             di = primal%decl_index(trim(spec%independents(i)))
+            if (di == 0) di = primal%decl_index( &
+                fad_base_name(trim(spec%independents(i))))
             if (di == 0) then
                 status%ok = .false.
                 status%message = "independent '"//trim(spec%independents(i))// &
                     "' is not declared in "//primal%name
+                return
+            end if
+            if (index(trim(spec%independents(i)), "%") == 0 .and. &
+                is_derived_decl(primal, di)) then
+                status%ok = .false.
+                status%message = "active derived object '"// &
+                    trim(spec%independents(i))// &
+                    "' must name a real component"
                 return
             end if
             active(di) = .true.
@@ -195,13 +215,8 @@ contains
                 end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 if (.not. expr_reads_active(primal, primal%stmts(j)%value, active)) cycle
-                target_open = index(primal%stmts(j)%target, "(")
-                if (target_open > 1) then
-                    di = primal%decl_index( &
-                        primal%stmts(j)%target(:target_open - 1))
-                else
-                    di = primal%decl_index(primal%stmts(j)%target)
-                end if
+                di = primal%decl_index(fad_base_name( &
+                    primal%stmts(j)%target))
                 if (di > 0) then
                     if (.not. active(di)) then
                         active(di) = .true.
@@ -268,6 +283,28 @@ contains
             index(p%decls(di)%type_name, "REAL") == 1
     end function is_real_decl
 
+    logical function is_derived_decl(p, di) result(yes)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: di
+        character(len=:), allocatable :: t, compact
+        integer :: i
+
+        yes = .false.
+        if (di <= 0 .or. di > p%n_decls) return
+        if (.not. allocated(p%decls(di)%type_name)) return
+        t = p%decls(di)%type_name
+        compact = ""
+        do i = 1, len_trim(t)
+            if (t(i:i) == " " .or. t(i:i) == achar(9)) cycle
+            compact = compact//t(i:i)
+        end do
+        if (len_trim(compact) < 5) return
+        yes = compact(:5) == "type(" .or. compact(:5) == "TYPE("
+        if (.not. yes .and. len_trim(compact) >= 6) then
+            yes = compact(:6) == "class(" .or. compact(:6) == "CLASS("
+        end if
+    end function is_derived_decl
+
     recursive logical function expr_reads_active(p, idx, active) result(yes)
         !! True when the expression reads any active variable.
         type(fad_proc_t), intent(in) :: p
@@ -280,7 +317,7 @@ contains
         associate (e => p%exprs(idx))
             select case (e%kind)
             case (FAD_VAR, FAD_INDEX)
-                di = p%decl_index(e%text)
+                di = p%decl_index(fad_base_name(e%text))
                 if (di > 0) yes = active(di)
                 if (yes) return
             end select
@@ -647,24 +684,25 @@ contains
                 out = 0
 
             case (FAD_VAR)
-                di = primal%decl_index(pe%text)
+                di = primal%decl_index(fad_base_name(pe%text))
                 if (di > 0) then
                     if (active(di)) then
                         if (vector) then
                             allocate (args(1))
                             args(1) = tangent%add_expr(expr_const(":"))
                             e%kind = FAD_INDEX
-                            e%text = pe%text//suffix
+                            e%text = fad_suffix_name(pe%text, suffix)
                             e%args = args
                             out = tangent%add_expr(e)
                         else
-                            out = tangent%add_expr(expr_var(pe%text//suffix))
+                            out = tangent%add_expr(expr_var( &
+                                fad_suffix_name(pe%text, suffix)))
                         end if
                     end if
                 end if
 
             case (FAD_INDEX)
-                di = primal%decl_index(pe%text)
+                di = primal%decl_index(fad_base_name(pe%text))
                 if (di > 0) then
                     if (active(di)) then
                         if (vector) then
@@ -680,7 +718,7 @@ contains
                             end do
                         end if
                         e%kind = FAD_INDEX
-                        e%text = pe%text//suffix
+                        e%text = fad_suffix_name(pe%text, suffix)
                         e%args = args
                         out = tangent%add_expr(e)
                     end if
@@ -765,14 +803,7 @@ contains
         !! The variable name of an assignment target, without any subscript.
         character(len=*), intent(in) :: target
         character(len=:), allocatable :: base
-        integer :: pos
-
-        pos = index(target, "(")
-        if (pos > 0) then
-            base = target(1:pos - 1)
-        else
-            base = target
-        end if
+        base = fad_base_name(target)
     end function target_base
 
     function tangent_name(target, suffix, vector) result(name)
@@ -781,22 +812,7 @@ contains
         character(len=*), intent(in) :: target, suffix
         logical, intent(in) :: vector
         character(len=:), allocatable :: name
-        integer :: pos
-
-        pos = index(target, "(")
-        if (pos > 0) then
-            if (vector) then
-                name = target(1:pos - 1)//suffix//"(:, "//target(pos + 1:)
-            else
-                name = target(1:pos - 1)//suffix//target(pos:)
-            end if
-        else
-            if (vector) then
-                name = target//suffix//"(:)"
-            else
-                name = target//suffix
-            end if
-        end if
+        name = fad_suffix_name(target, suffix, vector)
     end function tangent_name
 
 end module fortad_forward

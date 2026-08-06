@@ -16,7 +16,7 @@ module fortad_dce
     !! read nowhere later. Inside a loop the test is stricter: the variable must
     !! not be read anywhere in that loop body at all, because a read earlier in
     !! the body is a read of the *next* iteration's value.
-    use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_decl_t, &
+    use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_decl_t, fad_base_name, &
         copy_decl, &
         FAD_VAR, FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, &
         FAD_IF, FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
@@ -294,14 +294,7 @@ contains
         !! The name in an assignment target, without any subscript.
         character(len=*), intent(in) :: target
         character(len=:), allocatable :: base
-        integer :: pos
-
-        pos = index(target, "(")
-        if (pos > 0) then
-            base = target(1:pos - 1)
-        else
-            base = target
-        end if
+        base = fad_base_name(target)
     end function base_of
 
     subroutine fold_zero_accumulations(p)
@@ -427,6 +420,13 @@ contains
         if (.not. allocated(p%stmts(idx)%target)) return
         name = p%stmts(idx)%target
 
+        ! Anything with a subscript or component selector is a storage update,
+        ! not a removable scalar local.  A component of an output dummy is
+        ! caller-visible even though its textual target is not itself a dummy.
+        if (index(name, "%") > 0) then
+            if (is_dummy(p, fad_base_name(name))) return
+            return
+        end if
         ! Anything with a subscript or a marker target stays: an element write
         ! is a scatter with its own liveness, and a raw rule statement is
         ! opaque text.
@@ -434,7 +434,7 @@ contains
         if (name(1:1) == "!") return
 
         ! Never remove a store to something the caller can see.
-        if (is_dummy(p, name)) return
+        if (is_dummy(p, name) .or. is_dummy(p, fad_base_name(name))) return
 
         ! Read later anywhere: live.
         do j = idx + 1, p%n_stmts

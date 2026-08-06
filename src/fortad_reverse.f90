@@ -23,6 +23,7 @@ module fortad_reverse
     !! roadmap, which is the next milestone.
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
+        fad_base_name, fad_suffix_name, &
         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
@@ -376,10 +377,20 @@ contains
 
         do i = 1, size(spec%independents)
             di = primal%decl_index(trim(spec%independents(i)))
+            if (di == 0) di = primal%decl_index( &
+                fad_base_name(trim(spec%independents(i))))
             if (di == 0) then
                 status%ok = .false.
                 status%message = "independent '"//trim(spec%independents(i))// &
                     "' is not declared in "//primal%name
+                return
+            end if
+            if (index(trim(spec%independents(i)), "%") == 0 .and. &
+                is_derived_decl(primal, di)) then
+                status%ok = .false.
+                status%message = "active derived object '"// &
+                    trim(spec%independents(i))// &
+                    "' must name a real component"
                 return
             end if
             varied(di) = .true.
@@ -408,7 +419,7 @@ contains
                 ! An array-element target must resolve to its array, or the
                 ! array never becomes active and its adjoint is silently
                 ! dropped - a wrong gradient that looks plausible.
-                di = primal%decl_index(target_base(primal%stmts(j)%target))
+                di = primal%decl_index(fad_base_name(primal%stmts(j)%target))
                 if (di > 0) then
                     if (.not. varied(di)) then
                         varied(di) = .true.
@@ -438,7 +449,7 @@ contains
                     cycle
                 end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
-                di = primal%decl_index(target_base(primal%stmts(j)%target))
+                di = primal%decl_index(fad_base_name(primal%stmts(j)%target))
                 if (di == 0) cycle
                 if (.not. useful(di)) cycle
                 if (mark_reads(primal, primal%stmts(j)%value, useful)) changed = .true.
@@ -497,7 +508,7 @@ contains
         if (idx <= 0 .or. idx > p%n_exprs) return
         select case (p%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
-            di = p%decl_index(p%exprs(idx)%text)
+            di = p%decl_index(fad_base_name(p%exprs(idx)%text))
             if (di > 0) then
                 if (flags(di)) then
                     yes = .true.
@@ -538,7 +549,7 @@ contains
         di = 0
         if (idx <= 0 .or. idx > p%n_exprs) return
         if (p%exprs(idx)%kind == FAD_VAR) then
-            di = p%decl_index(p%exprs(idx)%text)
+            di = p%decl_index(fad_base_name(p%exprs(idx)%text))
         end if
     end function call_arg_decl_index
 
@@ -554,7 +565,7 @@ contains
         if (idx <= 0 .or. idx > p%n_exprs) return
         select case (p%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
-            di = p%decl_index(p%exprs(idx)%text)
+            di = p%decl_index(fad_base_name(p%exprs(idx)%text))
             if (di > 0) then
                 if (.not. flags(di)) then
                     flags(di) = .true.
@@ -577,7 +588,9 @@ contains
         logical, intent(in) :: active(:)
         character(len=64), allocatable :: names(:)
         type(fad_decl_t) :: d
-        integer :: i, n, di, ignored
+        character(len=:), allocatable :: base
+        integer :: i, j, n, di, ignored
+        logical :: seen
 
         associate (unused => active)
         end associate
@@ -622,12 +635,21 @@ contains
 
         ! One outgoing adjoint per independent.
         do i = 1, size(spec%independents)
-            di = primal%decl_index(trim(spec%independents(i)))
+            di = primal%decl_index(fad_base_name(trim(spec%independents(i))))
             if (di == 0) cycle
+            base = fad_base_name(trim(spec%independents(i)))
+            seen = .false.
+            do j = 1, i - 1
+                if (fad_base_name(trim(spec%independents(j))) == base) then
+                    seen = .true.
+                    exit
+                end if
+            end do
+            if (seen) cycle
             n = n + 1
-            names(n) = trim(spec%independents(i))//suffix
+            names(n) = trim(base)//suffix
             d = primal%decls(di)
-            d%name = trim(spec%independents(i))//suffix
+            d%name = trim(base)//suffix
             ! VALUE belongs to the primal argument. An outgoing adjoint is
             ! written by this routine and must remain a normal dummy.
             d%is_value = .false.
@@ -716,11 +738,14 @@ contains
                 ! same place every time it is written. It is emitted verbatim
                 ! and its adjoint is a scatter into the same element of the
                 ! array's adjoint.
-                is_element(n_rec + 1) = index(primal%stmts(i)%target, "(") > 0
+                is_element(n_rec + 1) = index(primal%stmts(i)%target, "(") > 0 .or. &
+                    index(primal%stmts(i)%target, "%") > 0
                 if (is_element(n_rec + 1)) then
-                    di = primal%decl_index(target_base(primal%stmts(i)%target))
+                    di = primal%decl_index(fad_base_name( &
+                        primal%stmts(i)%target))
                 else
-                    di = primal%decl_index(primal%stmts(i)%target)
+                    di = primal%decl_index(fad_base_name( &
+                        primal%stmts(i)%target))
                 end if
                 if (di == 0) then
                     status%ok = .false.
@@ -1121,7 +1146,7 @@ contains
                     "inside a branch arm"
                 return
             end if
-            di = primal%decl_index(primal%stmts(i)%target)
+            di = primal%decl_index(fad_base_name(primal%stmts(i)%target))
             if (di == 0) then
                 status%ok = .false.
                 status%message = "assignment to undeclared '"// &
@@ -1438,7 +1463,8 @@ contains
                 block
                     integer :: cdi
                     type(fad_decl_t) :: cd
-                    cdi = primal%decl_index(primal%stmts(i)%target)
+                    cdi = primal%decl_index(fad_base_name( &
+                        primal%stmts(i)%target))
                     cd = primal%decls(cdi)
                     cd%name = fresh
                     cd%intent = FAD_INTENT_NONE
@@ -1453,7 +1479,7 @@ contains
                 block
                     integer :: base_di
                     type(fad_decl_t) :: bd
-                    base_di = primal%decl_index(target_base(fresh))
+                    base_di = primal%decl_index(fad_base_name(fresh))
                     if (base_di > 0) then
                         bd = primal%decls(base_di)
                         bd%is_result = .false.
@@ -1472,7 +1498,8 @@ contains
                 block
                     integer :: tdi
                     type(fad_decl_t) :: td
-                    tdi = primal%decl_index(primal%stmts(i)%target)
+                    tdi = primal%decl_index(fad_base_name( &
+                        primal%stmts(i)%target))
                     if (tdi > 0) then
                         td = primal%decls(tdi)
                         td%name = fresh
@@ -1687,7 +1714,9 @@ contains
         do k = 1, n_calls
             call zero_call_adjoints(primal, adjoint, ssa, calls(k), suffix, zero)
         end do
+        call zero_component_adjoints(primal, adjoint, active, suffix, zero)
         do i = 1, size(spec%independents)
+            if (index(trim(spec%independents(i)), "%") > 0) cycle
             di = primal%decl_index(trim(spec%independents(i)))
             if (di == 0) cycle
             s%kind = FAD_ASSIGN
@@ -1767,6 +1796,70 @@ contains
             call fuse_loop(adjoint, loops(1), suffix)
         end if
     end subroutine build_reverse_sweep
+
+    subroutine zero_component_adjoints(primal, adjoint, active, suffix, zero)
+        !! Initialise component adjoints without assigning a scalar to the
+        !! derived object itself.  A derived tangent is a shadow object; only
+        !! the real components that occur on the active path are zeroed here.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        integer, intent(in) :: zero
+        character(len=256) :: paths(256)
+        character(len=:), allocatable :: path, base
+        type(fad_stmt_t) :: s
+        integer :: i, j, n, di, ignored
+        logical :: seen
+
+        paths = ""
+        n = 0
+        do i = 1, primal%n_exprs
+            if (primal%exprs(i)%kind /= FAD_VAR .and. &
+                primal%exprs(i)%kind /= FAD_INDEX) cycle
+            if (index(primal%exprs(i)%text, "%") == 0) cycle
+            base = fad_base_name(primal%exprs(i)%text)
+            di = primal%decl_index(base)
+            if (di <= 0) cycle
+            if (.not. active(di)) cycle
+            path = fad_suffix_name(primal%exprs(i)%text, suffix)
+            seen = .false.
+            do j = 1, n
+                if (trim(paths(j)) == trim(path)) then
+                    seen = .true.
+                    exit
+                end if
+            end do
+            if (seen .or. n == size(paths)) cycle
+            n = n + 1
+            paths(n) = path
+        end do
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (index(primal%stmts(i)%target, "%") == 0) cycle
+            base = fad_base_name(primal%stmts(i)%target)
+            di = primal%decl_index(base)
+            if (di <= 0) cycle
+            if (.not. active(di)) cycle
+            path = fad_suffix_name(primal%stmts(i)%target, suffix)
+            seen = .false.
+            do j = 1, n
+                if (trim(paths(j)) == trim(path)) then
+                    seen = .true.
+                    exit
+                end if
+            end do
+            if (seen .or. n == size(paths)) cycle
+            n = n + 1
+            paths(n) = path
+        end do
+        do i = 1, n
+            s%kind = FAD_ASSIGN
+            s%target = trim(paths(i))
+            s%value = zero
+            ignored = adjoint%add_stmt(s)
+        end do
+    end subroutine zero_component_adjoints
 
     subroutine zero_call_adjoints(primal, adjoint, ssa, rec, suffix, zero)
         !! Declare and clear adjoints for the arguments of an opaque call.
@@ -2041,14 +2134,7 @@ contains
         !! the whole reference.
         character(len=*), intent(in) :: target, suffix
         character(len=:), allocatable :: name
-        integer :: pos
-
-        pos = index(target, "(")
-        if (pos > 0) then
-            name = target(1:pos - 1)//suffix//target(pos:)
-        else
-            name = target//suffix
-        end if
+        name = fad_suffix_name(target, suffix)
     end function adjoint_element
 
     function shadow_element(target, suffix, dependent) result(name)
@@ -2158,6 +2244,28 @@ contains
         if (.not. allocated(d%type_name)) return
         yes = index(d%type_name, "real") == 1 .or. index(d%type_name, "REAL") == 1
     end function is_real_type
+
+    logical function is_derived_decl(p, di) result(yes)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: di
+        character(len=:), allocatable :: t, compact
+        integer :: i
+
+        yes = .false.
+        if (di <= 0 .or. di > p%n_decls) return
+        if (.not. allocated(p%decls(di)%type_name)) return
+        t = p%decls(di)%type_name
+        compact = ""
+        do i = 1, len_trim(t)
+            if (t(i:i) == " " .or. t(i:i) == achar(9)) cycle
+            compact = compact//t(i:i)
+        end do
+        if (len_trim(compact) < 5) return
+        yes = compact(:5) == "type(" .or. compact(:5) == "TYPE("
+        if (.not. yes .and. len_trim(compact) >= 6) then
+            yes = compact(:6) == "class(" .or. compact(:6) == "CLASS("
+        end if
+    end function is_derived_decl
 
     logical function can_fuse(primal, rec, dependent) result(yes)
         !! Fusion is safe when the loop's accumulator adjoint is already final
@@ -2519,7 +2627,7 @@ contains
 
         yes = .false.
         call ssa_base_of(ssa, trim(ssa_name), base)
-        di = primal%decl_index(base)
+        di = primal%decl_index(fad_base_name(base))
         if (di > 0) yes = active(di)
     end function adjoint_is_live
 
@@ -2534,7 +2642,7 @@ contains
         integer :: di, ignored
 
         call ssa_base_of(ssa, ssa_name, base)
-        di = primal%decl_index(base)
+        di = primal%decl_index(fad_base_name(base))
         if (di == 0) return
         d = primal%decls(di)
         d%name = ssa_name//suffix
@@ -2582,13 +2690,14 @@ contains
 
         case (FAD_VAR)
             call ssa_base_of(ssa, node_text, base)
+            base = fad_base_name(base)
             di = primal%decl_index(base)
             if (di > 0) then
                 if (.not. active(di)) return
             end if
             s%kind = FAD_ASSIGN
-            s%target = node_text//suffix
-            lhs = adjoint%add_expr(expr_var(node_text//suffix))
+            s%target = fad_suffix_name(node_text, suffix)
+            lhs = adjoint%add_expr(expr_var(fad_suffix_name(node_text, suffix)))
             s%value = fad_add(adjoint, lhs, seed)
             ignored = adjoint%add_stmt(s)
 
@@ -2674,6 +2783,7 @@ contains
             ! iteration touches a different element, so these scatters carry no
             ! loop-carried dependence.
             call ssa_base_of(ssa, node_text, base)
+            base = fad_base_name(base)
             di = primal%decl_index(base)
             if (di > 0) then
                 if (.not. active(di)) return
@@ -2682,7 +2792,7 @@ contains
                 type(fad_expr_t) :: target_expr
                 integer :: read_idx
                 target_expr%kind = FAD_INDEX
-                target_expr%text = node_text//suffix
+                target_expr%text = fad_suffix_name(node_text, suffix)
                 target_expr%args = node_args
                 read_idx = adjoint%add_expr(target_expr)
                 s%kind = FAD_ASSIGN
@@ -2720,6 +2830,7 @@ contains
         select case (adjoint%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
             call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
+            base = fad_base_name(base)
             di = primal%decl_index(base)
             if (di > 0) then
                 if (active(di)) then
