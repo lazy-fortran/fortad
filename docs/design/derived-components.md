@@ -22,8 +22,8 @@ differences, and the adjoint identity. Its value type includes an inherited
 real field, a nested real field, a real array, and an integer tag. No derivative
 is generated for the integer component.
 
-This is intentionally not the complete object model.  The active independent
-must name a component rather than the whole derived object.  Allocation and
+The active independent must name a component rather than the whole derived
+object. Allocation and
 deallocation, pointer aliases, polymorphic ownership, procedure components,
 and active character/logical components remain explicit P7.2--P8 boundaries.
 Runtime dispatch is covered separately by the
