@@ -45,6 +45,7 @@ program test_type_bound_oracle
     call expect_refusal(named_pass_source(), "named PASS", "named PASS")
     call check_nopass(nopass_source(), "nopass_case")
     call check_nopass(nopass_scope_source(), "nopass_scope_case")
+    call expect_refusal(ambiguous_source(), "ambiguous type", "ambiguous")
     call expect_refusal(inherited_source(), "inheritance", "inherited")
     call expect_refusal(generic_source(), "generic", "generic")
     call expect_refusal(deferred_source(), "deferred", "deferred")
@@ -304,6 +305,37 @@ contains
             "    end function top"//nl// &
             "end module nopass_scope_case"//nl
     end function nopass_scope_source
+
+    function ambiguous_source() result(text)
+        character(len=:), allocatable :: text
+        text = "module ambiguous_one"//nl// &
+            "    type :: box_t"//nl// &
+            "    contains"//nl// &
+            "        procedure, nopass :: value"//nl// &
+            "    end type box_t"//nl// &
+            "contains"//nl// &
+            "    pure real(8) function value(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = x + 1.0d0"//nl// &
+            "    end function value"//nl// &
+            "end module ambiguous_one"//nl// &
+            "module ambiguous_two"//nl// &
+            "    type :: box_t"//nl// &
+            "    contains"//nl// &
+            "        procedure, nopass :: value"//nl// &
+            "    end type box_t"//nl// &
+            "contains"//nl// &
+            "    pure real(8) function value(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = 2.0d0*x + 3.0d0"//nl// &
+            "    end function value"//nl// &
+            "    pure real(8) function top(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        type(box_t) :: b"//nl// &
+            "        y = b%value(x)"//nl// &
+            "    end function top"//nl// &
+            "end module ambiguous_two"//nl
+    end function ambiguous_source
 
     function inherited_source() result(text)
         character(len=:), allocatable :: text

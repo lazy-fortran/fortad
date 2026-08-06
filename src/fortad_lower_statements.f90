@@ -738,11 +738,13 @@ contains
         type(lower_status_t), intent(inout) :: status
         type(component_access_query_t) :: access
         type(derived_type_query_t) :: dtype
+        type(derived_type_query_t) :: candidate_dtype
         type(type_binding_query_t) :: binding
         type(program_unit_query_t) :: unit
         character(len=:), allocatable :: object_type, type_name, method, impl
         integer, allocatable :: args(:)
-        integer :: receiver, i, j, dtype_index, binding_index
+        integer :: receiver, i, j, binding_index
+        integer :: type_matches, function_matches
         logical :: found_type, found_binding, found_function
 
         out = 0
@@ -786,20 +788,26 @@ contains
         end if
         method = trim(access%component_name)
         found_type = .false.
-        dtype_index = 0
+        type_matches = 0
         do i = 1, arena%size
             if (.not. arena%has_node_at(i)) cycle
             if (trim(arena%entries(i)%node_type) /= "derived_type") cycle
-            dtype = query_derived_type(arena, i)
-            if (.not. dtype%found) cycle
-            if (.not. same_name(dtype%name, type_name)) cycle
+            candidate_dtype = query_derived_type(arena, i)
+            if (.not. candidate_dtype%found) cycle
+            if (.not. same_name(candidate_dtype%name, type_name)) cycle
+            type_matches = type_matches + 1
+            if (found_type) cycle
+            dtype = candidate_dtype
             found_type = .true.
-            dtype_index = i
-            exit
         end do
         if (.not. found_type) then
             call refuse_type_bound(status, method, &
                 "the concrete type is not defined in this source")
+            return
+        end if
+        if (type_matches > 1) then
+            call refuse_type_bound(status, method, &
+                "the concrete type name is ambiguous in this source")
             return
         end if
         if (allocated(dtype%extends_parent)) then
@@ -847,18 +855,25 @@ contains
             if (len_trim(binding%implementation) > 0) impl = trim(binding%implementation)
         end if
         found_function = .false.
+        function_matches = 0
         do j = 1, arena%size
             if (.not. arena%has_node_at(j)) cycle
             if (trim(arena%entries(j)%node_type) /= "function_def") cycle
             unit = query_program_unit(arena, j)
             if (unit%found .and. same_name(unit%name, impl)) then
+                function_matches = function_matches + 1
+                if (found_function) cycle
                 found_function = .true.
-                exit
             end if
         end do
         if (.not. found_function) then
             call refuse_type_bound(status, method, &
                 "the binding implementation is not a same-file function")
+            return
+        end if
+        if (function_matches > 1) then
+            call refuse_type_bound(status, method, &
+                "the binding implementation name is ambiguous in this source")
             return
         end if
         if (binding%pass_arg) then
