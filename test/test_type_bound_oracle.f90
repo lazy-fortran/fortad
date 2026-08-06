@@ -15,16 +15,14 @@ program test_type_bound_oracle
         "        procedure :: value"//nl// &
         "    end type box_t"//nl// &
         "contains"//nl// &
-        "    pure function value(self, x) result(y)"//nl// &
+        "    pure real(8) function value(self, x) result(y)"//nl// &
         "        class(box_t), intent(in) :: self"//nl// &
         "        real(8), intent(in) :: x"//nl// &
-        "        real(8) :: y"//nl// &
         "        y = self%scale*x + self%scale*self%scale"//nl// &
         "    end function value"//nl// &
-        "    pure function top(model, x) result(y)"//nl// &
+        "    pure real(8) function top(model, x) result(y)"//nl// &
         "        type(box_t), intent(in) :: model"//nl// &
         "        real(8), intent(in) :: x"//nl// &
-        "        real(8) :: y"//nl// &
         "        y = model%value(x)"//nl// &
         "    end function top"//nl// &
         "end module type_bound_case"//nl

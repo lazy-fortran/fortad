@@ -152,7 +152,7 @@ contains
                     source_line = source_line + 1
                 end do
                 call join_continued_statement(source, source_pos, source_header)
-                source_open = index(source_header, "(")
+                source_open = procedure_arg_open(source_header)
                 source_close = 0
                 source_depth = 0
                 if (source_open > 0) then
@@ -269,6 +269,30 @@ contains
         status%ok = .true.
         status%message = ""
     end subroutine lower_source
+
+    integer function procedure_arg_open(header) result(open)
+        !! Find the argument list, skipping a kind selector in a return type.
+        character(len=*), intent(in) :: header
+        integer :: i, p
+
+        open = 0
+        do i = 1, len_trim(header) - 7
+            if (.not. matches(header(i:i + 7), "function")) cycle
+            p = index(header(i + 8:), "(")
+            if (p > 0) then
+                open = i + 7 + p
+                return
+            end if
+        end do
+        do i = 1, len_trim(header) - 9
+            if (.not. matches(header(i:i + 8), "subroutine")) cycle
+            p = index(header(i + 9:), "(")
+            if (p > 0) then
+                open = i + 8 + p
+                return
+            end if
+        end do
+    end function procedure_arg_open
 
     subroutine join_continued_statement(source, start_pos, statement)
         !! Return the whole logical statement starting at `start_pos`, joining
