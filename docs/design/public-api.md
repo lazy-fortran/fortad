@@ -107,7 +107,9 @@ It is the source-pipeline diagnostic used before testing derivatives.
 For every transformation, `from` selects a procedure in multi-procedure input.
 The first procedure is the default. Other procedures in the source remain
 available for bounded same-file inlining. `module_name` wraps the generated
-procedure in a module and gives consumers a compiler-checked interface.
+procedure in a module and gives consumers a compiler-checked interface. If
+`module_name` and the generated procedure name differ only by letter case, the
+wrapper is named `<module_name>_module`; the procedure name is preserved.
 
 The generated argument list follows the primal arguments and the derivative
 objects required by the selected mode. Inspect `res%code` before writing a
