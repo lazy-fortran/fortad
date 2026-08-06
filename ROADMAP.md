@@ -81,7 +81,10 @@ the current integration gate is still open:
       `iga_polar_feec.f90` lines 328 and 344. Commit `11da10a4` gives
       nvfortran 26.5 a cold 381-target build after fixes to path handling, JSON
       escaping, and the CLI. Commit `ac02b4d0` exports the component-access
-      query used by FortAD commit `155bf0e`.
+      query used by FortAD commit `155bf0e`. FortFront `main` now also contains
+      `5b60c777`, which copies explicit `CALL` nodes through defined assignment
+      and checks that their allocatable name and argument list survive arena
+      growth under GNU and nvfortran.
 - [ ] FortFront `main` is green on Windows. The six failures and their current
       diagnosis are recorded under Repository state.
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
@@ -98,6 +101,12 @@ the current integration gate is still open:
 The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
+
+The current FortAD head is `d77a8a3`. Its GNU bare gate is green (407/407
+targets, 24/24 tests, lint), and the three previously failing nvfortran rule
+oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
+boundary and adds a scalar external-CALL refusal oracle. The complete
+multi-compiler gate remains open until the remaining lanes are rerun.
 
 ## Current integration gate
 
@@ -623,7 +632,8 @@ problem-specific rule.
 - [x] **P8.1 `select type` JVP closeout.** Commit `7766fa1` preserves a
       `class(base)` selector, concrete guards, and component reads in forward
       mode. One generated routine returns the analytical derivative for two
-      different child types at runtime. FortAD main `1e5694c` was measured and
+      different child types at runtime. FortAD main `d77a8a3` contains the
+      measured runtime implementation and
       verified in fortad-bench commits `58a9a49` and `60da134`. The pinned
       [evidence](https://github.com/lazy-fortran/fortad-bench/blob/60da1343531522116d0a1563b2512968b3c700af/results/itpplasma_polymorphic_select_type_validation.txt)
       contains the hand-derived child JVP oracle, transform and build timings,
