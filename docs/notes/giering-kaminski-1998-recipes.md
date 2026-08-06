@@ -2,10 +2,11 @@
 
 Giering and Kaminski present adjoint generation as a source-level reverse
 transformation of the numerical algorithm that computes a model or cost
-function. Their target is practical Fortran code used in inverse modeling,
-data assimilation, model tuning, and sensitivity analysis. The paper turns the
-chain rule into construction rules for statements, loops, procedures, files,
-and implicit iterations.
+function. Their target is practical Fortran code used in inverse modeling and
+data assimilation, including model tuning and sensitivity analysis. The paper
+turns the chain rule into construction rules that range from individual
+statements to files. Separate rules cover loops, procedure calls, and implicit
+iterations.
 
 ## Core rule
 
@@ -37,7 +38,7 @@ recompute it. Storage uses memory or direct-access files. Recomputation saves
 storage and costs runtime. The authors recommend a mixed strategy chosen for
 the application and machine.
 
-Procedure calls carry active adjoint arguments and required primal arguments.
+Procedure calls pass active adjoint arguments and required primal arguments.
 The adjoint procedure is built before its call because the call signature
 depends on the required values discovered inside the procedure. This is a
 concrete reason to construct differentiated procedures bottom-up. The paper
@@ -64,9 +65,7 @@ an explicit storage, recomputation, or checkpointing policy.
 The implicit fixed-point construction is a model for fortad's tape-free affine
 recurrence work. It should remain a general transformation for converged
 iterations, with an independent adjoint identity test and a convergence-domain
-check. The paper's readability and modularity requirements also support keeping
-generated code close enough to the source that a user can inspect the reverse
-control flow.
+check.
 
 ## Source
 

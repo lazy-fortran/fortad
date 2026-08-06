@@ -17,18 +17,18 @@ the loop are `map(to:)` / `copyin(...)`, and variables written by it are
 only in the corresponding reduction clause.  This avoids mapping procedure
 arguments that are merely bounds or values used before the loop.
 
-The ordinary compiler path remains valid: without OpenMP or OpenACC enabled,
+The ordinary compiler path remains valid. Without OpenMP or OpenACC enabled,
 both lines are comments and the generated routine is serial standard
 Fortran.  A GPU validation is not allowed to use that path as evidence.  The
-OpenMP oracle sets `OMP_TARGET_OFFLOAD=MANDATORY`; both the OpenMP and OpenACC
+OpenMP oracle sets `OMP_TARGET_OFFLOAD=MANDATORY`. Both the OpenMP and OpenACC
 drivers independently query device execution and compare the generated VJP
 against the analytic gradient of a dot-product-with-sine kernel.  The timing
 wraps the complete call, including host/device transfers.
 
-The committed validation uses TU Graz host `acluster`, its Tesla T4, and a
-user-local NVIDIA HPC SDK 26.5 installation.  CUDA 12.9 is selected because
-the host driver is 535.261.03; the compiler targets the native T4 `cc75`
-architecture.  The exact compiler flags, device oracle, timings, memory, and
-compiler reports are recorded in the P6.2 result file in `fortad-bench`.
+The committed validation uses TU Graz host `acluster` and its Tesla T4 with a
+user-local NVIDIA HPC SDK 26.5 installation. CUDA 12.9 is selected because
+the host driver is 535.261.03. The compiler targets the native T4 `cc75`
+architecture. The P6.2 result file in `fortad-bench` records the exact flags,
+device oracle, timings, memory use, and compiler reports.
 The GCC NVPTX path remains a separately validated fallback on `faepop31`, not
 the production GPU toolchain.

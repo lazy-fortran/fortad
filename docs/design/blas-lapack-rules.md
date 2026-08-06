@@ -1,7 +1,7 @@
 # BLAS/LAPACK structured rules
 
 P3.2 adds an explicit rule table for the external dense linear-solve path.
-The first built-in entry is `dgesv`; the registry remains available for other
+The first built-in entry is `dgesv`. The registry remains available for other
 BLAS/LAPACK routines and project-specific interfaces.
 
 ## Registration and interface contract
@@ -18,7 +18,7 @@ call dgesv(n, nrhs, a, lda, ipiv, b, ldb, info)
 ```
 
 with real double-precision `a` and `b`. `dgesv` overwrites `a` with its LU
-factorisation and `b` with the solution `x`; those post-call values are part of
+factorization and `b` with the solution `x`. Those post-call values are part of
 the rule contract. The current reverse emitter accepts simple variable actuals
 outside loops. General expressions, calls inside loops, and other mutating
 interfaces remain explicit future work.
@@ -72,8 +72,8 @@ The performance comparison is recorded in
 Ryzen 9 direct-solve fixture measured analytical versus Enzyme at 16 products:
 642.542350 ns versus 2449.369550 ns for JVP (3.8120x), and 637.162500 ns
 versus 974.323500 ns for VJP (1.5292x). That fixture uses a hand-written dense
-solve and Flang/LLVM 22.1.8 with Enzyme 22; it is a cross-record comparison,
-not an apples-to-apples timing of this gfortran-generated `dgesv` routine.
+solve and Flang/LLVM 22.1.8 with Enzyme 22. The gfortran-generated `dgesv`
+routine was measured in a separate record.
 
 Decision: keep the built-in `dgesv` rule as explicit opt-in infrastructure and
 do not add automatic hybrid selection. Extend the table only when a routine's

@@ -24,11 +24,12 @@ must preserve.
 
 ## Analyses and representation
 
-The implementation uses a source internal representation with symbol tables,
-procedures, modules, expressions, and control-flow structure. The architecture
-separates parsing, representation building, data-flow analysis, differentiation,
-rebuilding, and printing. This separation lets the analyses work on the same
-representation before either tangent or adjoint code is emitted.
+The implementation uses a source internal representation with symbol tables
+and explicit control-flow structure. It represents procedures, modules, and
+expressions. The architecture separates parsing and representation building
+from data-flow analysis. Differentiation, rebuilding, and printing follow.
+This separation lets the analyses work on the same representation before either
+tangent or adjoint code is emitted.
 
 The analysis pipeline is layered. Pointer and input-output information supports
 dependency analysis. Differentiable dependency relations feed the activity
@@ -40,8 +41,9 @@ procedure's flow graph are part of the analysis domain, so a local rule can be
 combined with interprocedural information.
 
 The formal specification matters as much as the architecture. Data-flow
-equations describe the sets propagated through instructions, branches, loops,
-and calls. Operational rules describe the tangent and adjoint transformations.
+equations describe the sets propagated through instructions and control flow,
+including calls. Operational rules describe the tangent and adjoint
+transformations.
 This gives a correctness target for the implementation that is more precise
 than comparing a few generated numerical results.
 
@@ -52,13 +54,13 @@ them have run. A single mutable variable name is insufficient as the semantic
 identity of a value. The implementation needs explicit handling for active
 values, overwritten values, and values required by reverse statements.
 
-The most useful architectural lesson is to keep the pipeline visible:
-front-end representation, dependency and activity analyses, reverse storage or
-recomputation analysis, derivative IR, and source emission. A formal rule for
-each IR instruction should accompany the implementation. The paper also
-supports a bottom-up treatment of procedures and a call-graph-aware treatment
-of required values. Those choices fit fortad's procedure-level differentiation
-and make unsupported control-flow cases visible at the right layer.
+Fortad should keep the pipeline visible: front-end representation,
+dependency and activity analyses, reverse storage or recomputation analysis,
+derivative IR, and source emission. A formal rule for each IR instruction should
+accompany the implementation. The paper also supports a bottom-up treatment of
+procedures and a call-graph-aware treatment of required values. Those choices
+fit fortad's procedure-level differentiation and make unsupported control-flow
+cases visible at the right layer.
 
 The paper's model is deliberately operational. It differentiates the discrete
 algorithm that the source executes. Fortad should use that same boundary when

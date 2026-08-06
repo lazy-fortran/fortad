@@ -10,7 +10,7 @@ run sequentially on one pinned core.
 
 The probe called `compile_frontend_from_file` with semantic analysis enabled.
 A file counted as accepted only when both `parse_ok` and `semantic_ok` were
-true. The scan took 13.21 seconds and used 22,604 kB peak RSS.
+true.
 
 | result | files |
 | --- | ---: |
@@ -31,8 +31,9 @@ focused API tests:
 - `test_compiler_resolved_type_query.f90` checks resolved kinds for literals,
   declarations, identifiers, binary expressions, intrinsic calls, function
   references, arrays, and unresolved names.
-- `test_compiler_scope_resolution.f90` checks direct, host, use-associated,
-  block, associate, procedure, and generic-interface bindings.
+- `test_compiler_scope_resolution.f90` checks direct, host, and use-associated
+  bindings. It also covers block and associate scopes, procedure names, and
+  generic interfaces.
 - `test_compiler_program_unit_queries.f90` checks derived-type components and
   type-bound procedure bindings, along with program-unit and declaration
   queries.
@@ -44,12 +45,10 @@ sources outside that measured boundary.
 
 ## Reproduction
 
-The scan used the existing fortfront `frontend_probe` executable and the
-following per-file condition:
+At the fortfront commit named above, run `fo exec frontend_probe FILE` from the
+fortfront checkout for each `.f90` file under the named fortnum tree. Count a
+file as accepted under this condition:
 
 ```text
 accepted = parse_ok and semantic_ok
 ```
-
-The raw per-file scan was retained on the cluster as
-`/home/ert/fortad-p0-4/coverage.psv` during the measurement.

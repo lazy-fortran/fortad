@@ -39,7 +39,7 @@ The callbacks own the map derivatives, stopping criterion, and any linear
 algebra. fortad emits the calls and no per-iteration tape. This is explicit
 because an opaque solver does not reveal its map or its convergence domain.
 
-## Evidence and boundary
+## Fixed-point oracle
 
 `test/test_fixed_point_rule_oracle.f90` uses the two-state tanh map from
 fortnum, registers both callbacks, and links the generated JVP/VJP to an
@@ -50,12 +50,12 @@ components. The focused oracle passes on the TU Graz `acluster`.
 The existing TU Graz Ryzen 9 fixed-point records provide the performance
 context. Against fresh complete re-solves, the implicit tangent is 97.8032 ns
 versus 1224.4016 ns (12.5190x), and the implicit adjoint is 132.3983 ns versus
-2495.1440 ns (18.8457x). These are independent analytical/reference records;
-there is no compatible Enzyme fixed-point fixture in the available TU Graz
+2495.1440 ns (18.8457x). These are independent analytical/reference records.
+There is no compatible Enzyme fixed-point fixture in the available TU Graz
 toolchains, and the separate Enzyme Richardson-trace record is not the same
 workload.
 
-The current boundary is caller-supplied fixed-shaped map products with a
-contractive converged phase. Automatic map extraction, convergence-domain
+Support requires caller-supplied fixed-shaped map products and a contractive
+converged phase. Automatic map extraction, convergence-domain
 proofs, noncontractive acceleration, and general shaped-array interfaces
 remain future work.

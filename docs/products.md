@@ -1,298 +1,272 @@
-# Getting each derivative product out of fortad
+# Derivative products
 
-Four products, four different derivative objects. Choosing the wrong one is the
-most expensive mistake available here — computing a full Jacobian to get a
-gradient costs `n` sweeps instead of one — so this page starts from what you
-want and works back to the call.
+The number of inputs, outputs, and requested directions determines the useful
+derivative product. fortad emits product routines and leaves numerical storage
+and solver policy with the caller.
 
-There is no driver layer, and that is deliberate. Each product below is a
-generated routine plus a few lines of ordinary Fortran. A wrapper hiding those
-lines would have to guess your storage layout, your covariance representation,
-and your optimiser's calling convention, and it would be wrong for someone.
-
-For downstream fortnum users, `fortnum_active_vector` and
-`fortnum_ad_interfaces` provide the stable boundary around those routines:
-named blocks pack into the optimiser's flat vector, while value, JVP, VJP,
-gradient, and HVP callbacks carry backend and quality status. The outer
-optimiser remains caller-owned; Gauss-Newton composes JVP with VJP, and
-Newton-Krylov consumes HVPs without requiring a materialised Hessian.
-
-| You want | Object | Mode | Cost |
-|---|---|---|---|
-| A gradient for an optimiser | `∇f` | reverse | one sweep, any number of inputs |
-| A Hessian-vector product | `H v` | forward-over-reverse | one sweep per product |
-| Sensitivity of many outputs to few inputs | columns of `J` | vector forward | one sweep for all `k` inputs |
-| Sensitivity of few outputs to many inputs | rows of `J` | reverse, once per output | one sweep per output |
-| Linear uncertainty propagation | `cov(y) = J cov(x) Jᵀ` | vector forward | one sweep for the whole covariance |
+| Need | Product | Route | Transformation cost |
+| --- | --- | --- | --- |
+| scalar-objective gradient | `J^T` with seed 1 | VJP | one reverse sweep |
+| directional sensitivity | `Jv` | JVP | one forward sweep |
+| several directions | `JV` | vector JVP | one primal sweep for all columns |
+| Hessian action | `Hv` | forward-over-reverse | one composed product per direction |
+| a few Jacobian rows | `u^T J` | VJP | one reverse sweep per output seed |
+| sparse Jacobian or Hessian | compressed products | coloring and recovery | one product per color |
 
 ## Gradients
 
+For a scalar objective, seed its cotangent with one. One VJP returns an adjoint
+for every independent:
+
 ```console
-$ fortad --mode reverse --indep x --module my_grad kernel.f90
+$ fo exec fortad --mode reverse --indep x --module rosenbrock_ad \
+    --output build/rosenbrock_ad.f90 example/rosenbrock.f90
 ```
 
-One reverse sweep gives the derivative with respect to every independent at
-once. This is the cheap-gradient principle and it is why reverse mode exists:
-the cost does not grow with the number of inputs.
+The generated procedure in the checked-in example has this call:
 
 ```fortran
-f_b = 1.0_dp
-call f_vjp(n, x, f, f_b, x_b)     ! x_b is now grad f
+f_b = 1.0d0
+call rosenbrock_vjp(x, f, f_b, x_b)
 ```
 
-Seed `f_b` with something other than one and you get `f_b · ∇f`, which is the
-vector-Jacobian product in general.
+Here `x_b` is the gradient. An incoming seed other than one scales the returned
+gradient and gives the general vector-Jacobian product. The
+[Rosenbrock driver](../example/check_rosenbrock.f90) checks both `f` and `x_b`
+against closed-form values.
+
+Use `--no-primal` when the caller needs only the gradient. This lets dead-store
+elimination remove work retained solely for the primal result.
 
 ## Hessian-vector products
 
 ```console
-$ fortad --mode hessian --indep x --module my_hvp kernel.f90
+$ fo exec fortad --mode hessian --indep x --module rosenbrock_hvp \
+    --output build/rosenbrock_hvp.f90 example/rosenbrock.f90
 ```
 
-Seed the tangents with the direction `v` and the dependent's adjoint with one;
-the tangents of the returned adjoints are `H v`. Cost is one sweep per product
-regardless of dimension, which is what makes Newton–Krylov practical: you never
-form `H`.
+`fad_hvp` first emits a VJP and then differentiates that source in forward
+mode. Seed the independent tangents with `v` and the objective cotangent with
+one. The tangents of the returned independent adjoints are `Hv`.
 
-To form `H` anyway, take `n` products with unit directions. Its symmetry is a
-free correctness check, and one worth taking — see
-`test/test_hessian_oracle.f90`, where symmetry is what catches an error that
-finite differences cannot.
+The HVP interface accepts one direction. A dense Hessian therefore needs one
+call per unit direction. Sparse recovery needs one call per color. There is no
+vector-HVP entry point in 0.1.0.
+
+[`test_hessian_oracle.f90`](../test/test_hessian_oracle.f90) checks generated
+products against finite differences and checks Hessian symmetry independently.
 
 ## Linear uncertainty propagation
 
-**Vector forward mode already is this product.** No further machinery is
-needed, which is why none is provided.
+Let an input covariance have a factorization
 
-Given inputs with covariance `Σ = L Lᵀ` — `L` from a Cholesky factor, or the
-scaled eigenvectors, or just the columns of independent standard deviations —
-the first-order propagated covariance is
-
-```
-cov(y) = J Σ Jᵀ = (J L)(J L)ᵀ
+```text
+Sigma_x = L transpose(L).
 ```
 
-and `J L` is exactly what vector forward mode computes when the tangent seeds
-are the columns of `L`:
+First-order propagation gives
 
-```console
-$ fortad --indep x -d n_dir --module my_jvp_v kernel.f90
+```text
+Sigma_y = J Sigma_x transpose(J)
+        = (J L) transpose(J L).
 ```
+
+Vector forward mode computes every column of `JL` in one primal sweep. Its
+direction index is the first array index. For the two-output model used by the
+product oracle, the tested layout is:
 
 ```fortran
-! x_d(:, i) holds column i of L, so y_d(:, i) is column i of J L.
-call f_jvp_v(k, n, x, x_d, y, y_d)
-cov_y = matmul(y_d, transpose(y_d))
+! L(input, direction); x_d(direction, input)
+do j = 1, k
+    do i = 1, n
+        x_d(j, i) = l(i, j)
+    end do
+end do
+
+call model_jvp_v(k, n, x, x_d, y1, y1_d, y2, y2_d)
+jl(1, :) = y1_d
+jl(2, :) = y2_d
+cov_y = matmul(jl, transpose(jl))
 ```
 
-One primal sweep carries all `k` columns. The measured cost per direction falls
-from about 9.6 ns per element at one direction to 0.9 at sixteen on the
-benchmark kernel, so this is far cheaper than `k` separate tangent runs.
+Generate that vector JVP by naming the direction-count dummy:
 
-**Where this stops being valid.** First-order propagation assumes the map is
-close to linear over the input uncertainty. It says nothing about skew, it
-cannot see a fold or a threshold, and near a stationary point in an input it
-predicts zero sensitivity where the true response is quadratic. If the
-nonlinearity matters over the range of `Σ`, this number is not the answer and
-no amount of derivative accuracy fixes that. See Saltelli et al., *Global
-Sensitivity Analysis: The Primer*, for what to reach for instead.
+```console
+$ fo exec fortad --mode forward --indep x --directions k \
+    --module model_ad --output build/model_ad.f90 model.f90
+```
+
+This approximation uses the derivative at one input point. It does not
+represent skewness, threshold crossings, folds, or curvature across a wide
+input distribution. Near a stationary point, first-order propagation can
+return zero even when the response has a quadratic variation. Use a nonlinear
+uncertainty method when those effects matter.
+
+[`test_products_oracle.f90`](../test/test_products_oracle.f90) compares this
+construction with covariance propagation through an explicit Jacobian built
+from scalar tangent products.
 
 ## Sensitivity analysis
 
-Sensitivity is a Jacobian question, and which mode wins depends only on the
-shape:
+Use the Jacobian shape to select the mode:
 
-- **Few inputs, many outputs** — vector forward mode, one sweep for all inputs.
-- **Few outputs, many inputs** — reverse mode, one sweep per output.
-- **Both large** — neither is cheap, and the answer is usually that you do not
-  want the full Jacobian. Ask what it is for: an optimiser wants `Jᵀu`, a
-  Krylov solve wants `Jv`, and both are one sweep.
+- A few inputs and many outputs favor forward mode. Vector forward mode can
+  propagate all input directions in one sweep.
+- A few outputs and many inputs favor reverse mode. Run one VJP per output
+  seed.
+- Large input and output spaces favor matrix-free `Jv` and `u^T J` products or
+  sparse compression.
 
-A useful diagnostic that costs one extra sweep: seed a *random* direction and
-compare against a directional finite difference. It checks the whole Jacobian
-at once, where checking entries one at a time costs `n` differences and misses
-cross terms.
+A directional finite difference provides a cheap independent check. Seed a
+nontrivial direction `v`, compare the generated `Jv` with
+`(f(x+h*v)-f(x-h*v))/(2*h)`, and repeat over decreasing `h` to distinguish
+truncation error from a wrong derivative.
 
 ## Gauss-Newton
 
-For a least-squares residual `r(x)`, Gauss-Newton needs `J v` and `Jᵀ u`, never
-`J` itself:
+For a least-squares residual `r(x)`, a matrix-free Gauss-Newton step needs two
+operations:
 
-- `J v` — one vector-forward sweep.
-- `Jᵀ u` — one reverse sweep with the residual adjoints seeded to `u`.
+1. A JVP computes `w = Jv`.
+2. A VJP with residual seed `w` computes `J^T w`.
 
-Both are matrix-free, so the normal equations are solved by a Krylov method
-without ever forming `JᵀJ`. That is the whole reason to have both modes.
+The Krylov solver consumes this composition as the action of `J^T J`. It does
+not need a materialized Jacobian or normal-equations matrix. The downstream
+application owns the iteration and preconditioner. It also owns storage and the
+convergence policy.
 
-## Differentiating a solve, not the solver
+## Structured procedure rules
 
-The single largest win available here, and the one fortad cannot find on its
-own. Given `call linsolve(n, A, b, x)`, differentiating `A x = b` gives
+fortad inlines supported same-file callees before differentiation. A procedure
+whose body is unavailable needs one of the public rule interfaces:
 
-```
-A x_d = b_d - A_d x
-```
+- `fad_add_rule` registers one scalar partial expression per argument.
+- `fad_add_call_rule` registers tangent and adjoint statement templates for a
+  subroutine call.
 
-— one more solve with the **same matrix**, so a solver holding a factorisation
-reuses it. Differentiating the solver's iterations instead is asymptotically
-worse and no loop-level cleverness recovers the difference.
+Statement templates use `$k` for the k-th actual argument, `$kd` for its
+tangent, and `$kb` for its adjoint. fortad substitutes the text without parsing
+or validating its mathematics. The registrant must supply compilable Fortran
+and an independent derivative check.
 
-Register the rule and fortad emits it:
+The structured rule boundary covers operations whose derivative should use a
+different algorithm from the primal implementation. Current records include:
 
-```fortran
-call fad_add_call_rule("linsolve", 4, &
-    tangent=[character(len=80) :: &
-             "call linsolve($1, $2, $3d - matmul($2d, $4), $4d)"], &
-    adjoint=[character(len=80) :: &
-             "call linsolve_transposed($1, $2, $4b, fad_lambda)"])
-```
+- an opt-in [`dgesv` rule](design/blas-lapack-rules.md) that reuses the primal
+  LU factorization;
+- caller-supplied products for [converged nonlinear roots](design/implicit-root-rules.md);
+- a [two-phase fixed-point rule](design/fixed-point-rules.md);
+- callbacks for [FFT, quadrature, interpolation, and `erf`](design/library-rules.md).
 
-Placeholders: `$k` is the k-th actual argument as written at the call site,
-`$kd` its tangent, `$kb` its adjoint. The primal call is emitted **before** the
-tangent statements, because a rule generally needs the call's outputs — the
-solve's tangent reads `x`. A rule needing a pre-call value must save it itself.
+Calls inside these generated statements can make the generated procedure
+impure. The statement templates also determine which external interfaces and
+libraries the consumer must provide.
 
-The same shape covers a nonlinear solve (the implicit function theorem at the
-converged point), a fixed-point iteration (Christianson's two-phase adjoint),
-and a BLAS call (its own transpose). In each case the rule is mathematics the
-registrant knows and the tool does not.
+## Sparse derivatives
 
-**Without a rule, a call is refused by name.** fortad never descends into a
-callee and never assumes one is inactive: a silently dropped derivative is
-worse than a build failure, because it looks plausible.
+`sparsity_t` stores a structural pattern by columns. An over-full pattern costs
+extra products. A pattern that omits a possible nonzero loses an entry, so use
+`fad_static_pattern` for its conservative supported-source result or provide a
+conservative application pattern.
 
-## Sparse Jacobians
-
-When most entries are structurally zero, a dense Jacobian costs `n` sweeps to
-learn almost nothing. Two columns whose nonzeros never share a row can be
-evaluated in the *same* sweep and separated afterwards: in any given row at most
-one of them contributes. Grouping columns that way is graph colouring.
+For a Jacobian, columns that do not share a nonzero row can use one forward
+direction:
 
 ```fortran
 use fortad, only: sparsity_t, colour_columns, seed_matrix, recover_entries
 
-call colour_columns(pattern, colour, n_colours)
+call colour_columns(pattern, colour, n_colours, stat)
 call seed_matrix(pattern, colour, n_colours, seeds)
-call f_jvp_v(n_colours, n, x, seeds, y, compressed)   ! one vector sweep
+call model_jvp_v(n_colours, n, x, seeds, y, compressed)
 call recover_entries(pattern, colour, compressed, values)
 ```
 
-`values` comes back in the order of `pattern%rows`, so it pairs directly with
-the pattern you supplied. A tridiagonal Jacobian of any size takes three
-colours; a diagonal one takes one. A dense one takes `n`, correctly — there is
-nothing to compress and the method says so rather than losing entries.
+`seeds(color, column)` and `compressed(color, row)` both place the direction
+first. `values` follows the order of `pattern%rows`. Recovery is an exact
+rearrangement when the pattern and coloring are valid.
 
-Recovery is **exact**, not approximate: compression is a rearrangement.
-
-For supported lowered procedures, `fad_static_pattern` can infer a conservative
-pattern from the source before colouring. It unions assignments across control
-flow, so an over-full pattern costs sweeps but an under-full one never silently
-loses a possible derivative. For external state or an unmodelled interface,
-you can still supply the pattern explicitly.
-
-### Sparse Hessians
-
-The same colouring works on a Hessian unchanged, applied to the
-Hessian-vector-product seeds instead of the tangent seeds. Compression only
-needs "no two columns of a colour share a row", which knows nothing about
-symmetry, so a symmetric tridiagonal Hessian takes three colours exactly as a
-tridiagonal Jacobian does.
-
-For a symmetric matrix, use `star_colour_columns` and `recover_symmetric`
-instead. `H(i,j)` and `H(j,i)` are the same number, so an entry only has to be
-recoverable from one of its two directions, and exploiting that needs strictly
-fewer colours:
+For a symmetric Hessian, call `star_colour_columns` and
+`recover_symmetric`. Run the scalar HVP once for each row of `seeds` and place
+each returned `Hv` in the matching row of `compressed`:
 
 ```fortran
-call star_colour_columns(pattern, colour, n_colours)
+call star_colour_columns(pattern, colour, n_colours, stat)
 call seed_matrix(pattern, colour, n_colours, seeds)
-call f_hvp_v(n_colours, n, x, seeds, ..., compressed)
-call recover_symmetric(pattern, colour, compressed, values)
+do c = 1, n_colours
+    v = seeds(c, :)
+    call objective_hvp(..., v, ..., hv)
+    compressed(c, :) = hv
+end do
+call recover_symmetric(pattern, colour, compressed, values, stat)
 ```
 
-The gain is not marginal. An arrowhead Hessian — one dense row and column —
-needs `n` colours by the asymmetric test, because the dense column shares a row
-with every other. Its adjacency graph is a star, which contains no four-vertex
-path, so star colouring needs **two**. Measured in the test suite: 2 against 10
-at `n = 10`.
+The exact generated HVP argument list depends on the primal procedure. The
+ellipsis above marks those primal and seed arguments. Inspect the generated
+source before writing the call.
 
-A symmetric tridiagonal still takes three either way; its graph is a path, and a
-path does contain four-vertex subpaths. Star colouring never does worse.
+[`test_sparse_oracle.f90`](../test/test_sparse_oracle.f90) checks coloring and
+recovery against explicit matrices. It also verifies that star coloring uses
+two colors for a ten-column symmetric arrowhead pattern, where ordinary column
+coloring needs ten.
 
-An asymmetric pattern passed to `star_colour_columns` is refused, because the
-result would not be recoverable.
+## Checkpointing
 
-## Adjoints of long time integrations
-
-The adjoint of an `n`-step integration needs each step's input state again, in
-reverse. Storing all `n` is often impossible; storing none means replaying from
-the start for every step, which is `O(n²)`. Binomial checkpointing is the
-optimal compromise, and the compromise is very good: with `s` slots and `r`
-repetitions it covers `binom(s+r, s)` steps.
-
-Measured from the schedules this generates: **1000 steps in 10 slots costs 3636
-forward steps** — about 3.6x the primal work, for 10 stored states instead of
-1000. 100 steps in 4 slots costs 379.
+`revolve_schedule(n_steps, n_slots, schedule)` returns a sequence of actions
+for a caller-owned time loop:
 
 ```fortran
 use fortad, only: revolve_schedule, revolve_t, &
                   REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
 
-call revolve_schedule(n_steps, n_slots, schedule)
+call revolve_schedule(n_steps, n_slots, schedule, stat)
 do i = 1, schedule%n_actions
     select case (schedule%actions(i)%kind)
-    case (REV_ADVANCE);  ! run the primal from %from to %to
-    case (REV_TAKESHOT); ! save the current state into %slot
-    case (REV_RESTORE);  ! load %slot back
-    case (REV_TURN);     ! adjoint of step %from, whose input state is current
+    case (REV_ADVANCE)
+        ! Advance from %from to %to.
+    case (REV_TAKESHOT)
+        ! Save the state in %slot.
+    case (REV_RESTORE)
+        ! Restore %slot.
+    case (REV_TURN)
+        ! Apply the adjoint of step %from.
     end select
 end do
 ```
 
-This is a **schedule, not a driver**. fortad does not own your time loop, your
-state, or your storage, and a framework that demanded to would be useless in
-exactly the codes that need this most.
+The schedule does not own the state or storage. The caller must implement each
+action. [`test_revolve_oracle.f90`](../test/test_revolve_oracle.f90) executes
+the schedule against a simulated integration and checks the binomial cost
+bound.
 
-## Derivatives above second order
+## Taylor mode
 
-Nesting a first-order tool `d` times costs `O(2ᵈ)`. Propagating a truncated
-Taylor series costs `O(d²)` per operation and gives every derivative up to `d`
-in one sweep.
+`fad_taylor` rewrites a straight-line scalar kernel into univariate Taylor
+coefficient arithmetic. The generated routine accepts the maximum order at run
+time and uses the public `tay_*` helpers. Arrays, loops, and branches are
+refused in this mode.
 
-A Taylor object carries the coefficients of `f(x + t v)` in `t`, so
-`a(k) = (1/k!) dᵏ/dtᵏ f(x + t v)`. The rules are recurrences read off the
-defining identity of each function — `z = exp(a)` satisfies `z' = z a'`, hence
-`k z_k = Σ i a_i z_{k-i}` — so they are exact relations, not differentiated
-series approximations.
+The coefficient convention is
 
-```fortran
-use fortad, only: tay_var, tay_exp, tay_sin_cos, tay_mul, tay_derivative
-
-real(dp) :: x(0:8), e(0:8), s(0:8), c(0:8), z(0:8)
-
-call tay_var(0.6_dp, 1.0_dp, x)     ! value, direction
-call tay_exp(x, e)
-call tay_sin_cos(x, s, c)
-call tay_mul(e, s, z)               ! z = exp(x)*sin(x)
-print *, tay_derivative(z, 5)       ! the fifth derivative
+```text
+a(k) = (1/k!) d^k/dt^k f(x + t v) at t = 0.
 ```
 
-**What is and is not built.** The arithmetic and the source transformation are
-both here and pinned against closed-form series — `exp(t)` giving `1/k!`,
-`1/(1-t)` giving all ones, `log(1+t)`, `sqrt(1+t)`, the sine and cosine series,
-and integer powers at a negative base where an `exp(p log a)` implementation
-would fail. `fad_taylor` rewrites straight-line scalar kernels into calls to
-these routines. Arrays, loops, and branches are refused by name because their
-coefficient-array storage needs a separate transformation; use forward or
-reverse mode for those cases.
+`tay_derivative(a, k)` converts `a(k)` back to the k-th directional derivative.
+The transformation and helper recurrences cost `O(d^2)` per operation for
+order `d`.
 
-## Which mode, mechanically
+[`test_taylor_gen_oracle.f90`](../test/test_taylor_gen_oracle.f90) checks the
+generated source. [`test_taylor_oracle.f90`](../test/test_taylor_oracle.f90)
+checks the arithmetic against closed-form series.
 
-```
+## Choosing a mode
+
+```text
                     few outputs        many outputs
 few inputs          either             vector forward
-many inputs         reverse            neither: use matrix-free products
+many inputs         reverse            matrix-free or sparse products
 ```
 
-If in doubt, generate both and time them. fortad emits ordinary Fortran, so
-that costs a compile, not a redesign.
+Generate both modes and measure the complete downstream workload when either
+choice is plausible. Compiler, input shape, memory traffic, and derivative
+seeds can change the result.

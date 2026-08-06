@@ -18,7 +18,7 @@ The complete validation record is in fortad-bench commit `eafcd1c`.
 
 ## Decision
 
-The original universal performance thesis is rejected by its own gate. The
+The runtime comparison rejected the original universal performance thesis. The
 frontend and correctness parts of the project are viable. The VMEC++
 performance comparison does not support a claim that a hand-written Fortran
 derivative matches C++/Enzyme.
@@ -28,8 +28,8 @@ roadmap before treating Phase 1 as evidence for that thesis. The revised
 roadmap targets a portable, correctness-checked source-transformation AD
 engine with performance claims stated per workload and backed by measurements.
 Every result keeps its compiler, hardware, build time, code size, runtime, and
-memory record. A competitor win remains an optimization target when the
-evidence justifies the work. It is not silently reported as a fortad win.
+memory record. A competitor win is recorded as such and remains an optimization
+target when the evidence justifies the work.
 
 The VMEC++ result remains the first performance challenge for generated code.
 The next work must address the measured code-generation gap before making a

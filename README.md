@@ -1,199 +1,179 @@
 # fortad
 
-Source-transformation automatic differentiation for Fortran. Reads Fortran,
-emits **standard Fortran** derivative code that any conforming compiler builds —
-no plugin, no LLVM version lock, no constraint on how the primal is written.
+`fortad` 0.1.0 transforms a supported subset of Fortran into standard Fortran
+procedures for automatic differentiation. The generated source has no runtime
+tape library or compiler plug-in dependency. The compiler matrix currently
+checks gfortran, ifx, flang-new, nvfortran, and LFortran.
 
 ```console
-$ fortad --mode reverse --indep a,b --module k_adjoint kernel.f90
+$ fo exec fortad --mode reverse --indep x --module rosenbrock_ad \
+    --output build/rosenbrock_ad.f90 example/rosenbrock.f90
 ```
 
-Working today: forward mode (scalar, array, loop, branch, and vector/batched),
-reverse mode (straight-line, branches, and loops - reductions, element writes,
-and taped recurrences), Hessian-vector products, and a registry for your own
-procedures' derivatives. 74 oracle cases
-pass locally, each checked against finite differences, the adjoint identity, or
-Hessian symmetry - never against another AD tool.
+That command differentiates the checked-in
+[Rosenbrock example](example/README.md) and writes a module containing
+`rosenbrock_vjp`. The example page compiles the generated module and checks its
+gradient against the analytic result.
 
-## Why
+## Build
 
-The Fortran options today are Enzyme (an LLVM pass, requiring flang-new or
-LFortran plus a matching `ClangEnzyme-NN.so`), Tapenade (Fortran 95-era, Inria
-non-commercial terms), OpenAD (effectively unmaintained), or operator
-overloading (which defeats vectorisation). There is no maintained, permissively
-licensed, modern-Fortran source-transformation AD tool. fortad is that.
+The current manifest uses sibling path dependencies for `fortfront` and
+`fortgen`. Clone all three repositories into the same parent directory:
 
-## The goal
-
-The current goal is a portable source-transformation engine that emits standard
-Fortran, passes independent derivative checks, and reports measured
-performance per workload. The mode matrix covers forward, reverse, vector
-forms of both, forward-over-reverse, sparse-compressed, and higher-order
-Taylor.
-
-The P0.8 VMEC++ gate rejected a universal claim of superiority. fortad records
-runtime, peak memory, build time, and generated-code size for each comparison.
-Any performance win is tied to the workload and compiler that produced the
-measurement. The decision is documented in
-[docs/design/go-no-go.md](docs/design/go-no-go.md).
-
-Enzyme is the hardest of those targets at runtime and is therefore the one the
-dossier argues against in detail; the overloading tools (CoDiPack, ADOL-C,
-Adept) and the tracing tools (JAX, PyTorch) are separate targets with different
-weak points. Build time is a target in its own right, measured and reported on
-every roadmap item, not a footnote — a source transformation that emits cached
-`.f90` should beat an LLVM plugin pass by a wide margin, and if it does not,
-that is a defect.
-
-The mechanism is differentiating **above** scalar IR, where Fortran's array
-semantics, `intent`, contiguity, shapes and purity are still visible, and
-differentiating the *mathematics* of a solve rather than its iterations.
-
-The full argument, the algorithm catalogue, and the honest accounting of where
-Enzyme wins are in **[docs/dossier.md](docs/dossier.md)**.
-
-## Measured against Enzyme
-
-On the `dot_sin` reduction kernel, this machine, all Fortran compiled with the
-same flang, correctness gating every timing. Full method and raw data in
-[fortad-bench](https://github.com/lazy-fortran/fortad-bench).
-
-| Mode | fortad vs Enzyme |
-|---|---|
-| Forward, one direction | ~8% faster, and matches a hand-written tangent |
-| Forward, 16 directions | ~10x faster per direction |
-| Reverse, reduction (dot_sin) | 1.7-1.8x faster |
-| Reverse, stencil with element writes | 2.1-2.2x faster |
-| Reverse, taped recurrence | **0.97x - Enzyme still ahead**, see below |
-| Build time | 2.7x faster cold and incremental; 4x smaller object |
-| Threads | bit-identical results, 7.4x on 8 cores |
-
-The reverse-mode wins come from restructuring the derivative program - fusing
-the adjoint into the primal loop so arrays stream once rather than twice, and
-scattering into array adjoints without materialising a history. Enzyme
-differentiates a program it must run forward and then reverse; a source-level
-tool can restructure it.
-
-**Where fortad currently loses.** On a nonlinear loop-carried recurrence, where
-both engines must tape and neither fusion nor recomputation applies, Enzyme is
-about 3.5% faster. The likely cause is store-versus-recompute: fortad recomputes
-`exp(...)` in the reverse sweep having already computed it forward, where
-storing it would trade a transcendental for a load. fortad has no cost model
-for that choice. This is an open defect, not a documented limitation.
-
-The build-time figure excludes building or installing a matching LLVM and the
-Enzyme plugin. That is a cost fortad does not have at all, but it is paid once,
-so folding it in would flatter fortad. The kernel is also small, so build time
-here measures toolchain overhead rather than compiling a large body of code; on
-a big file the Fortran compiler dominates both paths and the ratio narrows.
-
-These are numbers from one machine on one kernel, not a promise about another.
-
-## Status by capability
-
-| Capability | Forward | Reverse |
-|---|---|---|
-| Straight-line expressions | yes | yes |
-| Arrays and subscripts | yes | yes, including element writes in loops |
-| `do` loops, including nests | yes | reductions, element writes, recurrences |
-| `if`/`else` | yes | yes |
-| Nonlinear loop-carried recurrence | yes | yes, taped |
-| Vector / batched directions | yes | no |
-| Hessian-vector products | forward-over-reverse | - |
-| Calls to your own procedures | via a registered rule | via a registered rule |
-
-What reverse mode cannot do it **refuses by name**, with a message saying which
-mode does handle it. A named refusal is a bug report; a silent fallback is a
-wrong derivative.
-
-## Products
-
-| Product | Object | Mode | State |
-|---|---|---|---|
-| Optimiser gradients | grad f | reverse | working |
-| Newton-Krylov | H v | forward-over-reverse | working |
-| Sensitivity analysis | rows or columns of J | forward or reverse | working, [documented](docs/products.md) |
-| Linear UQ | cov(y) = J cov(x) J^T | vector forward | working, [documented](docs/products.md) |
-| Gauss-Newton | J, J^T J v | vector forward + reverse | working, [documented](docs/products.md) |
-| Sparse Jacobians | compressed | column colouring | working, [documented](docs/products.md) |
-| Sparse Hessians | compressed | star colouring | working, [documented](docs/products.md) |
-| Long time-integration adjoints | Revolve schedule | binomial checkpointing | working, [documented](docs/products.md) |
-| Higher order | Taylor coefficients to order d | generated straight-line scalar kernels | working, [documented](docs/products.md) |
-
-## Where it fits
-
-```
-user Fortran → fortfront (AST) → fortad (normalise, analyse, differentiate)
-             → standard Fortran → gfortran | ifx | flang-new | nvfortran | LFortran
+```console
+$ mkdir lazy-fortran
+$ cd lazy-fortran
+$ git clone https://github.com/lazy-fortran/fortfront.git
+$ git clone https://github.com/lazy-fortran/fortgen.git
+$ git clone https://github.com/lazy-fortran/fortad.git
+$ cd fortad
+$ fo check
 ```
 
-- **[fortfront](https://github.com/lazy-fortran/fortfront)** provides the typed
-  AST, name resolution, and Fortran emission.
-- **[fortnum](https://github.com/lazy-fortran/fortnum)** is the testbed. fortad
-  enters as a second `autodiff` candidate beside Enzyme and is selected only if
-  it wins on measured complete-workload wall clock.
-- **[fortsym](https://github.com/lazy-fortran/fortsym)** is the symbolic oracle
-  and an optional CSE pass over emitted expressions.
-- **[differentiable-fortran](https://github.com/lazy-fortran/differentiable-fortran)**
-  supplies the fixed benchmark protocol and the Enzyme baselines.
+The build requires a Fortran 2018 compiler, `fpm`, and the local
+[`fo`](https://github.com/lazy-fortran/fo) build driver. `fo check` builds the
+library and command-line application, then runs the oracle suite. Run bare
+`fo` for the complete contributor gate, including lint and formatting checks.
 
-## Benchmarks and the study corpus
+## Current support
 
-**[fortad-bench](https://github.com/lazy-fortran/fortad-bench)** holds everything
-expensive: the workloads, the adapters for every competing engine, the
-measurement harness, and the committed results. It also holds the field survey —
-the pinned manifest of 39 third-party AD projects
-([`docs/upstreams.toml`](https://github.com/lazy-fortran/fortad-bench/blob/main/docs/upstreams.toml))
-and the curated literature
-([`docs/reading-list.md`](https://github.com/lazy-fortran/fortad-bench/blob/main/docs/reading-list.md)).
+| Capability | Status |
+| --- | --- |
+| Scalar JVP and VJP | expressions, intrinsic calls, branches, and supported procedure calls |
+| Array JVP | whole arrays and subscripts, including loops and batched directions |
+| Array VJP | reductions, element writes, nested loops, affine recurrences, and taped nonlinear recurrences |
+| Derivative-only output | forward and reverse modes with `--no-primal` |
+| Hessian-vector product | scalar-direction forward-over-reverse |
+| Sparse Jacobian | static conservative patterns, column coloring, seeding, and recovery |
+| Sparse Hessian | repeated HVPs with star coloring and symmetric recovery |
+| Higher derivatives | univariate Taylor transformation for straight-line scalar kernels |
+| Long integrations | Revolve checkpoint schedules supplied to a caller-owned time loop |
+| Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
+| GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |
 
-This repository keeps only what must run on every change: unit tests and
-microbenchmarks that finish in seconds. **No third-party code or literature
-lives here at all.** A fortad change claiming a performance result cites a run
-recorded in fortad-bench; a change there never gates a commit here.
+Forward vector mode places the direction index first. For an array `x(n)`, a
+seed block has shape `(n_directions, n)`. Reverse vector mode is not
+implemented. Sparse Hessians therefore run one scalar HVP for each color.
 
-Read **[LEGAL.md](LEGAL.md)** before adapting anything from the study corpus —
-for most entries the answer is that you may not. **[PROVENANCE.md](PROVENANCE.md)**
-records the publication behind every algorithm fortad implements.
+Same-file callees can be inlined before differentiation. A call whose body is
+unavailable needs a registered derivative rule. The built-in structured rules
+cover an opt-in `dgesv` path. The same interface supports caller-supplied rules
+for nonlinear roots and fixed points, as well as selected numerical-library
+operations.
 
-## Using it
+Unsupported constructs return `fad_result_t%ok = .false.` and name the
+refused construct in `message`. This release is not a complete Fortran
+language implementation. In particular:
+
+- vector reverse mode is absent;
+- Taylor transformation refuses arrays, loops, and branches;
+- GPU emission is limited to the reduction shape described above;
+- assumed-size dummy arrays currently emerge as assumed-shape arrays, so do
+  not differentiate a procedure that declares an active dummy with `(*)`;
+- registered statement rules may introduce impure calls into generated code.
+
+The [open defects](ROADMAP.md#open-defects) section tracks implementation limits
+and measured performance losses.
+
+## Derivative products
+
+Choose a product from the shape of the problem:
+
+| Need | fortad route | Guide |
+| --- | --- | --- |
+| Gradient of a scalar objective | one VJP | [Gradients](docs/products.md#gradients) |
+| Jacobian-vector product | one JVP | [Sensitivity analysis](docs/products.md#sensitivity-analysis) |
+| Hessian-vector product | `fad_hvp` | [Hessian-vector products](docs/products.md#hessian-vector-products) |
+| Linear covariance propagation | vector JVP seeded by a covariance factor | [Linear uncertainty propagation](docs/products.md#linear-uncertainty-propagation) |
+| Matrix-free Gauss-Newton product | JVP followed by VJP | [Gauss-Newton](docs/products.md#gauss-newton) |
+| Sparse Jacobian or Hessian | coloring, compressed products, recovery | [Sparse derivatives](docs/products.md#sparse-derivatives) |
+| Time-integration adjoint | caller executes a Revolve schedule | [Checkpointing](docs/products.md#checkpointing) |
+| Derivatives above second order | `fad_taylor` or `tay_*` arithmetic | [Taylor mode](docs/products.md#taylor-mode) |
+
+The [product guide](docs/products.md) includes layouts, costs, and validity
+boundaries. [`test/test_products_oracle.f90`](test/test_products_oracle.f90)
+executes its gradient, Jacobian, and linear-UQ constructions and compares them
+with independent results.
+
+## Command line
+
+The command reads one Fortran source file and writes generated Fortran to
+standard output or `--output`:
+
+```text
+fortad --indep NAMES [OPTIONS] FILE
+
+--mode forward|reverse|hessian   derivative mode; forward is the default
+--indep a,b                     independent variable names
+--dep y                         dependent for reverse mode
+--directions n_dir              direction-count argument for vector forward mode
+--name procedure_name           generated procedure name
+--module module_name            wrap the procedure in a module
+--proc source_procedure         target inside a multi-procedure source
+--no-primal                     omit outputs used only by the primal result
+--roundtrip                     parse and re-emit without differentiation
+--rule SPEC                     register scalar partial expressions
+--call-rule SPEC                register tangent and adjoint statements
+--output PATH                   write to PATH instead of standard output
+--version                       print the version
+--help                          print command help
+```
+
+Use separate option values, as in `--mode reverse`. The
+[public API reference](docs/design/public-api.md#cli) gives the two rule formats
+and option scope.
+
+## Fortran API
 
 ```fortran
-use fortad, only: fad_vjp, fad_result_t
+use fortad, only: fad_result_t, fad_vjp
 
-type(fad_result_t) :: res
+type(fad_result_t) :: result
 
-res = fad_vjp(source, independents=["x", "y"], module_name="my_adjoint")
-if (res%ok) then
-    write (unit, '(a)') res%code
-else
-    write (error_unit, '(a)') res%message
-end if
+result = fad_vjp(source, ["x", "y"], module_name="my_adjoint")
+if (.not. result%ok) error stop result%message
 ```
 
-`fad_jvp`, `fad_vjp`, and `fad_hvp` all take Fortran source and return Fortran
-source. **[docs/products.md](docs/products.md)** works back from the product you
-want - gradient, Hessian-vector product, linear UQ, sensitivity, Gauss-Newton -
-to the call that gets it, with the cost of each. Passing `module_name` is recommended: the consumer then gets a
-compiler-checked interface rather than an external declaration nobody verifies.
-The complete frozen module and CLI surface is listed in
-**[docs/design/public-api.md](docs/design/public-api.md)**.
+`fad_jvp`, `fad_vjp`, `fad_hvp`, `fad_taylor`, and `fad_roundtrip` accept
+Fortran source and return generated source in `fad_result_t%code`. The
+[public API reference](docs/design/public-api.md) lists every exported symbol,
+call signature, optional argument, and default.
 
-Generated procedures are `pure` and hold no state, so they are thread-safe by
-construction, and the reduction adjoint loop carries no loop-carried dependence
-and parallelises directly.
+## Performance evidence
 
-## Next
+Measurements live in
+[`fortad-bench`](https://github.com/lazy-fortran/fortad-bench), together with
+the compiler, hardware, flags, raw output, and independent correctness gate.
+On its recorded `dot_sin` workload, fortad is about 8% faster than Enzyme for
+one forward direction, about ten times faster per direction at sixteen forward
+directions, 1.7 to 1.8 times faster for the fused reverse reduction, and 2.1 to
+2.2 times faster for the element-write stencil. Enzyme remains about 3.5%
+faster on the taped nonlinear recurrence. These results describe those
+workloads and toolchains only.
 
-See **[ROADMAP.md](ROADMAP.md)**, which also records what building the engine
-established. The next structural item is implicit differentiation of nonlinear
-solves and roots. The registry already contains an explicit `dgesv`
-BLAS/LAPACK rule, so a linear solve is differentiated as the operation it is
-rather than as the iterations that implement it; see
-**[docs/design/blas-lapack-rules.md](docs/design/blas-lapack-rules.md)**.
+The original VMEC++ gate rejected a universal performance claim. Its result and
+the revised measurement policy are recorded in
+[the P0.8 decision](docs/design/go-no-go.md). A competing engine remains the
+preferred implementation for any workload where its complete measured result
+wins.
 
-## Licence
+## Repository map
 
-MIT. Derivative code fortad emits from your program is your program's
-derivative: fortad claims no copyright in its output and imposes no licence on
-it.
+- [Documentation index](docs/README.md)
+- [Runnable Rosenbrock example](example/README.md)
+- [Derivative product guide](docs/products.md)
+- [Public API](docs/design/public-api.md)
+- [Roadmap and open defects](ROADMAP.md)
+- [Algorithm provenance](PROVENANCE.md)
+- [Legal rules for the external study corpus](LEGAL.md)
+- [Historical research dossier](docs/dossier.md)
+
+`fortfront` supplies parsing and semantic analysis. `fortad` lowers the result
+to its own IR, differentiates and optimizes that IR, and uses `fortgen` for
+source-generation conventions. The output is ordinary Fortran source.
+
+## License
+
+fortad is MIT licensed. Derivative source generated from a user's program is
+the derivative of that program. fortad claims no copyright in generated output
+and adds no license condition to it.

@@ -1,7 +1,7 @@
 # Implicit differentiation of nonlinear roots
 
 P3.3 uses the structured call-rule registry to differentiate a converged root
-as an implicit equation. The root solver stays opaque; its registrant supplies
+as an implicit equation. The root solver stays opaque. Its registrant supplies
 the residual products and the converged state.
 
 For a scalar residual `F(x,p)=0`, the implicit-function theorem gives
@@ -29,13 +29,13 @@ call fad_add_call_rule("root_solve", 2, &
              "call root_adjoint($1, $2, $2b, $1b)"])
 ```
 
-`root_tangent` and `root_adjoint` may use a factorisation or a matrix-free
-linear solve. They are evaluated at the converged `x`; no Newton iterate tape
+`root_tangent` and `root_adjoint` may use a factorization or a matrix-free
+linear solve. They are evaluated at the converged `x`. No Newton iterate tape
 is emitted. The rule is intentionally opt-in because fortad cannot infer the
 residual, convergence contract, or the correct linear solve from an opaque
 callee.
 
-## Evidence and boundary
+## Scalar-root oracle
 
 `test/test_implicit_root_rule_oracle.f90` registers this rule for the cubic
 
@@ -52,11 +52,11 @@ The existing TU Graz Ryzen 9 scalar-root fixture is the Enzyme comparison:
 Enzyme differentiates the twelve Newton steps. At one root product it measures
 2.297330 ns for the analytical implicit JVP versus 115.820600 ns for Enzyme
 (50.4153x), and 14.117010 ns for the analytical implicit VJP versus
-158.803910 ns for Enzyme (11.2491x). This is a cross-record performance
-comparison; the fortad oracle itself runs with gfortran on `acluster`, while
-the Enzyme fixture uses Flang/LLVM 22.1.8 with Enzyme 22.
+158.803910 ns for Enzyme (11.2491x). The fortad oracle itself runs with
+gfortran on `acluster`. The separate Enzyme fixture uses Flang/LLVM 22.1.8 with
+Enzyme 22.
 
-The current boundary is a caller-provided residual-product rule for a scalar
-root or a root with a fixed-shaped state. Automatic residual extraction,
+Support covers a scalar root or a root with a fixed-shaped state through
+caller-provided residual-product rules. Automatic residual extraction,
 convergence certification, singular-Jacobian handling, and nested root calls
 remain future work.
