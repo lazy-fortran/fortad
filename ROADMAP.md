@@ -92,9 +92,11 @@ the current integration gate is still open:
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds all 407 targets and runs 30 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
-      hazards; 94 `-Warray-temporaries` diagnostics still keep
+      hazards. 94 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
-      predates the latest lowering work.
+      predates the latest lowering work. `fo fmt --check` still reports
+      formatting debt in legacy files. The files touched by the current slices
+      pass the formatter check.
 - [ ] Every operator shared by fortnum and fortfem has same-machine FortAD and
       Enzyme measurements. The three vector-Newton routines have a FortAD-only
       record, and the tangent gaps below remain open.
