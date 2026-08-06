@@ -1032,6 +1032,16 @@ now differentiate end to end, and whether their numbers are within the
 
 ## Outstanding (2026-08-05)
 
+### Compiler gate (2026-08-06)
+
+The compiler matrix distinguishes Intel LLVM `ifx` from legacy `ifort`:
+`ifx` is a supported target and `ifort` is intentionally unsupported. GNU
+FortAD builds and the generated MLP product oracle pass. The downstream
+`nvfortran` 26.5 build now gets through FortFront but still terminates with an
+internal compiler error while compiling `src/fortad_lower.f90`, including at
+`-O0`; no NVIDIA runtime claim is made for FortAD until that gate is resolved
+or the affected source is isolated behind a supported compiler boundary.
+
 - The three vector-Newton routines are verified and recorded in
   `fortad-bench/results/vector_newton_fortad.csv`. This is a focused fortad
   record because the acluster has no compatible Enzyme toolchain; no
