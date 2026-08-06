@@ -205,10 +205,12 @@ contains
 
         call seed_activity(primal, spec, dependent, active, status)
         if (.not. status%ok) return
-        if (complex_reverse_path(primal, dependent, active)) then
+        if (complex_reverse_path(primal, dependent, active) .and. &
+            .not. complex_real_projection_path(primal, dependent, active)) then
             status%ok = .false.
             status%message = "reverse mode: active complex adjoints are not "// &
-                "supported yet; use forward mode for the real-coordinate complex path"
+                "supported for this expression; the bounded real-coordinate "// &
+                "projection path only accepts real(z) or dble(z)"
             return
         end if
         do i = 1, size(primal%params)
@@ -485,6 +487,138 @@ contains
             end if
         end do
     end function complex_reverse_path
+
+    logical function complex_real_projection_path(primal, dependent, active) &
+            result(yes)
+        !! Recognise the first bounded real-coordinate reverse case.
+        !!
+        !! A complex input may feed a real-valued objective through a direct
+        !! `real(z)`/`dble(z)` projection and then ordinary real arithmetic.
+        !! Its adjoint is representable as a complex number whose real and
+        !! imaginary parts are the two coordinate gradients.  Do not broaden
+        !! this predicate to arbitrary complex expressions: a single forward
+        !! seed is not enough to transpose a non-holomorphic map.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: dependent
+        logical, intent(in) :: active(:)
+        integer :: i, di
+
+        yes = .false.
+        di = primal%decl_index(dependent)
+        if (di <= 0) return
+        if (decl_is_complex(primal, di)) return
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (.not. has_active_complex(primal, primal%stmts(i)%value, active)) &
+                cycle
+            if (.not. safe_real_projection_expr(primal, &
+                    primal%stmts(i)%value, active)) return
+        end do
+        yes = .true.
+    end function complex_real_projection_path
+
+    recursive logical function has_active_complex(primal, idx, active) &
+            result(yes)
+        !! Whether an expression reads an active complex declaration.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        logical, intent(in) :: active(:)
+        integer :: i, di
+
+        yes = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        select case (primal%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            di = primal%decl_index(fad_base_name(primal%exprs(idx)%text))
+            if (di > 0) then
+                if (di <= size(active)) then
+                    yes = active(di) .and. decl_is_complex(primal, di)
+                    if (yes) return
+                end if
+            end if
+        end select
+        if (.not. allocated(primal%exprs(idx)%args)) return
+        do i = 1, size(primal%exprs(idx)%args)
+            if (has_active_complex(primal, primal%exprs(idx)%args(i), active)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function has_active_complex
+
+    recursive logical function safe_real_projection_expr(primal, idx, active) &
+            result(yes)
+        !! Verify that every active complex leaf is directly projected to real.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        logical, intent(in) :: active(:)
+        integer :: i
+        character(len=:), allocatable :: name
+
+        yes = .true.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (.not. has_active_complex(primal, idx, active)) return
+
+        select case (primal%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            ! A complex leaf is only valid beneath a real/dble call.  Seeing
+            ! one here means the caller used complex arithmetic directly.
+            yes = .false.
+        case (FAD_CALL)
+            name = lower_name(primal%exprs(idx)%text)
+            if (.not. allocated(primal%exprs(idx)%args)) then
+                yes = .false.
+            else if ((name == "real" .or. name == "dble") .and. &
+                    size(primal%exprs(idx)%args) == 1) then
+                yes = simple_active_complex(primal, &
+                    primal%exprs(idx)%args(1), active)
+            else
+                yes = .false.
+            end if
+        case default
+            if (.not. allocated(primal%exprs(idx)%args)) return
+            do i = 1, size(primal%exprs(idx)%args)
+                if (.not. safe_real_projection_expr(primal, &
+                        primal%exprs(idx)%args(i), active)) then
+                    yes = .false.
+                    return
+                end if
+            end do
+        end select
+    end function safe_real_projection_expr
+
+    logical function simple_active_complex(primal, idx, active) result(yes)
+        !! The accepted projection operand is one active complex object.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        logical, intent(in) :: active(:)
+        integer :: di
+
+        yes = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind /= FAD_VAR .and. &
+                primal%exprs(idx)%kind /= FAD_INDEX) return
+        di = primal%decl_index(fad_base_name(primal%exprs(idx)%text))
+        if (di <= 0 .or. di > size(active)) return
+        yes = active(di) .and. decl_is_complex(primal, di)
+    end function simple_active_complex
+
+    pure function lower_name(value) result(out)
+        !! ASCII lowercase for the two projection intrinsic names.
+        character(len=*), intent(in) :: value
+        character(len=len(value)) :: out
+        integer :: i, code
+
+        out = value
+        do i = 1, len(value)
+            code = iachar(out(i:i))
+            if (code >= iachar("A") .and. code <= iachar("Z")) then
+                out(i:i) = achar(code + iachar("a") - iachar("A"))
+            end if
+        end do
+        out = trim(out)
+    end function lower_name
 
     logical function decl_is_complex(primal, di) result(yes)
         type(fad_proc_t), intent(in) :: primal

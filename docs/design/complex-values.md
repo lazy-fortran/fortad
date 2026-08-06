@@ -5,7 +5,12 @@ derivative. A complex tangent `z_d` represents independent perturbations of
 `real(z)` and `aimag(z)`. It is not a holomorphic derivative.
 
 The current forward slice covers complex multiplication and division together
-with `conjg`, `real`, `aimag`, `cmplx`, and `abs`. For example,
+with `conjg`, `real`, `aimag`, `cmplx`, and `abs`. A bounded reverse slice now
+handles a real-valued objective whose active complex inputs enter through a
+direct `real(z)` or `dble(z)` projection, followed by ordinary real
+arithmetic. Its complex adjoint stores the two real-coordinate gradients:
+the real part is the derivative with respect to `real(z)`, and the imaginary
+part is the derivative with respect to `aimag(z)`. For example,
 
 ```fortran
 y = z/(1.0d0 + z) + abs(z) + cmplx(real(z), aimag(z), 8) + conjg(z)
@@ -23,7 +28,12 @@ oracle is [`test_complex_intrinsic_oracle.f90`](../../test/test_complex_intrinsi
 it compiles the generated routine, checks the hand derivative, and checks a
 central difference in a complex direction.
 
-Reverse mode currently refuses an active complex cotangent with a named
-diagnostic. This is deliberate: a real-only adjoint must not emit compiler-
-invalid expressions such as `aimag(1.0d0)`. Complex reverse rules, BLAS, and
-non-holomorphic objective conventions remain open in P7.5.
+The projection path is deliberately narrow. Complex arithmetic, `abs`,
+`aimag`, `conjg`, complex outputs, and complex BLAS remain explicit refusal
+boundaries until their real-coordinate transpose rules are implemented. This
+prevents a real-only seed from being mistaken for a complete complex Jacobian.
+The positive projection path is checked by
+[`test_complex_reverse_oracle.f90`](../../test/test_complex_reverse_oracle.f90),
+which compiles the generated VJP and compares a hand derivative, central
+finite differences, and the real adjoint identity
+`Re(conjg(z_b) dz) = y_b dy`.

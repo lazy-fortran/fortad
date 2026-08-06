@@ -50,7 +50,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Long integrations | Revolve checkpoint schedules supplied to a caller-owned time loop |
 | Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
 | Derived components | bounded concrete scalar, nested, inherited, and array component paths |
-| Complex JVP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division |
+| Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
 | Aliasing and sections | named refusal for `pointer`, `target`, pointer association, and noncontiguous sections |
 | GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |
 
@@ -60,6 +60,8 @@ implemented. Sparse Hessians therefore run one scalar HVP for each color.
 
 Complex forward examples and the real-coordinate contract are in
 [the complex-values design note](docs/design/complex-values.md).
+The bounded real-objective complex VJP and its hand/finite-difference/adjoint
+oracle are covered by [`test_complex_reverse_oracle.f90`](test/test_complex_reverse_oracle.f90).
 The bounded derived-component contract and its JVP/VJP oracle are in
 [the derived-components design note](docs/design/derived-components.md).
 Allocatable components and lifetime-changing statements are currently refused
