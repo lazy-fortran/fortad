@@ -90,9 +90,11 @@ the current integration gate is still open:
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
-      GNU is current: bare `fo` builds all 407 targets, runs 28 tests, and
-      passes lint. The other four lanes still rely on a run that predates the
-      latest lowering work.
+      GNU is current: `fo check` builds all 407 targets and runs 28 tests.
+      The cheap lint rules report zero unused imports and zero short-circuit
+      hazards; 91 pre-existing `-Warray-temporaries` diagnostics still keep
+      `fo lint` nonzero. The other four lanes still rely on a run that
+      predates the latest lowering work.
 - [ ] Every operator shared by fortnum and fortfem has same-machine FortAD and
       Enzyme measurements. The three vector-Newton routines have a FortAD-only
       record, and the tangent gaps below remain open.
@@ -102,11 +104,12 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `338fc90` (including the FortFront boundary
+The implementation snapshot is `a34fd53` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
-active-optional refusal, and bounded concrete type-bound calls). Its GNU bare
-gate is green (407/407 targets, 28/28 tests, lint), and the three previously
-failing nvfortran rule
+active-optional refusal, bounded concrete type-bound calls, and the lint
+hazard cleanup). Its GNU behavioral gate is green (407/407 targets, 28/28
+tests); the remaining lint diagnostics are the 91 array-temporary warnings
+listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
 multi-compiler gate remains open until the remaining lanes are rerun.
