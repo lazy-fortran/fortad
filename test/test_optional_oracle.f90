@@ -17,7 +17,7 @@ program test_optional_oracle
         "    z = x"//nl// &
         "    if (present(y)) z = z + x*y"//nl// &
         "end function f"//nl
-    type(fad_result_t) :: jvp, vjp
+    type(fad_result_t) :: jvp, vjp, active_jvp, active_vjp
     integer :: failures, unit, stat
     character(len=:), allocatable :: dir, driver
 
@@ -40,6 +40,32 @@ program test_optional_oracle
         failures = failures + 1
     end if
     if (failures > 0) error stop 1
+
+    active_jvp = fad_jvp( &
+        "function active_optional(x, y) result(z)"//nl// &
+        "    real(8), intent(in) :: x"//nl// &
+        "    real(8), intent(in), optional :: y"//nl// &
+        "    real(8) :: z"//nl// &
+        "    z = x"//nl// &
+        "    if (present(y)) z = z + y*y"//nl// &
+        "end function active_optional"//nl, ["y"], name="active_optional_jvp")
+    active_vjp = fad_vjp( &
+        "function active_optional(x, y) result(z)"//nl// &
+        "    real(8), intent(in) :: x"//nl// &
+        "    real(8), intent(in), optional :: y"//nl// &
+        "    real(8) :: z"//nl// &
+        "    z = x"//nl// &
+        "    if (present(y)) z = z + y*y"//nl// &
+        "end function active_optional"//nl, ["y"], name="active_optional_vjp")
+    if (active_jvp%ok .or. active_vjp%ok) then
+        print *, "FAIL optional: active optional derivative was accepted"
+        error stop 1
+    end if
+    if (index(active_jvp%message, "active optional") == 0 .or. &
+        index(active_vjp%message, "active optional") == 0) then
+        print *, "FAIL optional: active optional refusal was not named"
+        error stop 1
+    end if
 
     open (newunit=unit, file=dir//"/primal.f90", status="replace", &
         action="write")

@@ -175,7 +175,7 @@ contains
         character(len=:), allocatable :: suffix, dependent
         logical, allocatable :: active(:)
         type(ssa_map_t) :: ssa
-        integer :: i
+        integer :: i, di
         character(len=64), allocatable :: lhs_names(:)
         logical, allocatable :: is_element(:)
         integer, allocatable :: rhs_exprs(:)
@@ -204,6 +204,16 @@ contains
 
         call seed_activity(primal, spec, dependent, active, status)
         if (.not. status%ok) return
+        do i = 1, size(primal%params)
+            di = primal%decl_index(trim(primal%params(i)))
+            if (di <= 0) cycle
+            if (primal%decls(di)%is_optional .and. active(di)) then
+                status%ok = .false.
+                status%message = "active optional argument '"// &
+                    trim(primal%params(i))//"' is not supported"
+                return
+            end if
+        end do
 
         adjoint%name = primal%name//"_vjp"
         if (allocated(spec%name)) adjoint%name = spec%name
@@ -561,6 +571,7 @@ contains
             d%name = dependent//suffix
             d%intent = FAD_INTENT_IN
             d%is_result = .false.
+            d%is_optional = .false.
             ignored = adjoint%add_decl(d)
         end if
 
@@ -577,6 +588,7 @@ contains
             d%is_value = .false.
             d%intent = FAD_INTENT_OUT
             d%is_result = .false.
+            d%is_optional = .false.
             ignored = adjoint%add_decl(d)
         end do
 
@@ -684,6 +696,7 @@ contains
                     d%name = fresh
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
+                    d%is_optional = .false.
                     ignored = adjoint%add_decl(d)
                 end if
                 s%target = fresh
@@ -1021,6 +1034,7 @@ contains
             d%name = merged
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
+            d%is_optional = .false.
             ignored = adjoint%add_decl(d)
             rec%merge_name(rec%n_merge) = merged
             rec%merge_from_then(rec%n_merge) = from_then
@@ -1077,6 +1091,7 @@ contains
             d%name = fresh
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
+            d%is_optional = .false.
             ignored = adjoint%add_decl(d)
             ignored = adjoint%add_stmt(s)
             n = n + 1
@@ -1168,6 +1183,7 @@ contains
             d = primal%decls(di)
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
+            d%is_optional = .false.
             ignored = adjoint%add_decl(d)
         end if
 
@@ -1182,6 +1198,7 @@ contains
             d%name = fresh
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
+            d%is_optional = .false.
             ignored = adjoint%add_decl(d)
             s%kind = FAD_ASSIGN
             s%target = fresh
@@ -1198,6 +1215,7 @@ contains
             d = primal%decls(di)
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
+            d%is_optional = .false.
             ignored = adjoint%add_decl(d)
         end do
 
@@ -1250,6 +1268,7 @@ contains
                     d%name = trim(shape%temporaries(k))//"_tape"
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
+                    d%is_optional = .false.
                     d%is_array = .true.
                     d%dims = "("//hi_text//") - ("//lo_text//") + 1"
                     ignored = adjoint%add_decl(d)
@@ -1266,6 +1285,7 @@ contains
                     d%name = trim(shape%carried(k))//"_tape"
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
+                    d%is_optional = .false.
                     d%is_array = .true.
                     d%dims = "("//hi_text//") - ("//lo_text//") + 1"
                     ignored = adjoint%add_decl(d)
@@ -1302,6 +1322,7 @@ contains
                 d = primal%decls(di)
                 d%intent = FAD_INTENT_NONE
                 d%is_result = .false.
+                d%is_optional = .false.
                 ignored = adjoint%add_decl(d)
             end do
         end if
@@ -1324,6 +1345,7 @@ contains
                     d = primal%decls(di)
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
+                    d%is_optional = .false.
                     ignored = adjoint%add_decl(d)
                 end if
             end associate
@@ -1376,6 +1398,7 @@ contains
                     cd%name = fresh
                     cd%intent = FAD_INTENT_NONE
                     cd%is_result = .false.
+                    cd%is_optional = .false.
                     ignored = adjoint%add_decl(cd)
                 end block
             else if (index(primal%stmts(i)%target, "(") > 0) then
@@ -1410,6 +1433,7 @@ contains
                         td%name = fresh
                         td%intent = FAD_INTENT_NONE
                         td%is_result = .false.
+                        td%is_optional = .false.
                         ignored = adjoint%add_decl(td)
                     end if
                 end block
@@ -1959,6 +1983,7 @@ contains
         d%name = base//suffix
         d%intent = FAD_INTENT_NONE
         d%is_result = .false.
+        d%is_optional = .false.
         ignored = adjoint%add_decl(d)
         s%kind = FAD_ASSIGN
         s%target = base//suffix
@@ -2021,6 +2046,7 @@ contains
         d%name = dependent//suffix//"_in"
         d%intent = FAD_INTENT_NONE
         d%is_result = .false.
+        d%is_optional = .false.
         ignored = adjoint%add_decl(d)
         s%kind = FAD_ASSIGN
         s%target = dependent//suffix//"_in"
@@ -2469,6 +2495,7 @@ contains
         d%name = ssa_name//suffix
         d%intent = FAD_INTENT_NONE
         d%is_result = .false.
+        d%is_optional = .false.
         ignored = adjoint%add_decl(d)
     end subroutine declare_adjoint
 
@@ -2710,6 +2737,7 @@ contains
         d%name = name
         d%type_name = real_type_of(primal)
         d%intent = FAD_INTENT_NONE
+        d%is_optional = .false.
         ignored = adjoint%add_decl(d)
 
         s%kind = FAD_ASSIGN

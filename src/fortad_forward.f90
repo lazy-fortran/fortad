@@ -64,7 +64,7 @@ contains
         character(len=:), allocatable :: suffix, ndir
         character(len=256) :: decl_name, decl_type, decl_dims
         logical, allocatable :: active(:)
-        integer :: i, ignored
+        integer :: i, ignored, di
 
         status%ok = .true.
         suffix = "_d"
@@ -80,6 +80,16 @@ contains
 
         call seed_activity(primal, spec, active, status)
         if (.not. status%ok) return
+        do i = 1, size(primal%params)
+            di = primal%decl_index(trim(primal%params(i)))
+            if (di <= 0) cycle
+            if (primal%decls(di)%is_optional .and. active(di)) then
+                status%ok = .false.
+                status%message = "active optional argument '"// &
+                    trim(primal%params(i))//"' is not supported"
+                return
+            end if
+        end do
 
         tangent%name = primal%name//"_jvp"
         if (allocated(spec%name)) tangent%name = spec%name
@@ -128,7 +138,7 @@ contains
                     primal%decls(i)%is_contiguous, &
                     decl_dims, suffix, &
                     FAD_INTENT_NONE, spec%vector, ndir, &
-                    is_optional=primal%decls(i)%is_optional)
+                    is_optional=.false.)
             end if
         end do
     end subroutine differentiate_forward
@@ -335,14 +345,14 @@ contains
                         decl_value, decl_array, decl_contiguous, &
                         decl_dims, suffix, &
                         FAD_INTENT_OUT, vector, ndir, &
-                        is_optional=primal%decls(di)%is_optional)
+                        is_optional=.false.)
                     ! Dropped from the signature but still written by the primal
                     ! statements, so it stays as a local. Whether those writes
                     ! survive is dead-store elimination's decision, not this
                     ! routine's - and an undeclared name would not compile.
                     ignored = tangent%add_decl_fields(decl_name, decl_type, &
                         FAD_INTENT_NONE, decl_value, decl_array, decl_contiguous, &
-                        .false., decl_dims, primal%decls(di)%is_optional)
+                        .false., decl_dims, .false.)
                     cycle
                 end if
             end if
@@ -359,7 +369,7 @@ contains
             call add_tangent_decl(tangent, decl_name, decl_type, decl_value, &
                 decl_array, decl_contiguous, decl_dims, suffix, &
                 tangent_intent(primal%decls(di)%intent), vector, ndir, &
-                is_optional=primal%decls(di)%is_optional)
+                is_optional=.false.)
         end do
 
         if (primal%is_function) then
