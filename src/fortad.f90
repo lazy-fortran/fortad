@@ -15,34 +15,34 @@ module fortad
     use fortad_ir, only: fad_proc_t
     use fortad_lower, only: lower_source, lower_status_t
     use fortad_forward, only: differentiate_forward, forward_spec_t, &
-                              forward_status_t
+        forward_status_t
     use fortad_reverse, only: differentiate_reverse, reverse_spec_t, &
-                              reverse_status_t
+        reverse_status_t
     use fortad_taylor_gen, only: differentiate_taylor, taylor_spec_t, &
-                                 taylor_status_t
+        taylor_status_t
     use fortad_emit, only: emit_proc, emit_module
     use fortad_dce, only: eliminate_dead_stores, fold_zero_accumulations, &
-                          eliminate_dead_arrays, eliminate_dead_loops
+        eliminate_dead_arrays, eliminate_dead_loops
     use fortad_opt, only: optimise
     use fortad_registry, only: fad_add_rule, fad_add_call_rule, &
-                               fad_clear_rules
+        fad_clear_rules
     use fortad_linalg_rules, only: fad_register_blas_lapack_rules
     use fortad_sparse, only: sparsity_t, colour_columns, seed_matrix, &
-                             recover_entries, star_colour_columns, &
-                             recover_symmetric
+        recover_entries, star_colour_columns, &
+        recover_symmetric
     use fortad_pattern, only: pattern_from_proc
     use fortad_revolve, only: revolve_t, revolve_action_t, revolve_schedule, &
-                              REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
+        REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
     use fortad_taylor, only: tay_const, tay_var, tay_add, tay_sub, tay_scale, &
-                             tay_mul, tay_div, tay_exp, tay_log, tay_sqrt, &
-                             tay_sin_cos, tay_pow_int, tay_derivative
+        tay_mul, tay_div, tay_exp, tay_log, tay_sqrt, &
+        tay_sin_cos, tay_pow_int, tay_derivative
     implicit none
     private
 
     public :: fad_jvp, fad_vjp, fad_hvp, fad_taylor, fad_roundtrip, &
-              fad_result_t, &
-              fad_version, fad_add_rule, fad_add_call_rule, fad_clear_rules, &
-              fad_register_blas_lapack_rules
+        fad_result_t, &
+        fad_version, fad_add_rule, fad_add_call_rule, fad_clear_rules, &
+        fad_register_blas_lapack_rules
     public :: sparsity_t, colour_columns, seed_matrix, recover_entries
     public :: star_colour_columns, recover_symmetric
     public :: fad_static_pattern
@@ -66,7 +66,7 @@ module fortad
 contains
 
     subroutine fad_static_pattern(source, independents, dependents, pattern, &
-                                  stat, message, from)
+            stat, message, from)
         !! Infer a conservative structural Jacobian pattern from source.
         character(len=*), intent(in) :: source
         character(len=*), intent(in) :: independents(:), dependents(:)
@@ -87,7 +87,7 @@ contains
             end if
         else
             call pattern_from_proc(primal, independents, dependents, pattern, &
-                                   local_stat)
+                local_stat)
             if (present(message)) then
                 if (local_stat /= 0) message = "static pattern propagation failed"
             end if
@@ -128,7 +128,7 @@ contains
     end function fad_version
 
     function fad_jvp(source, independents, name, suffix, n_directions, &
-                     module_name, with_primal, from) result(res)
+            module_name, with_primal, from) result(res)
         !! Forward mode. Returns a subroutine computing the primal and its
         !! Jacobian-vector product in one sweep.
         !!
@@ -215,7 +215,7 @@ contains
     end function fad_jvp
 
     function fad_vjp(source, independents, dependent, name, suffix, &
-                     module_name, with_primal, from) result(res)
+            module_name, with_primal, from) result(res)
         !! Reverse mode. Returns a subroutine computing the primal and the
         !! vector-Jacobian product: one sweep yields the gradient with respect
         !! to every independent at once, which is the cheap-gradient principle.
@@ -296,7 +296,7 @@ contains
     end function fad_vjp
 
     function fad_hvp(source, independents, dependent, name, module_name, &
-                     from) result(res)
+            from) result(res)
         !! Second order: forward mode applied to the generated adjoint.
         !!
         !! This is **forward-over-reverse**, the standard route to a
@@ -315,7 +315,7 @@ contains
         character(len=*), intent(in) :: independents(:)
         !! The dependent. Defaults as for `fad_vjp`.
         character(len=*), intent(in), optional :: dependent
-        !! Name of the generated procedure. Defaults to `<primal>_hvp`.
+        !! Name of the generated procedure. Defaults to `fad_hvp`.
         character(len=*), intent(in), optional :: name
         !! Wrap the result in a module of this name.
         character(len=*), intent(in), optional :: module_name
@@ -329,7 +329,7 @@ contains
         inner_name = "fad_inner_vjp"
         if (present(dependent)) then
             adjoint = fad_vjp(source, independents, dependent=dependent, &
-                              name=inner_name, from=from)
+                name=inner_name, from=from)
         else
             adjoint = fad_vjp(source, independents, name=inner_name, from=from)
         end if
@@ -344,19 +344,19 @@ contains
 
         if (present(module_name)) then
             res = fad_jvp(adjoint%code, independents, name=outer_name, &
-                          module_name=module_name)
+                module_name=module_name)
         else
             res = fad_jvp(adjoint%code, independents, name=outer_name)
         end if
         if (.not. res%ok) then
             res%message = "forward pass over the generated adjoint failed: "// &
-                          res%message
+                res%message
         end if
     end function fad_hvp
 
     function fad_taylor(source, independents, order_name, name, module_name, &
-                        from) &
-        result(res)
+            from) &
+            result(res)
         !! Taylor mode: every derivative up to order `d` in one sweep.
         !!
         !! The generated routine takes the order as an argument, so the caller
