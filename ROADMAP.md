@@ -606,6 +606,11 @@ of selected child ends the fixed-path derivative contract.
       nested, and inherited real or complex components. Shadow values retain
       the primal layout needed by callees. Integer and logical components
       remain passive. Character and procedure components are passive.
+      - [x] **P7.1a bounded concrete value slice.** Commit `dcf40a8` supports
+        component-named independents on a concrete `type(t)` value, preserving
+        scalar, inherited, nested, and array component paths in JVP/VJP shadows.
+        The independent object itself is refused; allocation, alias, character,
+        logical, and procedure-component activity remain open.
 - [ ] **P7.2 Allocation lifetime.** Cover allocatable components,
       `allocate`, `deallocate`, `source=`, `mold=`, automatic reallocation,
       deep assignment, and `move_alloc`. Reverse mode must reproduce the
