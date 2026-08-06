@@ -91,9 +91,9 @@ the current integration gate is still open:
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds 408 targets, checks 407 derivative
-      targets, and runs 33 tests.
+      targets, and runs 35 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
-      hazards. 106 `-Warray-temporaries` diagnostics still keep
+      hazards. 108 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
       predates the latest lowering work. `fo fmt --check` still reports
       formatting debt in legacy files. The files touched by the current slices
@@ -107,15 +107,16 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `dd47126` (including the FortFront boundary
+The implementation snapshot is `c70b665` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, bounded concrete type-bound calls with procedure
 scope-correct binding resolution, the real-coordinate complex JVP slice, the
 select-type reverse finite-difference closeout, the bounded derived-component
-slice, allocation-lifetime refusals, alias/section refusals, and elemental
-JVP/VJP preservation). Its GNU behavioral gate is green (408 build targets,
-407 derivative targets, 33/33
-tests). The remaining lint diagnostics are the 106 array-temporary warnings
+slice, allocation-lifetime refusals, alias/section refusals, elemental
+JVP/VJP preservation, bounded complex projection VJP, and fixed-dispatch
+abstract hierarchy overrides). Its GNU behavioral gate is green (408 build
+targets, 407 derivative targets, 35/35 tests). The remaining lint diagnostics
+are the 108 array-temporary warnings
 listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
