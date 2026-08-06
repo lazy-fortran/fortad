@@ -728,8 +728,9 @@ problem-specific rule.
             finite differences, the adjoint seed, and all five binding-refusal
             cases in both JVP and VJP. Its second NOPASS case uses same-named
             locals in two procedures to verify scope-correct binding resolution.
-            An active whole-receiver case verifies the named boundary. This does
-            not cover active receiver cotangents, overrides, or runtime dispatch.
+            An active whole-receiver case verifies the named boundary. Local
+            overrides on an abstract/deferred hierarchy are covered by P8.4a.
+            Active receiver cotangents and runtime dispatch remain open.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through
