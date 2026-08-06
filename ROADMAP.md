@@ -107,7 +107,7 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `97bff6e` (including the FortFront boundary
+The implementation snapshot is `6691355` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, bounded concrete type-bound calls with procedure
 scope-correct binding resolution, the real-coordinate complex JVP slice, the
@@ -710,7 +710,7 @@ problem-specific rule.
             [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90). It
             checks generated JVP/VJP values for both binding forms. It uses central
             finite differences, the adjoint seed, and all five refusal cases.
-            its second NOPASS case uses same-named locals in two procedures to
+            Its second NOPASS case uses same-named locals in two procedures to
             verify scope-correct binding resolution. This does not cover
             active receiver cotangents, overrides, or runtime dispatch.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
