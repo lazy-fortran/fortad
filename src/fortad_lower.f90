@@ -284,11 +284,11 @@ contains
                 return
             end if
         end do
-        do i = 1, len_trim(header) - 9
-            if (.not. matches(header(i:i + 8), "subroutine")) cycle
-            p = index(header(i + 9:), "(")
+        do i = 1, len_trim(header) - 10
+            if (.not. matches(header(i:i + 9), "subroutine")) cycle
+            p = index(header(i + 10:), "(")
             if (p > 0) then
-                open = i + 8 + p
+                open = i + 9 + p
                 return
             end if
         end do
