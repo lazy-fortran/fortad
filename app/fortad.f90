@@ -9,7 +9,7 @@ program fortad_cli
     !! compile the generated file with the rest of your project.
     use fortad, only: fad_add_rule
     use fortad, only: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, &
-                      fad_result_t, fad_version
+        fad_result_t, fad_version
     implicit none
 
     character(len=:), allocatable :: input_path, output_path, indep_list, dep_name
@@ -22,8 +22,8 @@ program fortad_cli
     integer :: unit, stat
 
     call parse_arguments(input_path, output_path, indep_list, directions, &
-                         proc_name, mode, module_name, roundtrip_only, &
-                         with_primal, dep_name, from_name, stat)
+        proc_name, mode, module_name, roundtrip_only, &
+        with_primal, dep_name, from_name, stat)
     if (stat /= 0) then
         call usage()
         error stop 2
@@ -40,15 +40,15 @@ program fortad_cli
     else if (mode == "reverse") then
         independents = split_commas(indep_list)
         res = run_reverse(source, independents, proc_name, module_name, &
-                          with_primal, dep_name, from_name)
+            with_primal, dep_name, from_name)
     else if (mode == "hessian") then
         independents = split_commas(indep_list)
         res = run_hessian(source, independents, proc_name, module_name, from_name)
     else
         independents = split_commas(indep_list)
         res = fad_jvp(source, independents, name=proc_name, from=from_name, &
-                      module_name=module_name, n_directions=directions, &
-                      with_primal=with_primal)
+            module_name=module_name, n_directions=directions, &
+            with_primal=with_primal)
     end if
 
     if (.not. res%ok) then
@@ -102,7 +102,7 @@ contains
         call split_lines(spec(c2 + 1:bar - 1), tangent, n_t, MAX_LINES)
         call split_lines(spec(bar + 1:), adjoint, n_a, MAX_LINES)
         call fad_add_call_rule(trim(spec(:c1 - 1)), n_args, tangent(:n_t), &
-                               adjoint(:n_a), stat)
+            adjoint(:n_a), stat)
         if (stat /= 0) write (error_unit, '(a)') &
             "fortad: could not register the call rule for "//trim(spec(:c1 - 1))
     end subroutine register_call_rule
@@ -176,7 +176,7 @@ contains
     end subroutine register_rule
 
     function run_reverse(source, independents, proc_name, module_name, &
-                         with_primal, dep_name, from_name) result(res)
+            with_primal, dep_name, from_name) result(res)
         !! Reverse mode. A blank name, module or dependent means "the default".
         character(len=*), intent(in) :: source, independents(:)
         character(len=*), intent(in) :: proc_name, module_name, dep_name
@@ -185,12 +185,12 @@ contains
         type(fad_result_t) :: res
 
         res = fad_vjp(source, independents, dependent=dep_name, name=proc_name, &
-                      module_name=module_name, with_primal=with_primal, &
-                      from=from_name)
+            module_name=module_name, with_primal=with_primal, &
+            from=from_name)
     end function run_reverse
 
     function run_hessian(source, independents, proc_name, module_name, &
-                         from_name) result(res)
+            from_name) result(res)
         !! Forward-over-reverse Hessian-vector product.
         character(len=*), intent(in) :: source, independents(:)
         character(len=*), intent(in) :: proc_name, module_name
@@ -198,12 +198,12 @@ contains
         type(fad_result_t) :: res
 
         res = fad_hvp(source, independents, name=proc_name, &
-                      module_name=module_name, from=from_name)
+            module_name=module_name, from=from_name)
     end function run_hessian
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
-                               proc_name, mode, module_name, roundtrip_only, &
-                               with_primal, dep_name, from_name, stat)
+            proc_name, mode, module_name, roundtrip_only, &
+            with_primal, dep_name, from_name, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
         character(len=:), allocatable, intent(out) :: indep_list, directions
@@ -396,6 +396,7 @@ contains
         write (*, '(a)') "  -d, --directions nd   vector mode: name of the "// &
             "direction-count argument"
         write (*, '(a)') "      --name f_jvp      name of the generated procedure"
+        write (*, '(a)') "      --proc NAME       target procedure in the input"
         write (*, '(a)') "  -o, --output path     write here instead of stdout"
         write (*, '(a)') "      --dep name        which output to "// &
             "differentiate, when there is more than one"
@@ -403,6 +404,9 @@ contains
             "not the primal value"
         write (*, '(a)') "      --roundtrip       parse and re-emit, do not "// &
             "differentiate"
+        write (*, '(a)') "      --rule SPEC       register scalar partials"
+        write (*, '(a)') "      --call-rule SPEC  register tangent and adjoint "// &
+            "statements"
         write (*, '(a)') "      --version         print version and exit"
     end subroutine usage
 
