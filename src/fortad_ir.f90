@@ -40,6 +40,14 @@ module fortad_ir
     !! A compiler directive marker, verbatim in `target`.  The emitter expands
     !! the fused-loop marker to the OpenMP-target and OpenACC forms.
     integer, parameter, public :: FAD_DIRECTIVE = 8
+    !! Runtime-polymorphic dispatch. The selector and guard arms remain
+    !! structural statements so the generated derivative follows the same
+    !! dynamic type as the primal.
+    integer, parameter, public :: FAD_SELECT_TYPE = 9
+    integer, parameter, public :: FAD_TYPE_IS = 10
+    integer, parameter, public :: FAD_CLASS_IS = 11
+    integer, parameter, public :: FAD_CLASS_DEFAULT = 12
+    integer, parameter, public :: FAD_END_SELECT = 13
 
     ! Argument intents, mirroring fortfront's constants.
     integer, parameter, public :: FAD_INTENT_NONE = 0
@@ -62,7 +70,8 @@ module fortad_ir
         integer :: kind = 0
         character(len=:), allocatable :: target
         integer :: value = 0
-        !! Loop bounds for FAD_DO, condition for FAD_IF.
+        !! Loop bounds for FAD_DO; condition for FAD_IF; selector expression
+        !! for FAD_SELECT_TYPE.
         integer :: lo = 0, hi = 0, step = 0
         !! Source line in the primal, for provenance comments.
         integer :: line = 0
