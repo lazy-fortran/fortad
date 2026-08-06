@@ -51,6 +51,4 @@ arena-indexed fortad records. The derivative pipeline can then rename values,
 reorder statements, add tangent or adjoint statements, and refuse unsupported
 control flow without mutating the source AST.
 
-This decision was made before the IR work began and is the P0.5 result. It
-keeps the upstream API small and makes the AD invariants explicit in the
-fortad code.
+This decision was made before the IR work began and is the P0.5 result.

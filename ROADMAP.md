@@ -58,11 +58,6 @@ Work through this file one checkbox at a time.
     paths, and post the numbers even when they did not move. An unchanged table
     is itself the result.
 
-A mechanism name never selects a winner. Production selection requires an
-independent oracle plus measured application runtime and peak memory. This is
-the rule fortnum applies to every candidate, applied to FortAD without
-exception.
-
 Do not combine checklist items. If an item contains several independent changes,
 split it into smaller checkboxes before writing code.
 
@@ -107,20 +102,13 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `8718ec0` (including the FortFront boundary
-fix, the portable CLI oracle, optional-dummy preservation, the explicit
-active-optional refusal, bounded concrete type-bound calls with procedure
-scope-correct binding resolution, the real-coordinate complex JVP slice, the
-select-type reverse finite-difference closeout, the bounded derived-component
-slice, allocation-lifetime refusals, alias/section refusals, elemental
-JVP/VJP preservation, bounded complex projection VJP, and fixed-dispatch
-abstract hierarchy overrides). Its GNU behavioral gate is green (408 build
-targets, 407 derivative targets, 35/35 tests). The remaining lint diagnostics
-are the 108 array-temporary warnings
-listed above. The three previously failing nvfortran rule
-oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
-boundary and adds a scalar external-CALL refusal oracle. The complete
-multi-compiler gate remains open until the remaining lanes are rerun.
+The implementation snapshot is `8718ec0`. Its GNU behavioral gate is green
+(408 build targets, 407 derivative targets, 35/35 tests); `fo lint` still has
+108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
+checklists below. The three previously failing nvfortran rule oracles now pass
+after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
+scalar external-CALL refusal oracle. The complete multi-compiler gate remains
+open until the remaining lanes are rerun.
 
 ## Current integration gate
 
