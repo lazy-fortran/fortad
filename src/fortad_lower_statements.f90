@@ -592,7 +592,7 @@ contains
             end do
             if (n%base_expr_index > 0) then
                 if (is_component_base(arena, n%base_expr_index)) then
-                    if (is_type_bound_reference(arena, n%base_expr_index)) then
+                    if (is_type_bound_reference(arena, n%base_expr_index, proc)) then
                         out = lower_type_bound_call(arena, n, proc, status)
                         if (.not. status%ok) return
                     else if (size(n%arg_indices) == 0) then
@@ -688,7 +688,7 @@ contains
                 "only a simple concrete receiver is supported")
             return
         end if
-        call static_object_type(arena, access%base_node_index, object_type)
+        call static_object_type(arena, access%base_node_index, proc, object_type)
         if (.not. allocated(object_type)) then
             call refuse_type_bound(status, node%name, &
                 "the receiver has no statically declared type")
@@ -814,13 +814,14 @@ contains
         out = proc%add_expr(expr_call(impl, args))
     end function lower_type_bound_call
 
-    logical function is_type_bound_reference(arena, base_idx) result(found)
+    logical function is_type_bound_reference(arena, base_idx, proc) result(found)
         !! Distinguish ``object%binding(args)`` from an array component
         !! ``object%values(i)`` before lowering either one.  A local binding is
         !! enough to route the former through the existing explicit refusal
         !! diagnostics (named PASS, NOPASS, generic, and deferred).
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: base_idx
+        type(fad_proc_t), intent(in) :: proc
         type(component_access_query_t) :: access
         type(derived_type_query_t) :: dtype
         type(type_binding_query_t) :: binding
@@ -835,7 +836,7 @@ contains
         if (.not. arena%has_node_at(access%base_node_index)) return
         if (trim(arena%entries(access%base_node_index)%node_type) /= &
             "identifier") return
-        call static_object_type(arena, access%base_node_index, object_type)
+        call static_object_type(arena, access%base_node_index, proc, object_type)
         if (.not. allocated(object_type)) return
         type_name = canonical_type_name(object_type)
         if (.not. allocated(type_name)) then
@@ -898,35 +899,24 @@ contains
         status%message = "unsupported type-bound call '"//trim(name)//"': "//trim(reason)
     end subroutine refuse_type_bound
 
-    recursive subroutine static_object_type(arena, idx, type_name)
+    recursive subroutine static_object_type(arena, idx, proc, type_name)
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: idx
+        type(fad_proc_t), intent(in) :: proc
         character(len=:), allocatable, intent(out) :: type_name
-        integer :: i, j
+        integer :: i
 
         if (idx <= 0 .or. idx > arena%size) return
         if (.not. arena%has_node_at(idx)) return
         select type (id => arena%entries(idx)%node)
             type is (identifier_node)
-            do i = 1, arena%size
-                if (.not. arena%has_node_at(i)) cycle
-                select type (decl => arena%entries(i)%node)
-                    type is (declaration_node)
-                    if (allocated(decl%var_name)) then
-                        if (same_name(decl%var_name, id%name)) then
-                            if (allocated(decl%type_name)) type_name = decl%type_name
-                            return
-                        end if
-                    end if
-                    if (allocated(decl%var_names)) then
-                        do j = 1, size(decl%var_names)
-                            if (.not. same_name(decl%var_names(j), id%name)) cycle
-                            if (allocated(decl%type_name)) type_name = decl%type_name
-                            return
-                        end do
-                    end if
-                class default
-                end select
+            do i = 1, proc%n_decls
+                if (.not. allocated(proc%decls(i)%name)) cycle
+                if (.not. same_name(proc%decls(i)%name, id%name)) cycle
+                if (allocated(proc%decls(i)%type_name)) then
+                    type_name = proc%decls(i)%type_name
+                end if
+                return
             end do
         class default
         end select

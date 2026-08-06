@@ -43,7 +43,8 @@ program test_type_bound_oracle
     end if
 
     call expect_refusal(named_pass_source(), "named PASS", "named PASS")
-    call check_nopass(nopass_source())
+    call check_nopass(nopass_source(), "nopass_case")
+    call check_nopass(nopass_scope_source(), "nopass_scope_case")
     call expect_refusal(inherited_source(), "inheritance", "inherited")
     call expect_refusal(generic_source(), "generic", "generic")
     call expect_refusal(deferred_source(), "deferred", "deferred")
@@ -145,8 +146,8 @@ contains
         end if
     end subroutine expect_refusal
 
-    subroutine check_nopass(case_source)
-        character(len=*), intent(in) :: case_source
+    subroutine check_nopass(case_source, case_module)
+        character(len=*), intent(in) :: case_source, case_module
         type(fad_result_t) :: jvp_case, vjp_case
         character(len=:), allocatable :: case_dir, case_driver
         integer :: case_unit, case_stat
@@ -163,7 +164,7 @@ contains
             error stop 1
         end if
 
-        case_dir = "build/oracle/type_bound_nopass"
+        case_dir = "build/oracle/type_bound_"//trim(case_module)
         call execute_command_line("mkdir -p "//case_dir, exitstat=case_stat)
         if (case_stat /= 0) error stop "could not create NOPASS oracle directory"
 
@@ -174,7 +175,7 @@ contains
         open (newunit=case_unit, file=case_dir//"/derivatives.f90", &
             status="replace", action="write")
         write (case_unit, '(a)') "module type_bound_nopass_derivatives"
-        write (case_unit, '(a)') "    use nopass_case, only: box_t"
+        write (case_unit, '(a)') "    use "//trim(case_module)//", only: box_t"
         write (case_unit, '(a)') "contains"
         write (case_unit, '(a)') jvp_case%code
         write (case_unit, '(a)') vjp_case%code
@@ -183,7 +184,7 @@ contains
 
         case_driver = &
             "program driver"//nl// &
-            "    use nopass_case, only: top"//nl// &
+            "    use "//trim(case_module)//", only: top"//nl// &
             "    use type_bound_nopass_derivatives, only: top_nopass_jvp, "// &
             "top_nopass_vjp"//nl// &
             "    implicit none"//nl// &
@@ -270,6 +271,39 @@ contains
             "    end function top"//nl// &
             "end module nopass_case"//nl
     end function nopass_source
+
+    function nopass_scope_source() result(text)
+        character(len=:), allocatable :: text
+        text = "module nopass_scope_case"//nl// &
+            "    type :: box_t"//nl// &
+            "    contains"//nl// &
+            "        procedure, nopass :: value => two_value"//nl// &
+            "    end type box_t"//nl// &
+            "    type :: other_t"//nl// &
+            "    contains"//nl// &
+            "        procedure, nopass :: value => one_value"//nl// &
+            "    end type other_t"//nl// &
+            "contains"//nl// &
+            "    pure real(8) function one_value(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = x + 1.0d0"//nl// &
+            "    end function one_value"//nl// &
+            "    pure real(8) function two_value(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = 3.0d0*x + 1.0d0"//nl// &
+            "    end function two_value"//nl// &
+            "    pure real(8) function prior(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        type(other_t) :: b"//nl// &
+            "        y = b%value(x)"//nl// &
+            "    end function prior"//nl// &
+            "    pure real(8) function top(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        type(box_t) :: b"//nl// &
+            "        y = b%value(x)"//nl// &
+            "    end function top"//nl// &
+            "end module nopass_scope_case"//nl
+    end function nopass_scope_source
 
     function inherited_source() result(text)
         character(len=:), allocatable :: text
