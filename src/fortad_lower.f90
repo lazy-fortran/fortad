@@ -8,7 +8,7 @@ module fortad_lower
     use fortfront, only: compile_frontend_from_string, &
         compiler_frontend_options_t, compiler_frontend_result_t, &
         ast_arena_t, program_unit_query_t, query_program_unit, &
-        INPUT_MODE_STANDARD
+        query_declaration, declaration_query_t, INPUT_MODE_STANDARD
     use fortad_ir, only: fad_proc_t
     use fortad_inline, only: inline_calls, inline_status_t, references
     use fortad_lower_body, only: lower_function, lower_subroutine, &
@@ -354,6 +354,7 @@ contains
                     call lower_subroutine(arena, unit, source, one_proc, one)
                 end if
                 if (.not. one%ok) cycle
+                call copy_params(arena, unit, one_proc)
                 n_others = n_others + 1
                 others(n_others) = one_proc
                 added = added + 1
@@ -369,6 +370,30 @@ contains
             end if
         end if
     end subroutine inline_reachable
+
+    subroutine copy_params(arena, unit, proc)
+        !! Preserve a sibling's declared dummy order for inlining.
+        type(ast_arena_t), intent(in) :: arena
+        type(program_unit_query_t), intent(in) :: unit
+        type(fad_proc_t), intent(inout) :: proc
+        type(declaration_query_t) :: decl
+        integer :: i, n
+
+        if (allocated(proc%params)) deallocate (proc%params)
+        n = 0
+        if (allocated(unit%parameter_indices)) n = size(unit%parameter_indices)
+        allocate (character(len=64) :: proc%params(n))
+        do i = 1, n
+            decl = query_declaration(arena, unit%parameter_indices(i))
+            if (decl%found) then
+                if (allocated(decl%name)) then
+                    proc%params(i) = trim(decl%name)
+                else if (allocated(decl%names)) then
+                    if (size(decl%names) > 0) proc%params(i) = trim(decl%names(1))
+                end if
+            end if
+        end do
+    end subroutine copy_params
 
     subroutine clear_proc(proc)
         !! Reset an internal lowering buffer without compiler-generated

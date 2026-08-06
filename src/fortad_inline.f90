@@ -665,6 +665,22 @@ contains
             if (len_trim(binds(i)%renamed) > 0) out = trim(binds(i)%renamed)
             return
         end do
+        ! Component references are represented as one textual expression in
+        ! the compact IR (for example, `self%scale`).  A type-bound call binds
+        ! `self` to the caller's receiver, so rewrite that leading object too.
+        block
+            integer :: percent
+            percent = index(trim(name), "%")
+            if (percent > 1) then
+                do i = 1, n_binds
+                    if (.not. same_name(binds(i)%name, trim(name(:percent - 1)))) cycle
+                    if (len_trim(binds(i)%renamed) > 0) then
+                        out = trim(binds(i)%renamed)//trim(name(percent:))
+                    end if
+                    return
+                end do
+            end if
+        end block
     end function renamed_of
 
     recursive integer function import(target, callee, idx, binds, n_binds) &
@@ -682,15 +698,39 @@ contains
         if (idx <= 0 .or. idx > callee%n_exprs) return
         if (callee%exprs(idx)%kind == FAD_VAR) then
             do k = 1, n_binds
-                if (.not. same_name(binds(k)%name, callee%exprs(idx)%text)) cycle
-                ! A dummy stands for the caller's actual expression; a local
-                ! stands for itself under a new name.
-                if (binds(k)%expr /= 0) then
-                    out = binds(k)%expr
-                else
-                    out = target%add_expr(expr_var(binds(k)%renamed))
+                if (same_name(binds(k)%name, callee%exprs(idx)%text)) then
+                    ! A dummy stands for the caller's actual expression; a
+                    ! local stands for itself under a new name.
+                    if (binds(k)%expr /= 0) then
+                        out = binds(k)%expr
+                    else
+                        out = target%add_expr(expr_var(binds(k)%renamed))
+                    end if
+                    return
                 end if
-                return
+                block
+                    integer :: percent
+                    percent = index(trim(callee%exprs(idx)%text), "%")
+                    if (percent > 1 .and. same_name(binds(k)%name, &
+                            trim(callee%exprs(idx)%text(:percent - 1)))) then
+                        e%kind = FAD_VAR
+                        if (binds(k)%expr > 0) then
+                            if (target%exprs(binds(k)%expr)%kind == FAD_VAR) then
+                                e%text = trim(target%exprs(binds(k)%expr)%text)// &
+                                    trim(callee%exprs(idx)%text(percent:))
+                            else
+                                e%text = trim(binds(k)%renamed)// &
+                                    trim(callee%exprs(idx)%text(percent:))
+                            end if
+                        else
+                            e%text = trim(binds(k)%renamed)// &
+                                trim(callee%exprs(idx)%text(percent:))
+                        end if
+                        allocate (e%args(0))
+                        out = target%add_expr(e)
+                        return
+                    end if
+                end block
             end do
         end if
 
