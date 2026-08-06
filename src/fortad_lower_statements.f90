@@ -683,8 +683,6 @@ contains
                 "only a simple concrete receiver is supported")
             return
         end if
-        receiver = lower_expr(arena, access%base_node_index, proc, status)
-        if (.not. status%ok) return
         call static_object_type(arena, access%base_node_index, object_type)
         if (.not. allocated(object_type)) then
             call refuse_type_bound(status, node%name, &
@@ -761,14 +759,13 @@ contains
             call refuse_type_bound(status, method, "deferred bindings are unsupported")
             return
         end if
-        if (.not. binding%pass_arg) then
-            call refuse_type_bound(status, method, "NOPASS bindings are unsupported")
-            return
-        end if
-        if (allocated(binding%pass_name)) then
-            if (len_trim(binding%pass_name) > 0) then
-                call refuse_type_bound(status, method, "named PASS bindings are unsupported")
-                return
+        if (binding%pass_arg) then
+            if (allocated(binding%pass_name)) then
+                if (len_trim(binding%pass_name) > 0) then
+                    call refuse_type_bound(status, method, &
+                        "named PASS bindings are unsupported")
+                    return
+                end if
             end if
         end if
         impl = trim(binding%binding_name)
@@ -790,12 +787,25 @@ contains
                 "the binding implementation is not a same-file function")
             return
         end if
-        allocate (args(size(node%arg_indices) + 1))
-        args(1) = receiver
-        do i = 1, size(node%arg_indices)
-            args(i + 1) = lower_expr(arena, node%arg_indices(i), proc, status)
+        if (binding%pass_arg) then
+            receiver = lower_expr(arena, access%base_node_index, proc, status)
             if (.not. status%ok) return
-        end do
+            allocate (args(size(node%arg_indices) + 1))
+            args(1) = receiver
+            do i = 1, size(node%arg_indices)
+                args(i + 1) = lower_expr(arena, node%arg_indices(i), proc, status)
+                if (.not. status%ok) return
+            end do
+        else
+            ! NOPASS bindings do not receive the object expression.  Keeping
+            ! the receiver out of the ordinary call is essential: the
+            ! implementation's first dummy is the first explicit actual.
+            allocate (args(size(node%arg_indices)))
+            do i = 1, size(node%arg_indices)
+                args(i) = lower_expr(arena, node%arg_indices(i), proc, status)
+                if (.not. status%ok) return
+            end do
+        end if
         out = proc%add_expr(expr_call(impl, args))
     end function lower_type_bound_call
 

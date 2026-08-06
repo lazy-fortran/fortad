@@ -92,7 +92,7 @@ the current integration gate is still open:
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds all 407 targets and runs 30 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
-      hazards. 94 `-Warray-temporaries` diagnostics still keep
+      hazards. 96 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
       predates the latest lowering work. `fo fmt --check` still reports
       formatting debt in legacy files. The files touched by the current slices
@@ -112,7 +112,7 @@ active-optional refusal, bounded concrete type-bound calls, and the lint
 hazard cleanup, the real-coordinate complex JVP slice, the select-type reverse
 finite-difference closeout, and the bounded derived-component slice). Its GNU
 behavioral gate is green (407/407 targets, 30/30 tests). The remaining lint
-diagnostics are the 94 array-temporary warnings
+diagnostics are the 96 array-temporary warnings
 listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
@@ -691,13 +691,15 @@ problem-specific rule.
       generics. A same-file implementation is inlined or emitted as a separate
       derivative procedure according to the existing call policy.
       - [x] **P8.3a bounded concrete call.** A statically declared `type(t)`
-            receiver with the default implicit PASS and a same-file function is
-            normalized to an ordinary call before JVP/VJP generation. Named
-            all other binding forms are named refusals. The compiled oracle is
-            [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90).
-            it checks generated JVP/VJP values, a central-difference JVP, the
-            adjoint seed, and all five refusal cases. This does not cover
-            active receiver cotangents, overrides, or runtime dispatch.
+            receiver with the default implicit PASS or `NOPASS` and a same-file
+            function is normalized to an ordinary call before JVP/VJP
+            generation. Named PASS, inherited, generic, and deferred bindings
+            remain named refusals. The compiled oracle is
+            [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90). It
+            checks generated JVP/VJP values for both binding forms, central
+            finite differences, the adjoint seed, and all four refusal cases.
+            This does not cover active receiver cotangents, overrides, or
+            runtime dispatch.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through

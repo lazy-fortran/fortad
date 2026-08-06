@@ -43,7 +43,7 @@ program test_type_bound_oracle
     end if
 
     call expect_refusal(named_pass_source(), "named PASS", "named PASS")
-    call expect_refusal(nopass_source(), "NOPASS", "NOPASS")
+    call check_nopass(nopass_source())
     call expect_refusal(inherited_source(), "inheritance", "inherited")
     call expect_refusal(generic_source(), "generic", "generic")
     call expect_refusal(deferred_source(), "deferred", "deferred")
@@ -145,6 +145,87 @@ contains
         end if
     end subroutine expect_refusal
 
+    subroutine check_nopass(case_source)
+        character(len=*), intent(in) :: case_source
+        type(fad_result_t) :: jvp_case, vjp_case
+        character(len=:), allocatable :: case_dir, case_driver
+        integer :: case_unit, case_stat
+
+        jvp_case = fad_jvp(case_source, ["x"], from="top", name="top_nopass_jvp")
+        if (.not. jvp_case%ok) then
+            print *, "FAIL NOPASS JVP generation: ", jvp_case%message
+            error stop 1
+        end if
+        vjp_case = fad_vjp(case_source, ["x"], dependent="y", from="top", &
+            name="top_nopass_vjp")
+        if (.not. vjp_case%ok) then
+            print *, "FAIL NOPASS VJP generation: ", vjp_case%message
+            error stop 1
+        end if
+
+        case_dir = "build/oracle/type_bound_nopass"
+        call execute_command_line("mkdir -p "//case_dir, exitstat=case_stat)
+        if (case_stat /= 0) error stop "could not create NOPASS oracle directory"
+
+        open (newunit=case_unit, file=case_dir//"/primal.f90", status="replace", &
+            action="write")
+        write (case_unit, '(a)') case_source
+        close (case_unit)
+        open (newunit=case_unit, file=case_dir//"/derivatives.f90", &
+            status="replace", action="write")
+        write (case_unit, '(a)') "module type_bound_nopass_derivatives"
+        write (case_unit, '(a)') "    use nopass_case, only: box_t"
+        write (case_unit, '(a)') "contains"
+        write (case_unit, '(a)') jvp_case%code
+        write (case_unit, '(a)') vjp_case%code
+        write (case_unit, '(a)') "end module type_bound_nopass_derivatives"
+        close (case_unit)
+
+        case_driver = &
+            "program driver"//nl// &
+            "    use nopass_case, only: top"//nl// &
+            "    use type_bound_nopass_derivatives, only: top_nopass_jvp, "// &
+            "top_nopass_vjp"//nl// &
+            "    implicit none"//nl// &
+            "    real(8) :: x, x_d, y, y_d, x_b, y_b, h, fp, fm"//nl// &
+            "    x = 1.5d0"//nl// &
+            "    x_d = -0.7d0"//nl// &
+            "    y_b = 1.3d0"//nl// &
+            "    call top_nopass_jvp(x, x_d, y, y_d)"//nl// &
+            "    if (abs(y - 5.5d0) > 1.0d-13) error stop 2"//nl// &
+            "    if (abs(y_d - 3.0d0*x_d) > 1.0d-13) error stop 3"//nl// &
+            "    h = 1.0d-6"//nl// &
+            "    fp = top(x + h)"//nl// &
+            "    fm = top(x - h)"//nl// &
+            "    if (abs(y_d - (fp - fm)/(2.0d0*h)*x_d) > 1.0d-7) error stop 4"//nl// &
+            "    call top_nopass_vjp(x, y, y_b, x_b)"//nl// &
+            "    if (abs(y - 5.5d0) > 1.0d-13) error stop 5"//nl// &
+            "    if (abs(x_b - 3.0d0*y_b) > 1.0d-13) error stop 6"//nl// &
+            "    print *, 'NOPASS type-bound oracle pass'"//nl// &
+            "end program driver"//nl
+        open (newunit=case_unit, file=case_dir//"/driver.f90", status="replace", &
+            action="write")
+        write (case_unit, '(a)') case_driver
+        close (case_unit)
+
+        call execute_command_line("gfortran -std=f2018 -O2 -o "//case_dir//"/run "// &
+            case_dir//"/primal.f90 "//case_dir//"/derivatives.f90 "// &
+            case_dir//"/driver.f90 > "//case_dir//"/build.log 2>&1", &
+            exitstat=case_stat)
+        if (case_stat /= 0) then
+            print *, "FAIL NOPASS: generated code did not compile"
+            call show_file(case_dir//"/build.log")
+            error stop 1
+        end if
+        call execute_command_line("./"//case_dir//"/run > "//case_dir//"/out.txt 2>&1", &
+            exitstat=case_stat)
+        if (case_stat /= 0) then
+            print *, "FAIL NOPASS: independent oracle failed"
+            call show_file(case_dir//"/out.txt")
+            error stop 1
+        end if
+    end subroutine check_nopass
+
     function named_pass_source() result(text)
         character(len=:), allocatable :: text
         text = "module named_pass"//nl// &
@@ -179,7 +260,7 @@ contains
             "    pure function value(x) result(y)"//nl// &
             "        real(8), intent(in) :: x"//nl// &
             "        real(8) :: y"//nl// &
-            "        y = x"//nl// &
+            "        y = 3.0d0*x + 1.0d0"//nl// &
             "    end function value"//nl// &
             "    pure function top(x) result(y)"//nl// &
             "        real(8), intent(in) :: x"//nl// &
