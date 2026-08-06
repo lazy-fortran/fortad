@@ -17,11 +17,11 @@ module fortad_taylor_gen
     !! and loops would need the temporaries to be loop-local. Both are refused
     !! by name.
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-                        expr_const, expr_var, FAD_CONST, FAD_VAR, FAD_BINOP, &
-                        FAD_UNOP, FAD_CALL, FAD_INDEX, FAD_ASSIGN, &
-                        FAD_CALL_STMT, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
-                        FAD_END_IF, FAD_INTENT_IN, FAD_INTENT_OUT, &
-                        FAD_INTENT_NONE
+        expr_const, expr_var, FAD_CONST, FAD_VAR, FAD_BINOP, &
+        FAD_UNOP, FAD_CALL, FAD_INDEX, FAD_ASSIGN, &
+        FAD_CALL_STMT, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
+        FAD_END_IF, FAD_INTENT_IN, FAD_INTENT_OUT, &
+        FAD_INTENT_NONE
     implicit none
     private
 
@@ -135,7 +135,7 @@ contains
             n = n + 1
             names(n) = trim(primal%params(i))//suffix
             call add_taylor_decl(taylor, primal%decls(di), suffix, order, &
-                                 primal%decls(di)%intent)
+                primal%decls(di)%intent)
         end do
 
         if (primal%is_function) then
@@ -144,11 +144,14 @@ contains
                 n = n + 1
                 names(n) = primal%result_name//suffix
                 call add_taylor_decl(taylor, primal%decls(di), suffix, order, &
-                                     FAD_INTENT_OUT)
+                    FAD_INTENT_OUT)
             end if
         end if
 
-        taylor%params = names(1:n)
+        allocate (character(len=64) :: taylor%params(n))
+        do i = 1, n
+            taylor%params(i) = names(i)
+        end do
     end subroutine build_signature
 
     subroutine add_taylor_decl(taylor, primal_decl, suffix, order, intent_code)
@@ -187,17 +190,17 @@ contains
             if (di == 0) then
                 status%ok = .false.
                 status%message = "assignment to undeclared '"// &
-                                 primal%stmts(i)%target//"'"
+                    primal%stmts(i)%target//"'"
                 return
             end if
             ! A local target needs its own coefficient array.
             if (taylor%decl_index(primal%stmts(i)%target//suffix) == 0) then
                 call add_taylor_decl(taylor, primal%decls(di), suffix, order, &
-                                     FAD_INTENT_NONE)
+                    FAD_INTENT_NONE)
             end if
 
             call emit_expr_calls(primal, taylor, primal%stmts(i)%value, suffix, &
-                                 order, n_tmp, result_name, status)
+                order, n_tmp, result_name, status)
             if (.not. status%ok) return
 
             ! Copy the result into the target's array. A whole-array assignment
@@ -210,7 +213,7 @@ contains
     end subroutine build_body
 
     recursive subroutine emit_expr_calls(primal, taylor, idx, suffix, order, &
-                                         n_tmp, result_name, status)
+            n_tmp, result_name, status)
         !! Emit the calls computing one expression, returning the name holding
         !! its coefficients.
         type(fad_proc_t), intent(in) :: primal
@@ -239,15 +242,15 @@ contains
         case (FAD_CONST)
             call fresh_temp(taylor, order, n_tmp, result_name)
             call emit_call(taylor, "tay_const", primal%exprs(idx)%text, &
-                           result_name)
+                result_name)
             return
 
         case (FAD_BINOP)
             call emit_expr_calls(primal, taylor, primal%exprs(idx)%args(1), &
-                                 suffix, order, n_tmp, a_name, status)
+                suffix, order, n_tmp, a_name, status)
             if (.not. status%ok) return
             call emit_expr_calls(primal, taylor, primal%exprs(idx)%args(2), &
-                                 suffix, order, n_tmp, b_name, status)
+                suffix, order, n_tmp, b_name, status)
             if (.not. status%ok) return
             call fresh_temp(taylor, order, n_tmp, result_name)
             select case (trim(primal%exprs(idx)%text))
@@ -262,28 +265,28 @@ contains
             case default
                 status%ok = .false.
                 status%message = "Taylor mode: no rule for operator '"// &
-                                 trim(primal%exprs(idx)%text)//"'"
+                    trim(primal%exprs(idx)%text)//"'"
             end select
             return
 
         case (FAD_UNOP)
             call emit_expr_calls(primal, taylor, primal%exprs(idx)%args(1), &
-                                 suffix, order, n_tmp, a_name, status)
+                suffix, order, n_tmp, a_name, status)
             if (.not. status%ok) return
             if (trim(primal%exprs(idx)%text) /= "-") then
                 status%ok = .false.
                 status%message = "Taylor mode: no rule for unary '"// &
-                                 trim(primal%exprs(idx)%text)//"'"
+                    trim(primal%exprs(idx)%text)//"'"
                 return
             end if
             call fresh_temp(taylor, order, n_tmp, result_name)
             call emit_call(taylor, "tay_scale", &
-                           "-1.0"//taylor%real_suffix, a_name, result_name)
+                "-1.0"//taylor%real_suffix, a_name, result_name)
             return
 
         case (FAD_CALL)
             call emit_call_rule(primal, taylor, idx, suffix, order, n_tmp, &
-                                result_name, status)
+                result_name, status)
             return
 
         case default
@@ -293,7 +296,7 @@ contains
     end subroutine emit_expr_calls
 
     recursive subroutine emit_call_rule(primal, taylor, idx, suffix, order, &
-                                        n_tmp, result_name, status)
+            n_tmp, result_name, status)
         !! Emit the call for an intrinsic.
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: taylor
@@ -305,7 +308,7 @@ contains
         character(len=:), allocatable :: a_name, spare
 
         call emit_expr_calls(primal, taylor, primal%exprs(idx)%args(1), suffix, &
-                             order, n_tmp, a_name, status)
+            order, n_tmp, a_name, status)
         if (.not. status%ok) return
         call fresh_temp(taylor, order, n_tmp, result_name)
 

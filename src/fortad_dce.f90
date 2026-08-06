@@ -17,14 +17,15 @@ module fortad_dce
     !! not be read anywhere in that loop body at all, because a read earlier in
     !! the body is a read of the *next* iteration's value.
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-                        FAD_VAR, FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, &
-                        FAD_IF, FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
-                        FAD_INTENT_NONE
+        copy_decl, &
+        FAD_VAR, FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, &
+        FAD_IF, FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
+        FAD_INTENT_NONE
     implicit none
     private
 
     public :: eliminate_dead_stores, fold_zero_accumulations, &
-              eliminate_dead_arrays, eliminate_dead_loops
+        eliminate_dead_arrays, eliminate_dead_loops
 
 contains
 
@@ -255,9 +256,11 @@ contains
             if (.not. allocated(p%decls(d)%name)) cycle
             if (len_trim(p%decls(d)%name) == 0) cycle
             n_decls = n_decls + 1
-            decls(n_decls) = p%decls(d)
+            call copy_decl(decls(n_decls), p%decls(d))
         end do
-        p%decls(1:n_decls) = decls(1:n_decls)
+        do d = 1, n_decls
+            call copy_decl(p%decls(d), decls(d))
+        end do
         p%n_decls = n_decls
     end subroutine eliminate_dead_arrays
 
@@ -399,7 +402,7 @@ contains
         yes = .false.
         e = p%stmts(idx)%value
         if (e <= 0 .or. e > p%n_exprs) return
-        if (p%exprs(e)%kind /= 3) return               ! FAD_BINOP
+        if (p%exprs(e)%kind /= 3) return ! FAD_BINOP
         if (trim(p%exprs(e)%text) /= "+") return
         l = p%exprs(e)%args(1)
         if (l <= 0 .or. l > p%n_exprs) return
@@ -593,7 +596,7 @@ contains
         if (pos < 1 .or. pos > len(text)) return
         c = text(pos:pos)
         yes = (c >= "a" .and. c <= "z") .or. (c >= "A" .and. c <= "Z") .or. &
-              (c >= "0" .and. c <= "9") .or. c == "_"
+            (c >= "0" .and. c <= "9") .or. c == "_"
     end function is_ident_char
 
     logical function is_dummy(p, name) result(yes)
