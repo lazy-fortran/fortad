@@ -90,7 +90,7 @@ the current integration gate is still open:
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
-      GNU is current: bare `fo` builds all 407 targets, runs 27 tests, and
+      GNU is current: bare `fo` builds all 407 targets, runs 28 tests, and
       passes lint. The other four lanes still rely on a run that predates the
       latest lowering work.
 - [ ] Every operator shared by fortnum and fortfem has same-machine FortAD and
@@ -102,10 +102,10 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `08201bf` (including the FortFront boundary
-fix, the portable CLI oracle, optional-dummy preservation, and the explicit
-active-optional refusal). Its GNU bare gate is green (407/407 targets, 27/27
-tests, lint), and the three previously
+The implementation snapshot is `b38de65` (including the FortFront boundary
+fix, the portable CLI oracle, optional-dummy preservation, the explicit
+active-optional refusal, and bounded concrete type-bound calls). Its GNU bare
+gate is green (407/407 targets, 28/28 tests, lint), and the three previously
 failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
