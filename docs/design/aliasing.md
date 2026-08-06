@@ -9,7 +9,10 @@ to refuse it before derivative code is emitted.
 The same boundary covers array sections. A strided section such as
 `x(1:size(x):2)` may be noncontiguous, and two sections can overlap without
 having the same spelling. FortAD reports that storage identity is not tracked
-instead of treating a section as an ordinary element.
+instead of treating a section as an ordinary element. Vector subscripts such
+as `x(idx)` where `idx` is an array are refused by the same boundary. They do
+not have a range node in the frontend, so FortAD checks the declared rank of
+each subscript.
 
 ```fortran
 use fortad, only: fad_jvp, fad_result_t
@@ -22,8 +25,9 @@ result = fad_jvp(source, ["x"])
 
 The executable boundary is
 [`test_alias_boundary_oracle.f90`](../../test/test_alias_boundary_oracle.f90).
-It checks both JVP and VJP refusals for `TARGET`, `POINTER`, and a strided
-section. Plain element writes remain supported;
+It checks both JVP and VJP refusals for `TARGET`, `POINTER`, pointer
+association, a strided section, and a vector subscript. Plain element writes
+remain supported;
 [`test_element_target_oracle.f90`](../../test/test_element_target_oracle.f90)
 checks those against central differences. Storage-identity analysis for
 same-target, different-target, overlapping, and component aliases remains

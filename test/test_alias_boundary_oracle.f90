@@ -24,6 +24,14 @@ program test_alias_boundary_oracle
         "unsupported array section", .false., failures)
     call check_case("strided section VJP", section_source(), &
         "unsupported array section", .true., failures)
+    call check_case("vector subscript JVP", vector_section_source(), &
+        "unsupported vector subscript", .false., failures)
+    call check_case("vector subscript VJP", vector_section_source(), &
+        "unsupported vector subscript", .true., failures)
+    call check_case("pointer association JVP", association_source(), &
+        "unsupported pointer association", .false., failures)
+    call check_case("pointer association VJP", association_source(), &
+        "unsupported pointer association", .true., failures)
 
     if (failures /= 0) then
         print *, "test_alias_boundary_oracle: ", failures, " case(s) FAILED"
@@ -95,5 +103,36 @@ contains
             "    y = sum(x(1:size(x):2))"//nl// &
             "end subroutine k"//nl
     end function section_source
+
+    function vector_section_source() result(source)
+        character(len=:), allocatable :: source
+
+        source = "subroutine k(x, idx, y)"//nl// &
+            "    use, intrinsic :: iso_fortran_env, only: dp => real64"//nl// &
+            "    implicit none"//nl// &
+            "    real(dp), intent(in) :: x(:)"//nl// &
+            "    integer, intent(in) :: idx(:)"//nl// &
+            "    real(dp), intent(out) :: y"//nl// &
+            "    y = sum(x(idx))"//nl// &
+            "end subroutine k"//nl
+    end function vector_section_source
+
+    function association_source() result(source)
+        character(len=:), allocatable :: source
+
+        source = "module alias_fixture"//nl// &
+            "    use, intrinsic :: iso_fortran_env, only: dp => real64"//nl// &
+            "    implicit none"//nl// &
+            "    real(dp), target :: stored"//nl// &
+            "    real(dp), pointer :: alias"//nl// &
+            "contains"//nl// &
+            "    subroutine k(x, y)"//nl// &
+            "        real(dp), intent(in) :: x"//nl// &
+            "        real(dp), intent(out) :: y"//nl// &
+            "        alias => stored"//nl// &
+            "        y = x*x"//nl// &
+            "    end subroutine k"//nl// &
+            "end module alias_fixture"//nl
+    end function association_source
 
 end program test_alias_boundary_oracle

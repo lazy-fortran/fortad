@@ -632,9 +632,10 @@ of selected child ends the fixed-path derivative contract.
       aliases by storage identity. Test aliases that share a target and aliases
       that do not.
       - [x] **P7.3a explicit refusal boundary.** The lowering pass now refuses
-        `POINTER` and `TARGET` declarations, pointer association, and array
-        sections before derivative emission with named diagnostics because the
-        IR does not track storage identity. The independent
+        `POINTER` and `TARGET` declarations, pointer association, strided and
+        vector-subscript array sections before derivative emission with named
+        diagnostics because the IR does not track storage identity. The
+        independent
         [`test_alias_boundary_oracle.f90`](test/test_alias_boundary_oracle.f90)
         checks both JVP and VJP paths. Positive element writes are separate:
         [`test_element_target_oracle.f90`](test/test_element_target_oracle.f90)
