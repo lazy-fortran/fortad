@@ -33,6 +33,7 @@ program test_solve_rule_oracle
     failures = 0
 
     call fad_clear_rules()
+    call check_scalar_refusal(failures)
     call check_refusal(failures)
 
     ! Implicit differentiation: differentiating A x = b gives A x_d = b_d - A_d x.
@@ -51,6 +52,33 @@ program test_solve_rule_oracle
     end if
 
 contains
+
+    subroutine check_scalar_refusal(failures)
+        !! A scalar external CALL follows the same refusal contract as the
+        !! array-valued solver case.  Keep this small boundary case because
+        !! it also guards the frontend's allocator-safe call path.
+        integer, intent(inout) :: failures
+        character(len=*), parameter :: scalar_source = &
+            "subroutine scalar_kernel(x, y)"//nl// &
+            "    real(8), intent(in) :: x"//nl// &
+            "    real(8), intent(out) :: y"//nl// &
+            "    call opaque_scalar(x)"//nl// &
+            "    y = x"//nl// &
+            "end subroutine scalar_kernel"//nl
+        type(fad_result_t) :: res
+
+        res = fad_jvp(scalar_source, ["x"])
+        if (res%ok) then
+            print *, "FAIL scalar_external_call: expected a refusal"
+            failures = failures + 1
+        else if (index(res%message, "opaque_scalar") == 0) then
+            print *, "FAIL scalar_external_call: refusal does not name the call: ", &
+                res%message
+            failures = failures + 1
+        else
+            print *, "pass scalar_external_call (refused: ", trim(res%message), ")"
+        end if
+    end subroutine check_scalar_refusal
 
     subroutine check_refusal(failures)
         !! Without a rule the call must be refused by name, not assumed inert.
