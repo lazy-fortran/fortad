@@ -1,7 +1,6 @@
 module fortad_lower_body
     !! Lower procedure metadata and delegate bodies to a separate unit.
-    use fortfront, only: ast_arena_t, program_unit_query_t, identifier_node, &
-        parameter_declaration_node, declaration_node
+    use fortfront, only: ast_arena_t, program_unit_query_t
     use fortad_ir, only: fad_proc_t, fad_decl_t
     use fortad_lower_statements, only: lower_body, inherit_module_uses
     use fortad_lower_types, only: lower_status_t
@@ -57,7 +56,6 @@ contains
         else
             proc%result_name = unit%name
         end if
-        call collect_params(arena, unit%parameter_indices, proc)
         call lower_body(arena, unit%body_indices, proc, status)
         if (.not. status%ok) return
         call infer_real_suffix(proc)
@@ -89,43 +87,9 @@ contains
 
         proc%name = unit%name
         proc%is_function = .false.
-        call collect_params(arena, unit%parameter_indices, proc)
         call lower_body(arena, unit%body_indices, proc, status)
         if (.not. status%ok) return
         call infer_real_suffix(proc)
     end subroutine lower_subroutine
-
-    subroutine collect_params(arena, param_indices, proc)
-        !! Record the dummy argument names in declaration order.
-        type(ast_arena_t), intent(in) :: arena
-        integer, intent(in) :: param_indices(:)
-        type(fad_proc_t), intent(inout) :: proc
-        character(len=64), allocatable :: names(:)
-        integer :: i, n
-
-        n = 0
-        allocate (names(max(1, size(param_indices))))
-        do i = 1, size(param_indices)
-            if (param_indices(i) <= 0) cycle
-            if (param_indices(i) > arena%size) cycle
-            if (.not. arena%has_node_at(param_indices(i))) cycle
-            select type (pn => arena%entries(param_indices(i))%node)
-                type is (identifier_node)
-                n = n + 1
-                names(n) = pn%name
-                type is (parameter_declaration_node)
-                n = n + 1
-                names(n) = pn%name
-                type is (declaration_node)
-                n = n + 1
-                names(n) = pn%var_name
-            end select
-        end do
-        if (n > 0) then
-            proc%params = names(1:n)
-        else
-            allocate (character(len=64) :: proc%params(0))
-        end if
-    end subroutine collect_params
 
 end module fortad_lower_body

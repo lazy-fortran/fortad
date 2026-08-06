@@ -22,20 +22,20 @@ module fortad_reverse
     !! mishandled; they need the typed per-loop storage described in the
     !! roadmap, which is the next milestone.
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-                        expr_const, expr_var, expr_binop, expr_unop, expr_call, &
-                        FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
-                        FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
-                        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
-                        FAD_DIRECTIVE, &
-                        FAD_INTENT_OUT, &
-                        FAD_INTENT_INOUT, FAD_INTENT_NONE
+        expr_const, expr_var, expr_binop, expr_unop, expr_call, &
+        FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
+        FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
+        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
+        FAD_DIRECTIVE, &
+        FAD_INTENT_OUT, &
+        FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
-                            fad_add, fad_mul, fad_neg, fad_real
+        fad_add, fad_mul, fad_neg, fad_real
     use fortad_registry, only: call_rule_has, call_rule_lines, &
-                               call_rule_substitute
+        call_rule_substitute
     use fortad_emit, only: emit_expr
     use fortad_reverse_loop, only: loop_shape_t, analyse_loop, LOOP_OK, &
-                                   split_accumulation, target_base
+        split_accumulation, target_base
     implicit none
     private
 
@@ -191,8 +191,11 @@ contains
         if (allocated(primal%real_suffix)) adjoint%real_suffix = primal%real_suffix
         ! The derivative names the same kinds as the primal, so it needs the
         ! same imports.
-        if (allocated(primal%uses)) then
-            adjoint%uses = primal%uses
+        if (primal%n_uses > 0 .and. allocated(primal%uses)) then
+            allocate (character(len=256) :: adjoint%uses(primal%n_uses))
+            do i = 1, primal%n_uses
+                adjoint%uses(i) = primal%uses(i)
+            end do
             adjoint%n_uses = primal%n_uses
         end if
         adjoint%is_pure = .true.
@@ -202,18 +205,18 @@ contains
 
         call build_signature(primal, adjoint, spec, dependent, suffix, active)
         call build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
-                                 is_element, &
-                                 n_rec, loops, n_loops, branches, n_branches, &
-                                 calls, n_calls, &
-                                 order_kind, order_index, n_order, active, &
-                                 status)
+            is_element, &
+            n_rec, loops, n_loops, branches, n_branches, &
+            calls, n_calls, &
+            order_kind, order_index, n_order, active, &
+            status)
         if (.not. status%ok) return
         call build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
-                                 is_element, &
-                                 n_rec, loops, n_loops, branches, n_branches, &
-                                 calls, n_calls, &
-                                 order_kind, order_index, n_order, &
-                                 spec, dependent, suffix, active, status)
+            is_element, &
+            n_rec, loops, n_loops, branches, n_branches, &
+            calls, n_calls, &
+            order_kind, order_index, n_order, &
+            spec, dependent, suffix, active, status)
     end subroutine differentiate_reverse
 
     subroutine choose_dependent(primal, spec, dependent, status)
@@ -229,7 +232,7 @@ contains
             if (primal%decl_index(dependent) == 0) then
                 status%ok = .false.
                 status%message = "dependent '"//dependent// &
-                                 "' is not declared in "//primal%name
+                    "' is not declared in "//primal%name
             end if
             return
         end if
@@ -255,10 +258,10 @@ contains
         status%ok = .false.
         if (n_out == 0) then
             status%message = "no dependent found: "//primal%name// &
-                             " has no intent(out) argument; name one explicitly"
+                " has no intent(out) argument; name one explicitly"
         else
             status%message = "several intent(out) arguments in "//primal%name// &
-                             "; name the dependent explicitly"
+                "; name the dependent explicitly"
         end if
     end subroutine choose_dependent
 
@@ -295,14 +298,14 @@ contains
                 if (.not. call_rule_has(primal%stmts(i)%target)) then
                     status%ok = .false.
                     status%message = "no reverse rule for the call to '"// &
-                                     primal%stmts(i)%target// &
-                                     "'; register one with fad_add_call_rule"
+                        primal%stmts(i)%target// &
+                        "'; register one with fad_add_call_rule"
                     return
                 end if
                 if (depth > 0) then
                     status%ok = .false.
                     status%message = "reverse mode: structured calls inside "// &
-                                     "loops are not supported"
+                        "loops are not supported"
                     return
                 end if
             end select
@@ -332,7 +335,7 @@ contains
             if (di == 0) then
                 status%ok = .false.
                 status%message = "independent '"//trim(spec%independents(i))// &
-                                 "' is not declared in "//primal%name
+                    "' is not declared in "//primal%name
                 return
             end if
             varied(di) = .true.
@@ -346,7 +349,7 @@ contains
                     if (.not. call_reads_any(primal, primal%stmts(j), varied)) cycle
                     do i = 1, size(primal%stmts(j)%call_args)
                         di = call_arg_decl_index(primal, &
-                                                 primal%stmts(j)%call_args(i))
+                            primal%stmts(j)%call_args(i))
                         if (di <= 0) cycle
                         if (.not. is_real_type(primal%decls(di))) cycle
                         if (.not. varied(di)) then
@@ -381,7 +384,7 @@ contains
                     if (.not. call_reads_any(primal, primal%stmts(j), useful)) cycle
                     do i = 1, size(primal%stmts(j)%call_args)
                         di = call_arg_decl_index(primal, &
-                                                 primal%stmts(j)%call_args(i))
+                            primal%stmts(j)%call_args(i))
                         if (di <= 0) cycle
                         if (.not. useful(di)) then
                             useful(di) = .true.
@@ -549,15 +552,18 @@ contains
             ignored = adjoint%add_decl(d)
         end do
 
-        adjoint%params = names(1:n)
+        allocate (character(len=64) :: adjoint%params(n))
+        do i = 1, n
+            adjoint%params(i) = names(i)
+        end do
     end subroutine build_signature
 
     subroutine build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
-                                   is_element, &
-                                   n_rec, loops, n_loops, branches, n_branches, &
-                                   calls, n_calls, &
-                                   order_kind, order_index, n_order, active, &
-                                   status)
+            is_element, &
+            n_rec, loops, n_loops, branches, n_branches, &
+            calls, n_calls, &
+            order_kind, order_index, n_order, active, &
+            status)
         !! Emit the primal, renaming straight-line assignments into static
         !! single assignment and emitting reduction loops verbatim.
         !!
@@ -629,7 +635,7 @@ contains
                 if (di == 0) then
                     status%ok = .false.
                     status%message = "assignment to undeclared '"// &
-                                     primal%stmts(i)%target//"'"
+                        primal%stmts(i)%target//"'"
                     return
                 end if
                 s%kind = FAD_ASSIGN
@@ -666,7 +672,7 @@ contains
                 end if
                 n_loops = n_loops + 1
                 call emit_loop_forward(primal, adjoint, ssa, shape, &
-                                       loops(n_loops), status)
+                    loops(n_loops), status)
                 if (.not. status%ok) return
                 n_order = n_order + 1
                 order_kind(n_order) = ORDER_LOOP
@@ -676,7 +682,7 @@ contains
             case (FAD_IF)
                 n_branches = n_branches + 1
                 call emit_branch_forward(primal, adjoint, ssa, i, &
-                                         branches(n_branches), after, status)
+                    branches(n_branches), after, status)
                 if (.not. status%ok) return
                 n_order = n_order + 1
                 order_kind(n_order) = ORDER_BRANCH
@@ -691,7 +697,7 @@ contains
                 if (.not. call_rule_has(primal%stmts(i)%target)) then
                     status%ok = .false.
                     status%message = "no reverse rule for the call to '"// &
-                                     primal%stmts(i)%target//"'"
+                        primal%stmts(i)%target//"'"
                     return
                 end if
                 n_calls = n_calls + 1
@@ -706,7 +712,7 @@ contains
                         FAD_VAR) then
                         status%ok = .false.
                         status%message = "reverse mode: structured call arguments "// &
-                                         "must be simple variables"
+                            "must be simple variables"
                         return
                     end if
                     s%call_args(k) = copy_renamed( &
@@ -799,8 +805,8 @@ contains
         ignored = adjoint%add_stmt(s)
 
         call emit_arm(primal, adjoint, ssa, first + 1, &
-                      merge(else_at, end_at, else_at > 0) - 1, &
-                      rec%then_lhs, rec%then_rhs, rec%n_then, status)
+            merge(else_at, end_at, else_at > 0) - 1, &
+            rec%then_lhs, rec%then_rhs, rec%n_then, status)
         if (.not. status%ok) return
         after_then = ssa
 
@@ -811,7 +817,7 @@ contains
         ssa = before
         if (else_at > 0) then
             call emit_arm(primal, adjoint, ssa, else_at + 1, end_at - 1, &
-                          rec%else_lhs, rec%else_rhs, rec%n_else, status)
+                rec%else_lhs, rec%else_rhs, rec%n_else, status)
             if (.not. status%ok) return
         end if
 
@@ -826,7 +832,7 @@ contains
             ! gone further, and its names are already in the emitted code.
             call ssa_set(ssa, primal%decls(i)%name, from_else)
             call ssa_advance_to(ssa, primal%decls(i)%name, &
-                                ssa_version(after_then, primal%decls(i)%name))
+                ssa_version(after_then, primal%decls(i)%name))
             call ssa_fresh(ssa, primal%decls(i)%name, merged)
             d = primal%decls(i)
             d%name = merged
@@ -877,7 +883,7 @@ contains
             if (di == 0) then
                 status%ok = .false.
                 status%message = "assignment to undeclared '"// &
-                                 primal%stmts(i)%target//"'"
+                    primal%stmts(i)%target//"'"
                 return
             end if
             s%kind = FAD_ASSIGN
@@ -970,7 +976,7 @@ contains
         rec%step = 0
         if (primal%stmts(shape%first)%step /= 0) then
             rec%step = copy_renamed(primal, adjoint, &
-                                    primal%stmts(shape%first)%step, ssa)
+                primal%stmts(shape%first)%step, ssa)
         end if
 
         ! The loop index needs a declaration in the generated procedure.
@@ -1004,7 +1010,7 @@ contains
         ! A per-iteration temporary keeps its own name; it is one local.
         do k = 1, shape%n_temporaries
             call ssa_set(ssa, trim(shape%temporaries(k)), &
-                         trim(shape%temporaries(k)))
+                trim(shape%temporaries(k)))
             di = primal%decl_index(trim(shape%temporaries(k)))
             d = primal%decls(di)
             d%intent = FAD_INTENT_NONE
@@ -1056,7 +1062,7 @@ contains
                     if (primal%decls(di)%is_array) cycle
                     if (.not. is_real_type(primal%decls(di))) cycle
                     if (.not. worth_taping(primal, shape, &
-                                           trim(shape%temporaries(k)))) cycle
+                        trim(shape%temporaries(k)))) cycle
                     d = primal%decls(di)
                     d%name = trim(shape%temporaries(k))//"_tape"
                     d%intent = FAD_INTENT_NONE
@@ -1070,7 +1076,7 @@ contains
                     ! its adjoint coefficient is built from values that do not
                     ! depend on it, so the reverse sweep never reads it.
                     if (is_known_name(shape%linear, shape%n_linear, &
-                                      trim(shape%carried(k)))) cycle
+                        trim(shape%carried(k)))) cycle
                     di = primal%decl_index(trim(shape%carried(k)))
                     if (di == 0) cycle
                     d = primal%decls(di)
@@ -1109,7 +1115,7 @@ contains
                 ! reverse sweep can tell the pre-update value from the
                 ! post-update one. Conflating them was the first bug here.
                 call ssa_set(ssa, trim(shape%carried(k)), &
-                             trim(shape%carried(k)))
+                    trim(shape%carried(k)))
                 d = primal%decls(di)
                 d%intent = FAD_INTENT_NONE
                 d%is_result = .false.
@@ -1177,7 +1183,7 @@ contains
             s%kind = FAD_ASSIGN
             s%value = copy_renamed(primal, adjoint, primal%stmts(i)%value, ssa)
             if (is_known_name(shape%carried, shape%n_carried, &
-                              primal%stmts(i)%target)) then
+                primal%stmts(i)%target)) then
                 call ssa_fresh(ssa, primal%stmts(i)%target, fresh)
                 block
                     integer :: cdi
@@ -1204,7 +1210,7 @@ contains
                     end if
                 end block
             else if (is_known_name(shape%temporaries, shape%n_temporaries, &
-                                   primal%stmts(i)%target)) then
+                    primal%stmts(i)%target)) then
                 ! A per-iteration temporary gets a version per write, like any
                 ! straight-line assignment. Holding it to one name is what made
                 ! a second write ambiguous, and the loop was refused for it -
@@ -1233,13 +1239,13 @@ contains
             ! In a taped loop, store a scalar temporary as it is produced.
             if (rec%taped) then
                 if (is_known_name(shape%temporaries, shape%n_temporaries, &
-                                  primal%stmts(i)%target)) then
+                    primal%stmts(i)%target)) then
                     if (adjoint%decl_index(primal%stmts(i)%target//"_tape") > 0) then
                         block
                             type(fad_stmt_t) :: ts
                             ts%kind = FAD_ASSIGN
                             ts%target = primal%stmts(i)%target//"_tape("// &
-                                        rec%tape_index//")"
+                                rec%tape_index//")"
                             ts%value = adjoint%add_expr(expr_var(fresh))
                             ignored = adjoint%add_stmt(ts)
                         end block
@@ -1251,7 +1257,7 @@ contains
             rec%body_lhs(rec%n_body) = fresh
             rec%body_is_accum(rec%n_body) = &
                 is_known_name(shape%accumulators, shape%n_accumulators, &
-                              primal%stmts(i)%target)
+                primal%stmts(i)%target)
             if (index(primal%stmts(i)%target, "(") > 0) then
                 ! An array-element write: its adjoint is a scatter, and the
                 ! written value survives the loop so nothing is saved.
@@ -1262,7 +1268,7 @@ contains
                 cycle
             end if
             if (is_known_name(shape%carried, shape%n_carried, &
-                              primal%stmts(i)%target)) then
+                primal%stmts(i)%target)) then
                 ! Renamed like any other in-body assignment; what makes it
                 ! special is only that its final version feeds the next
                 ! iteration, which is handled at the end of the loop.
@@ -1280,7 +1286,7 @@ contains
                     integer :: terms(64), signs(64), n_terms, k2
                     logical :: split_ok
                     call split_accumulation(adjoint, s%value, fresh, terms, &
-                                            signs, n_terms, split_ok)
+                        signs, n_terms, split_ok)
                     if (.not. split_ok) then
                         status%ok = .false.
                         status%message = "reverse mode: could not split the "// &
@@ -1331,11 +1337,11 @@ contains
     end subroutine emit_loop_forward
 
     subroutine build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
-                                   is_element, &
-                                   n_rec, loops, n_loops, branches, n_branches, &
-                                   calls, n_calls, &
-                                   order_kind, order_index, n_order, &
-                                   spec, dependent, suffix, active, status)
+            is_element, &
+            n_rec, loops, n_loops, branches, n_branches, &
+            calls, n_calls, &
+            order_kind, order_index, n_order, &
+            spec, dependent, suffix, active, status)
         !! Walk backwards, accumulating adjoints.
         !!
         !! Straight-line statements are inverted directly against their SSA
@@ -1384,7 +1390,7 @@ contains
         do k = 1, n_loops
             do i = 1, loops(k)%shape%n_accumulators
                 call declare_adjoint(primal, adjoint, ssa, &
-                                     trim(loops(k)%accum_names(i)), suffix)
+                    trim(loops(k)%accum_names(i)), suffix)
                 s%kind = FAD_ASSIGN
                 s%target = trim(loops(k)%accum_names(i))//suffix
                 s%value = zero
@@ -1392,7 +1398,7 @@ contains
             end do
             do i = 1, loops(k)%n_carried
                 call declare_adjoint(primal, adjoint, ssa, &
-                                     trim(loops(k)%carried_name(i)), suffix)
+                    trim(loops(k)%carried_name(i)), suffix)
                 s%kind = FAD_ASSIGN
                 s%target = trim(loops(k)%carried_name(i))//suffix
                 s%value = zero
@@ -1408,7 +1414,7 @@ contains
                     cycle
                 end if
                 call declare_adjoint(primal, adjoint, ssa, &
-                                     trim(loops(k)%body_lhs(i)), suffix)
+                    trim(loops(k)%body_lhs(i)), suffix)
                 s%kind = FAD_ASSIGN
                 s%target = trim(loops(k)%body_lhs(i))//suffix
                 s%value = zero
@@ -1417,7 +1423,7 @@ contains
         end do
         do k = 1, n_branches
             call zero_branch_adjoints(primal, adjoint, ssa, branches(k), suffix, &
-                                      active, zero)
+                active, zero)
         end do
         do k = 1, n_calls
             call zero_call_adjoints(primal, adjoint, ssa, calls(k), suffix, zero)
@@ -1454,14 +1460,14 @@ contains
                     seed_expr = adjoint%add_expr(expr_var(shadow_element( &
                         trim(lhs_names(i)), suffix, dependent)))
                     call accumulate(primal, adjoint, rhs_exprs(i), seed_expr, &
-                                    ssa, suffix, active, n_tmp, status)
+                        ssa, suffix, active, n_tmp, status)
                     if (.not. status%ok) return
                     block
                         type(fad_stmt_t) :: zs
                         integer :: zignored
                         zs%kind = FAD_ASSIGN
                         zs%target = shadow_element(trim(lhs_names(i)), suffix, &
-                                                   dependent)
+                            dependent)
                         zs%value = adjoint%add_expr( &
                             expr_const("0.0"//adjoint%real_suffix))
                         zignored = adjoint%add_stmt(zs)
@@ -1471,18 +1477,18 @@ contains
                 if (.not. adjoint_is_live(primal, ssa, lhs_names(i), active)) cycle
                 seed_expr = adjoint%add_expr(expr_var(trim(lhs_names(i))//suffix))
                 call accumulate(primal, adjoint, rhs_exprs(i), seed_expr, ssa, &
-                                suffix, active, n_tmp, status)
+                    suffix, active, n_tmp, status)
             case (ORDER_BRANCH)
                 call emit_branch_reverse(primal, adjoint, ssa, &
-                                         branches(order_index(k)), suffix, &
-                                         active, n_tmp, status)
+                    branches(order_index(k)), suffix, &
+                    active, n_tmp, status)
             case (ORDER_LOOP)
                 call emit_loop_reverse(primal, adjoint, ssa, &
-                                       loops(order_index(k)), suffix, &
-                                       active, n_tmp, status)
+                    loops(order_index(k)), suffix, &
+                    active, n_tmp, status)
             case (ORDER_CALL)
                 call emit_call_reverse(adjoint, calls(order_index(k)), &
-                                       suffix, status)
+                    suffix, status)
             end select
             if (.not. status%ok) return
         end do
@@ -1538,11 +1544,11 @@ contains
         if (n_lines == 0) then
             status%ok = .false.
             status%message = "no reverse rule body for the call to '"// &
-                             rec%name//"'"
+                rec%name//"'"
             return
         end if
         allocate (args(size(rec%args)), tangents(size(rec%args)), &
-                  adjoints(size(rec%args)))
+            adjoints(size(rec%args)))
         do i = 1, size(rec%args)
             args(i) = rec%args(i)
             tangents(i) = trim(rec%args(i))//suffix
@@ -1550,7 +1556,7 @@ contains
         end do
         do i = 1, n_lines
             line = call_rule_substitute(rec%name, "adjoint", i, args, tangents, &
-                                        adjoints)
+                adjoints)
             s%kind = FAD_ASSIGN
             s%target = "!fad_raw"
             s%value = adjoint%add_expr(expr_const(line))
@@ -1559,7 +1565,7 @@ contains
     end subroutine emit_call_reverse
 
     subroutine zero_branch_adjoints(primal, adjoint, ssa, rec, suffix, active, &
-                                    zero)
+            zero)
         !! Declare and zero every adjoint a branch introduces.
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: adjoint
@@ -1590,7 +1596,7 @@ contains
         do i = 1, rec%n_merge
             if (.not. adjoint_is_live(primal, ssa, rec%merge_name(i), active)) cycle
             call declare_adjoint(primal, adjoint, ssa, trim(rec%merge_name(i)), &
-                                 suffix)
+                suffix)
             s%kind = FAD_ASSIGN
             s%target = trim(rec%merge_name(i))//suffix
             s%value = zero
@@ -1599,7 +1605,7 @@ contains
     end subroutine zero_branch_adjoints
 
     subroutine emit_branch_reverse(primal, adjoint, ssa, rec, suffix, active, &
-                                   n_tmp, status)
+            n_tmp, status)
         !! The adjoint of one if/else.
         !!
         !! The condition is re-evaluated, not recorded: its operands are SSA
@@ -1623,7 +1629,7 @@ contains
 
         do i = 1, rec%n_merge
             if (.not. adjoint_is_live(primal, ssa, rec%merge_from_then(i), &
-                                      active)) cycle
+                active)) cycle
             s%kind = FAD_ASSIGN
             s%target = trim(rec%merge_from_then(i))//suffix
             lhs = adjoint%add_expr(expr_var(trim(rec%merge_from_then(i))//suffix))
@@ -1635,7 +1641,7 @@ contains
             if (.not. adjoint_is_live(primal, ssa, rec%then_lhs(i), active)) cycle
             seed_expr = adjoint%add_expr(expr_var(trim(rec%then_lhs(i))//suffix))
             call accumulate(primal, adjoint, rec%then_rhs(i), seed_expr, ssa, &
-                            suffix, active, n_tmp, status)
+                suffix, active, n_tmp, status)
             if (.not. status%ok) return
         end do
 
@@ -1645,7 +1651,7 @@ contains
 
         do i = 1, rec%n_merge
             if (.not. adjoint_is_live(primal, ssa, rec%merge_from_else(i), &
-                                      active)) cycle
+                active)) cycle
             s%kind = FAD_ASSIGN
             s%target = trim(rec%merge_from_else(i))//suffix
             lhs = adjoint%add_expr(expr_var(trim(rec%merge_from_else(i))//suffix))
@@ -1657,7 +1663,7 @@ contains
             if (.not. adjoint_is_live(primal, ssa, rec%else_lhs(i), active)) cycle
             seed_expr = adjoint%add_expr(expr_var(trim(rec%else_lhs(i))//suffix))
             call accumulate(primal, adjoint, rec%else_rhs(i), seed_expr, ssa, &
-                            suffix, active, n_tmp, status)
+                suffix, active, n_tmp, status)
             if (.not. status%ok) return
         end do
 
@@ -2003,7 +2009,7 @@ contains
     end function ends_with
 
     subroutine emit_loop_reverse(primal, adjoint, ssa, rec, suffix, active, &
-                                 n_tmp, status)
+            n_tmp, status)
         !! The adjoint of one reduction loop.
         !!
         !! Emitted in **ascending** index order on purpose. The accumulator's
@@ -2107,14 +2113,14 @@ contains
                     expr_var(trim(rec%body_lhs(i))//suffix))
                 if (rec%body_sign(i) < 0) seed_expr = fad_neg(adjoint, seed_expr)
                 call accumulate(primal, adjoint, rec%body_rhs(i), seed_expr, &
-                                ssa, suffix, active, n_tmp, status)
+                    ssa, suffix, active, n_tmp, status)
                 if (.not. status%ok) return
 
             else if (rec%body_sign(i) == ELEMENT_TARGET) then
                 seed_expr = adjoint%add_expr(expr_var(adjoint_element( &
                     trim(rec%body_lhs(i)), suffix)))
                 call accumulate(primal, adjoint, rec%body_rhs(i), seed_expr, &
-                                ssa, suffix, active, n_tmp, status)
+                    ssa, suffix, active, n_tmp, status)
                 if (.not. status%ok) return
                 ! That element's adjoint belongs to this iteration alone.
                 s%kind = FAD_ASSIGN
@@ -2124,11 +2130,11 @@ contains
 
             else
                 if (.not. adjoint_is_live(primal, ssa, rec%body_lhs(i), &
-                                          active)) cycle
+                    active)) cycle
                 seed_expr = adjoint%add_expr( &
                     expr_var(trim(rec%body_lhs(i))//suffix))
                 call accumulate(primal, adjoint, rec%body_rhs(i), seed_expr, &
-                                ssa, suffix, active, n_tmp, status)
+                    ssa, suffix, active, n_tmp, status)
                 if (.not. status%ok) return
                 s%kind = FAD_ASSIGN
                 s%target = trim(rec%body_lhs(i))//suffix
@@ -2197,7 +2203,7 @@ contains
     end subroutine declare_adjoint
 
     recursive subroutine accumulate(primal, adjoint, idx, seed, ssa, suffix, &
-                                    active, n_tmp, status)
+            active, n_tmp, status)
         !! Push the adjoint `seed` through expression `idx`.
         !!
         !! Partials are obtained by seeding the forward rule with one for the
@@ -2255,9 +2261,9 @@ contains
                     partial = fad_mul(adjoint, two, node_args(1))
                     contrib = fad_mul(adjoint, seed, partial)
                     call materialise(primal, adjoint, contrib, ssa, n_tmp, &
-                                     child_seed)
+                        child_seed)
                     call accumulate(primal, adjoint, node_args(1), child_seed, &
-                                    ssa, suffix, active, n_tmp, status)
+                        ssa, suffix, active, n_tmp, status)
                 end if
                 return
             end if
@@ -2265,19 +2271,19 @@ contains
                 ! Nothing downstream of a constant subtree has an adjoint, so
                 ! computing its partial would only emit dead temporaries.
                 if (.not. carries_adjoint(primal, adjoint, node_args(j), ssa, &
-                                          active)) cycle
+                    active)) cycle
                 if (j == 1) then
                     partial = jvp_binop(adjoint, node_text, node_args(1), &
-                                        node_args(2), one, 0)
+                        node_args(2), one, 0)
                 else
                     partial = jvp_binop(adjoint, node_text, node_args(1), &
-                                        node_args(2), 0, one)
+                        node_args(2), 0, one)
                 end if
                 if (partial == 0) cycle
                 contrib = fad_mul(adjoint, seed, partial)
                 call materialise(primal, adjoint, contrib, ssa, n_tmp, child_seed)
                 call accumulate(primal, adjoint, node_args(j), child_seed, ssa, &
-                                suffix, active, n_tmp, status)
+                    suffix, active, n_tmp, status)
                 if (.not. status%ok) return
             end do
 
@@ -2288,7 +2294,7 @@ contains
             contrib = fad_mul(adjoint, seed, partial)
             call materialise(primal, adjoint, contrib, ssa, n_tmp, child_seed)
             call accumulate(primal, adjoint, node_args(1), child_seed, ssa, &
-                            suffix, active, n_tmp, status)
+                suffix, active, n_tmp, status)
 
         case (FAD_CALL)
             if (.not. has_rule(node_text)) then
@@ -2301,7 +2307,7 @@ contains
             if (trim(node_text) == "sum") then
                 if (size(node_args) > 0) then
                     call accumulate(primal, adjoint, node_args(1), seed, ssa, &
-                                    suffix, active, n_tmp, status)
+                        suffix, active, n_tmp, status)
                 end if
                 return
             end if
@@ -2309,7 +2315,7 @@ contains
             allocate (dargs(size(node_args)))
             do j = 1, size(node_args)
                 if (.not. carries_adjoint(primal, adjoint, node_args(j), ssa, &
-                                          active)) cycle
+                    active)) cycle
                 dargs = 0
                 dargs(j) = one
                 partial = jvp_call(adjoint, node_text, node_args, dargs)
@@ -2317,7 +2323,7 @@ contains
                 contrib = fad_mul(adjoint, seed, partial)
                 call materialise(primal, adjoint, contrib, ssa, n_tmp, child_seed)
                 call accumulate(primal, adjoint, node_args(j), child_seed, ssa, &
-                                suffix, active, n_tmp, status)
+                    suffix, active, n_tmp, status)
                 if (.not. status%ok) return
             end do
 
@@ -2356,7 +2362,7 @@ contains
     end function index_text
 
     recursive logical function carries_adjoint(primal, adjoint, idx, ssa, active) &
-        result(yes)
+            result(yes)
         !! True when the subtree reads at least one active variable, and so has
         !! an adjoint worth accumulating.
         type(fad_proc_t), intent(in) :: primal
@@ -2382,7 +2388,7 @@ contains
         end select
         do i = 1, size(adjoint%exprs(idx)%args)
             if (carries_adjoint(primal, adjoint, adjoint%exprs(idx)%args(i), &
-                                ssa, active)) then
+                ssa, active)) then
                 yes = .true.
                 return
             end if

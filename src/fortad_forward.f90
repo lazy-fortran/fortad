@@ -7,14 +7,14 @@ module fortad_forward
     !! structural zero produce no code at all: that is activity analysis falling
     !! out of the zero-aware rule builders rather than being a separate pass.
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-                        expr_const, expr_var, expr_binop, expr_unop, expr_call, &
-                        FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
-                        FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
-                        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
-                        FAD_INTENT_OUT, FAD_INTENT_INOUT, FAD_INTENT_NONE
+        expr_const, expr_var, expr_binop, expr_unop, expr_call, &
+        FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
+        FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
+        FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
+        FAD_INTENT_OUT, FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule
     use fortad_registry, only: call_rule_has, call_rule_lines, &
-                               call_rule_substitute
+        call_rule_substitute
     use fortad_emit, only: emit_expr
     implicit none
     private
@@ -60,6 +60,7 @@ contains
         type(fad_proc_t), intent(out) :: tangent
         type(forward_status_t), intent(out) :: status
         character(len=:), allocatable :: suffix, ndir
+        character(len=256) :: decl_name, decl_type, decl_dims
         logical, allocatable :: active(:)
         integer :: i, ignored
 
@@ -85,14 +86,17 @@ contains
         if (allocated(primal%real_suffix)) tangent%real_suffix = primal%real_suffix
         ! The derivative names the same kinds as the primal, so it needs the
         ! same imports.
-        if (allocated(primal%uses)) then
-            tangent%uses = primal%uses
+        if (primal%n_uses > 0 .and. allocated(primal%uses)) then
+            allocate (character(len=256) :: tangent%uses(primal%n_uses))
+            do i = 1, primal%n_uses
+                tangent%uses(i) = primal%uses(i)
+            end do
             tangent%n_uses = primal%n_uses
         end if
         tangent%is_pure = .not. has_calls(primal)
 
         call build_signature(primal, tangent, active, suffix, spec%vector, ndir, &
-                             spec%with_primal)
+            spec%with_primal)
         call build_body(primal, tangent, active, suffix, spec%vector, status)
         if (.not. status%ok) return
 
@@ -102,10 +106,26 @@ contains
         do i = 1, primal%n_decls
             if (is_dummy(primal, primal%decls(i)%name)) cycle
             if (primal%decls(i)%is_result) cycle
-            ignored = tangent%add_decl(strip_intent(primal%decls(i)))
+            decl_name = trim(primal%decls(i)%name)
+            decl_type = ""
+            if (allocated(primal%decls(i)%type_name)) then
+                decl_type = primal%decls(i)%type_name
+            end if
+            decl_dims = ""
+            if (allocated(primal%decls(i)%dims)) then
+                decl_dims = primal%decls(i)%dims
+            end if
+            ignored = tangent%add_decl_fields(decl_name, decl_type, &
+                FAD_INTENT_NONE, primal%decls(i)%is_value, &
+                primal%decls(i)%is_array, primal%decls(i)%is_contiguous, &
+                .false., decl_dims)
             if (active(i)) then
-                call add_tangent_decl(tangent, primal%decls(i), suffix, &
-                                      FAD_INTENT_NONE, spec%vector, ndir)
+                call add_tangent_decl(tangent, decl_name, decl_type, &
+                    primal%decls(i)%is_value, &
+                    primal%decls(i)%is_array, &
+                    primal%decls(i)%is_contiguous, &
+                    decl_dims, suffix, &
+                    FAD_INTENT_NONE, spec%vector, ndir)
             end if
         end do
     end subroutine differentiate_forward
@@ -123,7 +143,7 @@ contains
         type(forward_status_t), intent(inout) :: status
         integer :: i, j, di
         logical :: changed
-        character(len=:), allocatable :: base
+        integer :: target_open
 
         allocate (active(max(1, primal%n_decls)))
         active = .false.
@@ -133,7 +153,7 @@ contains
             if (di == 0) then
                 status%ok = .false.
                 status%message = "independent '"//trim(spec%independents(i))// &
-                                 "' is not declared in "//primal%name
+                    "' is not declared in "//primal%name
                 return
             end if
             active(di) = .true.
@@ -162,8 +182,13 @@ contains
                 end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 if (.not. expr_reads_active(primal, primal%stmts(j)%value, active)) cycle
-                base = target_base(primal%stmts(j)%target)
-                di = primal%decl_index(base)
+                target_open = index(primal%stmts(j)%target, "(")
+                if (target_open > 1) then
+                    di = primal%decl_index( &
+                        primal%stmts(j)%target(:target_open - 1))
+                else
+                    di = primal%decl_index(primal%stmts(j)%target)
+                end if
                 if (di > 0) then
                     if (.not. active(di)) then
                         active(di) = .true.
@@ -227,7 +252,7 @@ contains
         if (di <= 0 .or. di > p%n_decls) return
         if (.not. allocated(p%decls(di)%type_name)) return
         yes = index(p%decls(di)%type_name, "real") == 1 .or. &
-              index(p%decls(di)%type_name, "REAL") == 1
+            index(p%decls(di)%type_name, "REAL") == 1
     end function is_real_decl
 
     recursive logical function expr_reads_active(p, idx, active) result(yes)
@@ -256,7 +281,7 @@ contains
     end function expr_reads_active
 
     subroutine build_signature(primal, tangent, active, suffix, vector, ndir, &
-                               with_primal)
+            with_primal)
         !! Dummy arguments: every primal argument, each active one followed by
         !! its tangent, then the result and its tangent for a function. In
         !! vector mode the direction count leads the list.
@@ -268,53 +293,67 @@ contains
         character(len=*), intent(in) :: ndir
         logical, intent(in) :: with_primal
         character(len=64), allocatable :: names(:)
+        character(len=256) :: decl_name, decl_type, decl_dims
         integer :: i, n, di, ignored
-        type(fad_decl_t) :: d
+        logical :: decl_value, decl_array, decl_contiguous
 
         allocate (names(2*(size(primal%params) + 3)))
         n = 0
         if (vector) then
             n = n + 1
             names(n) = ndir
-            d%name = ndir
-            d%type_name = "integer"
-            d%intent = FAD_INTENT_IN
-            ignored = tangent%add_decl(d)
-            d = fad_decl_t()
+            ignored = tangent%add_decl_fields(ndir, "integer", FAD_INTENT_IN, &
+                .false., .false., .false., .false., "")
         end if
         do i = 1, size(primal%params)
             di = primal%decl_index(trim(primal%params(i)))
             ! An active `intent(out)` dummy is a primal value the caller asked
             ! not to be given back. Inactive ones stay: a status flag is not a
             ! derivative output and dropping it would change the contract.
+            if (di > 0) then
+                decl_name = trim(primal%decls(di)%name)
+                decl_type = ""
+                if (allocated(primal%decls(di)%type_name)) then
+                    decl_type = primal%decls(di)%type_name
+                end if
+                decl_dims = ""
+                if (allocated(primal%decls(di)%dims)) then
+                    decl_dims = primal%decls(di)%dims
+                end if
+                decl_value = primal%decls(di)%is_value
+                decl_array = primal%decls(di)%is_array
+                decl_contiguous = primal%decls(di)%is_contiguous
+            end if
             if (di > 0 .and. .not. with_primal) then
                 if (active(di) .and. primal%decls(di)%intent == FAD_INTENT_OUT) then
                     n = n + 1
                     names(n) = trim(primal%params(i))//suffix
-                    call add_tangent_decl(tangent, primal%decls(di), suffix, &
-                                          FAD_INTENT_OUT, vector, ndir)
+                    call add_tangent_decl(tangent, decl_name, decl_type, &
+                        decl_value, decl_array, decl_contiguous, &
+                        decl_dims, suffix, &
+                        FAD_INTENT_OUT, vector, ndir)
                     ! Dropped from the signature but still written by the primal
                     ! statements, so it stays as a local. Whether those writes
                     ! survive is dead-store elimination's decision, not this
                     ! routine's - and an undeclared name would not compile.
-                    d = primal%decls(di)
-                    d%intent = FAD_INTENT_NONE
-                    d%is_result = .false.
-                    ignored = tangent%add_decl(d)
-                    d = fad_decl_t()
+                    ignored = tangent%add_decl_fields(decl_name, decl_type, &
+                        FAD_INTENT_NONE, decl_value, decl_array, decl_contiguous, &
+                        .false., decl_dims)
                     cycle
                 end if
             end if
             n = n + 1
             names(n) = trim(primal%params(i))
             if (di == 0) cycle
-            ignored = tangent%add_decl(primal%decls(di))
+            ignored = tangent%add_decl_fields(decl_name, decl_type, &
+                primal%decls(di)%intent, decl_value, decl_array, decl_contiguous, &
+                primal%decls(di)%is_result, decl_dims)
             if (.not. active(di)) cycle
             n = n + 1
             names(n) = trim(primal%params(i))//suffix
-            call add_tangent_decl(tangent, primal%decls(di), suffix, &
-                                  tangent_intent(primal%decls(di)%intent), &
-                                  vector, ndir)
+            call add_tangent_decl(tangent, decl_name, decl_type, decl_value, &
+                decl_array, decl_contiguous, decl_dims, suffix, &
+                tangent_intent(primal%decls(di)%intent), vector, ndir)
         end do
 
         if (primal%is_function) then
@@ -324,17 +363,33 @@ contains
                 names(n) = primal%result_name
             end if
             if (di > 0) then
-                d = primal%decls(di)
-                d%intent = FAD_INTENT_OUT
-                if (with_primal) ignored = tangent%add_decl(d)
+                decl_name = trim(primal%decls(di)%name)
+                decl_type = ""
+                if (allocated(primal%decls(di)%type_name)) then
+                    decl_type = primal%decls(di)%type_name
+                end if
+                decl_dims = ""
+                if (allocated(primal%decls(di)%dims)) then
+                    decl_dims = primal%decls(di)%dims
+                end if
+                decl_value = primal%decls(di)%is_value
+                decl_array = primal%decls(di)%is_array
+                decl_contiguous = primal%decls(di)%is_contiguous
+                if (with_primal) ignored = tangent%add_decl_fields( &
+                    decl_name, decl_type, FAD_INTENT_OUT, decl_value, decl_array, &
+                    decl_contiguous, .true., decl_dims)
                 n = n + 1
                 names(n) = primal%result_name//suffix
-                call add_tangent_decl(tangent, d, suffix, FAD_INTENT_OUT, &
-                                      vector, ndir)
+                call add_tangent_decl(tangent, decl_name, decl_type, decl_value, &
+                    decl_array, decl_contiguous, decl_dims, suffix, &
+                    FAD_INTENT_OUT, vector, ndir)
             end if
         end if
 
-        tangent%params = names(1:n)
+        allocate (character(len=64) :: tangent%params(n))
+        do i = 1, n
+            tangent%params(i) = names(i)
+        end do
     end subroutine build_signature
 
     integer function tangent_intent(primal_intent) result(out)
@@ -352,8 +407,9 @@ contains
         end select
     end function tangent_intent
 
-    subroutine add_tangent_decl(tangent, primal_decl, suffix, intent_code, &
-                                vector, ndir)
+    subroutine add_tangent_decl(tangent, name, type_name, is_value, is_array, &
+            is_contiguous, dims, suffix, intent_code, &
+            vector, ndir)
         !! Declare the tangent counterpart of a primal entity.
         !!
         !! In vector mode the direction axis goes **first**, because Fortran
@@ -362,48 +418,37 @@ contains
         !! and `a_d(:, i)` is then a contiguous vector the compiler can load
         !! and fuse as a unit.
         type(fad_proc_t), intent(inout) :: tangent
-        type(fad_decl_t), intent(in) :: primal_decl
+        character(len=*), intent(in) :: name, type_name, dims
+        logical, intent(in) :: is_value, is_array, is_contiguous
         character(len=*), intent(in) :: suffix
         integer, intent(in) :: intent_code
         logical, intent(in), optional :: vector
         character(len=*), intent(in), optional :: ndir
-        type(fad_decl_t) :: d
         integer :: ignored
         logical :: vec
 
         vec = .false.
         if (present(vector)) vec = vector
 
-        d = primal_decl
-        d%name = primal_decl%name//suffix
         ! VALUE belongs to the primal dummy, not to its tangent. A tangent is
         ! written by the generated routine, so VALUE would conflict with the
         ! required INTENT(INOUT) contract.
-        d%is_value = .false.
-        d%intent = intent_code
-        d%is_result = .false.
         if (vec) then
-            if (d%is_array .and. allocated(d%dims)) then
-                d%dims = ndir//", "//d%dims
+            if (is_array .and. len_trim(dims) > 0) then
+                ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
+                    intent_code, .false., .true., .false., .false., &
+                    ndir//", "//trim(dims))
             else
-                d%dims = ndir
+                ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
+                    intent_code, .false., .true., .false., .false., ndir)
             end if
-            d%is_array = .true.
             ! Contiguity of the primal says nothing about the tangent block,
             ! and a wrong `contiguous` is a promise the caller may not keep.
-            d%is_contiguous = .false.
+        else
+            ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
+                intent_code, .false., is_array, is_contiguous, .false., dims)
         end if
-        ignored = tangent%add_decl(d)
     end subroutine add_tangent_decl
-
-    type(fad_decl_t) function strip_intent(d) result(out)
-        !! A local copy of a declaration with no intent, for use as a local.
-        type(fad_decl_t), intent(in) :: d
-
-        out = d
-        out%intent = FAD_INTENT_NONE
-        out%is_result = .false.
-    end function strip_intent
 
     subroutine build_body(primal, tangent, active, suffix, vector, status)
         !! Walk the primal statements, emitting tangent then primal.
@@ -424,7 +469,7 @@ contains
                     if (di > 0) then
                         if (active(di)) then
                             dexpr = tangent_of(primal, tangent, ps%value, active, &
-                                               suffix, vector, status)
+                                suffix, vector, status)
                             if (.not. status%ok) return
                             s%kind = FAD_ASSIGN
                             s%target = tangent_name(ps%target, suffix, vector)
@@ -463,7 +508,7 @@ contains
 
                 case (FAD_CALL_STMT)
                     call emit_call_tangent(primal, tangent, ps, active, suffix, &
-                                           vector, status)
+                        vector, status)
                     if (.not. status%ok) return
 
                 case default
@@ -476,7 +521,7 @@ contains
     end subroutine build_body
 
     subroutine emit_call_tangent(primal, tangent, ps, active, suffix, vector, &
-                                 status)
+            status)
         !! Apply a registered statement rule to a subroutine call.
         !!
         !! The call is opaque to fortad: it emits the registered tangent
@@ -537,13 +582,13 @@ contains
             s%target = "!fad_raw"
             s%value = tangent%add_expr(expr_const( &
                 call_rule_substitute(ps%target, "tangent", i, args, tangents, &
-                                     adjoints)))
+                adjoints)))
             ignored = tangent%add_stmt(s)
         end do
     end subroutine emit_call_tangent
 
     recursive integer function tangent_of(primal, tangent, idx, active, suffix, &
-                                          vector, status) result(out)
+            vector, status) result(out)
         !! Tangent of a primal expression, as an expression in `tangent`.
         !!
         !! In vector mode a tangent leaf carries the whole direction block:
@@ -629,7 +674,7 @@ contains
                 do i = 1, size(pe%args)
                     args(i) = copy_expr(primal, tangent, pe%args(i))
                     dargs(i) = tangent_of(primal, tangent, pe%args(i), active, &
-                                          suffix, vector, status)
+                        suffix, vector, status)
                     if (.not. status%ok) return
                 end do
                 if (all(dargs == 0)) then

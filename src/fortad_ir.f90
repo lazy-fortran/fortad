@@ -19,18 +19,18 @@ module fortad_ir
     integer, parameter :: BUCKETS = 4096
 
     ! Expression kinds.
-    integer, parameter, public :: FAD_CONST = 1     !! literal, text in `text`
-    integer, parameter, public :: FAD_VAR = 2       !! variable reference by name
-    integer, parameter, public :: FAD_BINOP = 3     !! text = operator, 2 args
-    integer, parameter, public :: FAD_UNOP = 4      !! text = operator, 1 arg
-    integer, parameter, public :: FAD_CALL = 5      !! text = name, n args
-    integer, parameter, public :: FAD_INDEX = 6     !! text = array name, n subscripts
+    integer, parameter, public :: FAD_CONST = 1 !! literal, text in `text`
+    integer, parameter, public :: FAD_VAR = 2 !! variable reference by name
+    integer, parameter, public :: FAD_BINOP = 3 !! text = operator, 2 args
+    integer, parameter, public :: FAD_UNOP = 4 !! text = operator, 1 arg
+    integer, parameter, public :: FAD_CALL = 5 !! text = name, n args
+    integer, parameter, public :: FAD_INDEX = 6 !! text = array name, n subscripts
 
     ! Statement kinds.
-    integer, parameter, public :: FAD_ASSIGN = 1    !! target_text = value
-    integer, parameter, public :: FAD_DO = 2        !! do var = a, b [, c]
+    integer, parameter, public :: FAD_ASSIGN = 1 !! target_text = value
+    integer, parameter, public :: FAD_DO = 2 !! do var = a, b [, c]
     integer, parameter, public :: FAD_END_DO = 3
-    integer, parameter, public :: FAD_IF = 4        !! if (cond) then
+    integer, parameter, public :: FAD_IF = 4 !! if (cond) then
     integer, parameter, public :: FAD_ELSE = 5
     integer, parameter, public :: FAD_END_IF = 6
     !! `call name(args...)`. The arguments live in `call_args`; the name is in
@@ -73,7 +73,7 @@ module fortad_ir
     type, public :: fad_decl_t
         !! A declared entity: dummy argument, result, or local.
         character(len=:), allocatable :: name
-        character(len=:), allocatable :: type_name   !! "real(dp)", "integer"
+        character(len=:), allocatable :: type_name !! "real(dp)", "integer"
         integer :: intent = FAD_INTENT_NONE
         logical :: is_value = .false.
         logical :: is_array = .false.
@@ -124,11 +124,12 @@ module fortad_ir
         procedure :: add_expr => proc_add_expr
         procedure :: add_stmt => proc_add_stmt
         procedure :: add_decl => proc_add_decl
+        procedure :: add_decl_fields => proc_add_decl_fields
         procedure :: decl_index => proc_decl_index
     end type fad_proc_t
 
     public :: expr_const, expr_var, expr_binop, expr_unop, expr_call
-    public :: fad_expr_equal
+    public :: fad_expr_equal, copy_decl
 
 contains
 
@@ -230,7 +231,7 @@ contains
 
         existing = self%decl_index(d%name)
         if (existing > 0) then
-            self%decls(existing) = d
+            call copy_decl(self%decls(existing), d)
             idx = existing
             return
         end if
@@ -242,9 +243,84 @@ contains
             call move_alloc(tmp, self%decls)
         end if
         self%n_decls = self%n_decls + 1
-        self%decls(self%n_decls) = d
+        call copy_decl(self%decls(self%n_decls), d)
         idx = self%n_decls
     end function proc_add_decl
+
+    subroutine copy_decl(out, source)
+        !! Copy declaration metadata without compiler-generated assignment of
+        !! a derived type carrying several deferred-length allocatables.
+        !! nvfortran's older front end can corrupt an unrelated allocatable
+        !! descriptor when that intrinsic assignment is repeated in a loop.
+        type(fad_decl_t), intent(inout) :: out
+        type(fad_decl_t), intent(in) :: source
+
+        if (allocated(out%name)) deallocate (out%name)
+        if (allocated(out%type_name)) deallocate (out%type_name)
+        if (allocated(out%dims)) deallocate (out%dims)
+        if (allocated(source%name)) out%name = source%name
+        if (allocated(source%type_name)) out%type_name = source%type_name
+        if (allocated(source%dims)) out%dims = source%dims
+        out%intent = source%intent
+        out%is_value = source%is_value
+        out%is_array = source%is_array
+        out%is_contiguous = source%is_contiguous
+        out%is_result = source%is_result
+    end subroutine copy_decl
+
+    integer function proc_add_decl_fields(self, name, type_name, intent, &
+            is_value, is_array, is_contiguous, &
+            is_result, dims) result(idx)
+        !! Append declaration scalars and strings directly. This is the
+        !! compiler-neutral path for transformation code that repeatedly
+        !! mirrors declarations; it avoids passing an allocatable-component
+        !! derived value through nvfortran's argument machinery.
+        class(fad_proc_t), intent(inout) :: self
+        character(len=*), intent(in) :: name, type_name, dims
+        integer, intent(in) :: intent
+        logical, intent(in) :: is_value, is_array, is_contiguous, is_result
+        type(fad_decl_t), allocatable :: tmp(:)
+        integer :: cap, existing
+
+        existing = self%decl_index(name)
+        if (existing > 0) then
+            call set_decl_fields(self%decls(existing), name, type_name, intent, &
+                is_value, is_array, is_contiguous, is_result, dims)
+            idx = existing
+            return
+        end if
+        if (.not. allocated(self%decls)) allocate (self%decls(32))
+        cap = size(self%decls)
+        if (self%n_decls >= cap) then
+            allocate (tmp(2*cap))
+            tmp(1:cap) = self%decls
+            call move_alloc(tmp, self%decls)
+        end if
+        self%n_decls = self%n_decls + 1
+        call set_decl_fields(self%decls(self%n_decls), name, type_name, intent, &
+            is_value, is_array, is_contiguous, is_result, dims)
+        idx = self%n_decls
+    end function proc_add_decl_fields
+
+    subroutine set_decl_fields(out, name, type_name, intent, is_value, &
+            is_array, is_contiguous, is_result, dims)
+        type(fad_decl_t), intent(inout) :: out
+        character(len=*), intent(in) :: name, type_name, dims
+        integer, intent(in) :: intent
+        logical, intent(in) :: is_value, is_array, is_contiguous, is_result
+
+        if (allocated(out%name)) deallocate (out%name)
+        if (allocated(out%type_name)) deallocate (out%type_name)
+        if (allocated(out%dims)) deallocate (out%dims)
+        out%name = trim(name)
+        if (len_trim(type_name) > 0) out%type_name = trim(type_name)
+        if (len_trim(dims) > 0) out%dims = trim(dims)
+        out%intent = intent
+        out%is_value = is_value
+        out%is_array = is_array
+        out%is_contiguous = is_contiguous
+        out%is_result = is_result
+    end subroutine set_decl_fields
 
     integer function proc_decl_index(self, name) result(idx)
         !! Index of the declaration for `name`, or 0.

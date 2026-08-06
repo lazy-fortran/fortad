@@ -103,7 +103,10 @@ contains
         type(compiler_frontend_result_t) :: res
         type(program_unit_query_t) :: unit
         logical :: has_callee
-        integer :: i, chosen
+        character(len=4096) :: source_header, source_param_text, source_item
+        integer :: i, chosen, source_pos, source_next, source_line
+        integer :: source_open, source_close, source_first, source_last
+        integer :: source_comma, source_depth, source_n_params
 
         opts%input_mode = INPUT_MODE_STANDARD
         opts%standardize = .false.
@@ -134,6 +137,85 @@ contains
             unit = query_program_unit(res%arena, i)
             if (.not. unit%found) cycle
             if (wanted(unit%name, proc_name, chosen)) then
+                source_header = ""
+                source_pos = 1
+                source_line = 1
+                do while (source_line < unit%line)
+                    source_next = index(source(source_pos:), new_line('a'))
+                    if (source_next == 0) exit
+                    source_pos = source_pos + source_next
+                    source_line = source_line + 1
+                end do
+                source_next = index(source(source_pos:), new_line('a'))
+                if (source_next == 0) then
+                    source_header = source(source_pos:)
+                else if (source_next > 1) then
+                    source_header = source(source_pos:source_pos + source_next - 2)
+                end if
+                source_open = index(source_header, "(")
+                source_close = 0
+                source_depth = 0
+                if (source_open > 0) then
+                    do source_comma = source_open, len_trim(source_header)
+                        if (source_header(source_comma:source_comma) == "(") then
+                            source_depth = source_depth + 1
+                        else if (source_header(source_comma:source_comma) == ")") then
+                            source_depth = source_depth - 1
+                            if (source_depth == 0) then
+                                source_close = source_comma
+                                exit
+                            end if
+                        end if
+                    end do
+                end if
+                source_n_params = 0
+                if (source_close > source_open) then
+                    source_param_text = source_header(source_open + 1:source_close - 1)
+                    if (len_trim(source_param_text) > 0) then
+                        source_n_params = 1
+                        source_depth = 0
+                        do source_comma = 1, len_trim(source_param_text)
+                            if (source_param_text(source_comma:source_comma) == "(") then
+                                source_depth = source_depth + 1
+                            else if (source_param_text(source_comma:source_comma) == ")") then
+                                source_depth = max(0, source_depth - 1)
+                            else if (source_depth == 0 .and. &
+                                    source_param_text(source_comma:source_comma) == ",") then
+                                source_n_params = source_n_params + 1
+                            end if
+                        end do
+                    end if
+                end if
+                if (allocated(proc%params)) deallocate (proc%params)
+                allocate (character(len=64) :: proc%params(source_n_params))
+                if (source_n_params > 0) then
+                    source_first = 1
+                    source_depth = 0
+                    source_n_params = 0
+                    do source_comma = 1, len_trim(source_param_text) + 1
+                        if (source_comma <= len_trim(source_param_text)) then
+                            if (source_param_text(source_comma:source_comma) == "(") then
+                                source_depth = source_depth + 1
+                            else if (source_param_text(source_comma:source_comma) == ")") then
+                                source_depth = max(0, source_depth - 1)
+                            end if
+                        end if
+                        if (source_comma > len_trim(source_param_text)) then
+                            source_last = source_comma - 1
+                            source_item = adjustl(source_param_text(source_first:source_last))
+                            source_n_params = source_n_params + 1
+                            proc%params(source_n_params) = trim(source_item)
+                            source_first = source_comma + 1
+                        else if (source_depth == 0 .and. &
+                                source_param_text(source_comma:source_comma) == ",") then
+                            source_last = source_comma - 1
+                            source_item = adjustl(source_param_text(source_first:source_last))
+                            source_n_params = source_n_params + 1
+                            proc%params(source_n_params) = trim(source_item)
+                            source_first = source_comma + 1
+                        end if
+                    end do
+                end if
                 if (trim(unit%unit_kind) == "function") then
                     call lower_function(res%arena, unit, source, proc, status)
                 else

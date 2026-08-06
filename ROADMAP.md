@@ -1032,17 +1032,54 @@ now differentiate end to end, and whether their numbers are within the
 
 ## Outstanding (2026-08-05)
 
-### Compiler gate (2026-08-06)
+### Compiler gate and nvfortran handoff (2026-08-06)
 
 The compiler matrix distinguishes Intel LLVM `ifx` from legacy `ifort`:
-`ifx` is a supported target and `ifort` is intentionally unsupported. GNU
-FortAD builds and the generated MLP product oracle pass. The downstream
-`nvfortran` 26.5 now compiles and links the split FortAD/FortFront lowering
-boundary, and a declaration-free lowering smoke test passes. The independent
-tangent-only oracle still exposes runtime heap corruption on returning from
-`lower_source` for declaration-bearing procedures such as `real(dp)`; no full
-NVIDIA runtime claim is made until that gate is resolved. Intel LLVM `ifx` is
-the supported Intel lane; legacy `ifort` is not supported.
+`ifx` is a supported target and `ifort` is intentionally unsupported. GNU,
+Flang and ifx remain the supported non-NVIDIA lanes; no ifort installation or
+compatibility promise is wanted.
+
+The FortFront nvfortran 26.5 build is green (381/381), and the FortAD
+nvfortran build compiles and links all 406 targets. The declaration-bearing
+lowering smoke now passes with `real(dp)`, a renamed `iso_fortran_env` import,
+five dummy arguments and five declarations. The unsafe FortFront dummy-
+parameter AST traversal was removed from the lowering path: parameters are
+read from the source procedure header, declaration mirroring uses scalar
+metadata fields, and deferred-length `uses(:)` and `params(:)` arrays are
+copied element by element. IR declaration copying and DCE declaration
+compaction have the same explicit ownership boundary. These changes are
+intended to cover nvfortran's allocatable-descriptor failure mode.
+
+The optimized nvfortran tangent-only oracle is **not yet signed off**. A
+debug build with the post-differentiation optimization passes temporarily
+disabled passed the finite-difference tangent oracle, but the final optimized
+nvfortran run was interrupted before completion. GNU's full 22-test gate and
+the final optimized NVIDIA gate must therefore be rerun after this handoff;
+no full NVIDIA correctness or performance claim is made yet.
+
+Remaining work, in order:
+
+1. Run the full GNU gate and the full nvfortran gate, including the independent
+   tangent-only finite-difference oracle, VJP oracle, generated-code compile
+   checks and all existing tests. If the optimized NVIDIA gate still reports
+   heap damage, isolate the remaining `fad_stmt_t`/`fad_expr_t` intrinsic
+   assignments and reverse-mode declaration copies using the same explicit
+   copy boundary.
+2. Run the supported ifx and Flang compiler lanes and record pass counts. Keep
+   ifort out of the matrix.
+3. Re-run the operation-level and scaling benchmarks on identical precision,
+   parameters, hardware and compiler flags against PyTorch/GPyTorch and
+   KeOps. Record runtime, build time, generated size, peak memory,
+   vectorization reports and stable scaling slopes; do not claim the 30%
+   target until same-machine evidence exists for both CPU and GPU.
+4. Complete the CUDA/KeOps-style matrix-free kernel lane and its backend
+   abstraction (CUDA first, CPU Fortran retained, ROCm/SYCL left as backend
+   extension points), then add the compact-support/regular-grid and tensor-
+   product-grid cases to the benchmark corpus.
+5. When a benchmark plot is regenerated, upload it to Slopbox and DM the
+   complete result table and plot URL to Zulip. The existing hard rule remains:
+   no performance announcement without the plot, workload metadata and an
+   independent correctness oracle.
 
 - The three vector-Newton routines are verified and recorded in
   `fortad-bench/results/vector_newton_fortad.csv`. This is a focused fortad
