@@ -31,7 +31,7 @@ module fortad_reverse_loop
     !! A loop that does not fit this shape - a nonlinear loop-carried
     !! recurrence, for instance - is refused by name. That needs per-iteration
     !! storage and belongs to the next milestone.
-    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
+    use fortad_ir, only: fad_proc_t, &
                         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
                         FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_BINOP, FAD_CONST, &
                         FAD_UNOP
@@ -459,6 +459,8 @@ contains
         character(len=*), intent(in) :: target
         integer :: k
 
+        associate (unused => stmt)
+        end associate
         yes = .true.
         do k = first + 1, last - 1
             if (p%stmts(k)%kind /= FAD_ASSIGN) cycle

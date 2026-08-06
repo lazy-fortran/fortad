@@ -49,6 +49,8 @@ contains
         type(lower_status_t), intent(out) :: status
         type(fad_decl_t) :: d
 
+        associate (unused => source)
+        end associate
         proc%name = unit%name
         proc%is_function = .true.
         if (allocated(unit%result_name)) then
@@ -85,6 +87,8 @@ contains
         type(fad_proc_t), intent(inout) :: proc
         type(lower_status_t), intent(out) :: status
 
+        associate (unused => source)
+        end associate
         proc%name = unit%name
         proc%is_function = .false.
         call lower_body(arena, unit%body_indices, proc, status)

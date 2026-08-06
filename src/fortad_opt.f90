@@ -442,11 +442,15 @@ contains
         n = 0
         do i = 1, p%n_stmts
             if (p%stmts(i)%kind == FAD_ASSIGN) then
-                if (allocated(p%stmts(i)%target) .and. p%stmts(i)%value > 0) then
-                    if (index(p%stmts(i)%target, "(") == 0 .and. &
-                        p%exprs(p%stmts(i)%value)%kind == FAD_VAR) then
-                        if (trim(p%stmts(i)%target) == &
-                            trim(p%exprs(p%stmts(i)%value)%text)) cycle
+                if (allocated(p%stmts(i)%target)) then
+                    if (p%stmts(i)%value > 0 .and. &
+                        p%stmts(i)%value <= p%n_exprs) then
+                        if (index(p%stmts(i)%target, "(") == 0) then
+                            if (p%exprs(p%stmts(i)%value)%kind == FAD_VAR) then
+                                if (trim(p%stmts(i)%target) == &
+                                    trim(p%exprs(p%stmts(i)%value)%text)) cycle
+                            end if
+                        end if
                     end if
                 end if
             end if
@@ -600,6 +604,8 @@ contains
         type(span_t), intent(in) :: span
         integer :: k
 
+        associate (unused => p)
+        end associate
         yes = .true.
         k = span_index(span, name)
         if (k == 0) then
@@ -1290,7 +1296,7 @@ contains
                 cycle
             end if
             call rename_one_body(p, first, last)
-            call loop_extent(p, first, first, last)
+            call refresh_loop_extent(p, first, last)
             i = last + 1
         end do
     end subroutine rename_bodies
@@ -1315,7 +1321,7 @@ contains
         do k = 1, n_names
             if (counts(k) < 2) cycle
             call rename_name(p, first, last, trim(names(k)))
-            call loop_extent(p, first, first, last)
+            call refresh_loop_extent(p, first, last)
         end do
     end subroutine rename_one_body
 
@@ -1891,7 +1897,7 @@ contains
                     call zero_start(p, first, last, j, drop)
                     if (drop > 0) then
                         call remove_stmt(p, drop)
-                        call loop_extent(p, first, first, last)
+                        call refresh_loop_extent(p, first, last)
                     end if
                 end block
                 j = j + 1
@@ -2047,7 +2053,7 @@ contains
                 cycle
             end if
             call coalesce_in_body(p, first, last, n_named)
-            call loop_extent(p, first, first, last)
+            call refresh_loop_extent(p, first, last)
             i = last + 1
         end do
     end subroutine coalesce_element_updates
@@ -2102,7 +2108,7 @@ contains
                 again = .true.
                 exit
             end do
-            if (again) call loop_extent(p, first, first, last)
+            if (again) call refresh_loop_extent(p, first, last)
         end do
     end subroutine coalesce_in_body
 
@@ -2180,6 +2186,8 @@ contains
         type(fad_decl_t) :: d
         integer :: k, di, ignored, repl
 
+        associate (unused_first => first, unused_last => last)
+        end associate
         di = p%decl_index(base)
         if (di == 0) return
         d = p%decls(di)
@@ -2807,7 +2815,7 @@ contains
                 cycle
             end if
             call share_in_body(p, first, last, n_named)
-            call loop_extent(p, first, first, last)
+            call refresh_loop_extent(p, first, last)
             i = last + 1
         end do
     end subroutine share_subexpressions
@@ -2863,7 +2871,7 @@ contains
             n_named = n_named + 1
             write (label, '(a,i0)') "fad_s", n_named
             call name_subexpression(p, first, last, best, trim(label), decl_i)
-            call loop_extent(p, first, first, last)
+            call refresh_loop_extent(p, first, last)
             again = .true.
         end do
     end subroutine share_in_body
@@ -3017,7 +3025,7 @@ contains
                 cycle
             end if
             call pack_one_body(p, first, last, n_packed)
-            call loop_extent(p, first, first, last)
+            call refresh_loop_extent(p, first, last)
             i = last + 1
         end do
     end subroutine pack_adjacent_reads
@@ -3056,7 +3064,7 @@ contains
             call emit_slice(p, first, last, trim(arrays(r)), trim(bases(r)), &
                             lo, hi, offsets(r, :), nodes(r, :), n_offsets(r), &
                             n_packed)
-            call loop_extent(p, first, first, last)
+            call refresh_loop_extent(p, first, last)
         end do
     end subroutine pack_one_body
 
@@ -3326,7 +3334,7 @@ contains
                 cycle
             end if
             call rotate_one(p, first, last, n_snap)
-            call loop_extent(p, first, first, last)
+            call refresh_loop_extent(p, first, last)
             i = last + 1
         end do
     end subroutine rotate_carried
@@ -3512,6 +3520,16 @@ contains
             end select
         end do
     end subroutine loop_extent
+
+    subroutine refresh_loop_extent(p, first, last)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(inout) :: first
+        integer, intent(out) :: last
+        integer :: lo
+
+        call loop_extent(p, first, lo, last)
+        first = lo
+    end subroutine refresh_loop_extent
 
     logical function invariant_here(p, first, last, idx) result(yes)
         !! Whether statement `idx` can be lifted out of the loop `first..last`.

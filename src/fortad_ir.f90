@@ -385,7 +385,9 @@ contains
 
         e%kind = FAD_BINOP
         e%text = op
-        e%args = [a, b]
+        allocate (e%args(2))
+        e%args(1) = a
+        e%args(2) = b
     end function expr_binop
 
     type(fad_expr_t) function expr_unop(op, a) result(e)
@@ -395,7 +397,8 @@ contains
 
         e%kind = FAD_UNOP
         e%text = op
-        e%args = [a]
+        allocate (e%args(1))
+        e%args(1) = a
     end function expr_unop
 
     type(fad_expr_t) function expr_call(name, args) result(e)

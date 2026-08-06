@@ -11,7 +11,6 @@ program test_taylor_gen_oracle
     !! Orders one and two are cross-checked against the generated first-order
     !! tangent as well, so a transformation error cannot hide behind an
     !! arithmetic error.
-    use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortad, only: fad_taylor, fad_jvp, fad_result_t
     implicit none
 

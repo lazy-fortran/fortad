@@ -185,7 +185,7 @@ contains
             col = order(k)
             c = 1
             do while (c <= pattern%n_cols)
-                if (star_allows(pattern, row_start, row_cols, colour, col, c)) exit
+                if (star_allows(row_start, row_cols, colour, col, c)) exit
                 c = c + 1
             end do
             colour(col) = c
@@ -193,14 +193,13 @@ contains
         end do
     end subroutine star_colour_columns
 
-    logical function star_allows(pattern, row_start, row_cols, colour, v, c) &
+    logical function star_allows(row_start, row_cols, colour, v, c) &
         result(ok)
         !! Whether colour `c` may be given to column `v`.
         !!
         !! Two conditions. The colouring must stay proper - no neighbour of `v`
         !! already has `c`. And no path `v - w - x - y` may end up using only
         !! two colours, which happens when `c(x) = c` and `c(y) = c(w)`.
-        type(sparsity_t), intent(in) :: pattern
         integer, intent(in) :: row_start(:), row_cols(:), colour(:), v, c
         integer :: iw, w, ix, x, iy, y
 
@@ -287,9 +286,9 @@ contains
         do j = 1, pattern%n_cols
             do k = pattern%col_start(j), pattern%col_start(j + 1) - 1
                 i = pattern%rows(k)
-                if (alone_in_row(pattern, row_start, row_cols, colour, i, j)) then
+                if (alone_in_row(row_start, row_cols, colour, i, j)) then
                     values(k) = compressed(colour(j), i)
-                else if (alone_in_row(pattern, row_start, row_cols, colour, j, i)) then
+                else if (alone_in_row(row_start, row_cols, colour, j, i)) then
                     values(k) = compressed(colour(i), j)
                 else
                     values(k) = 0.0_dp
@@ -299,10 +298,9 @@ contains
         end do
     end subroutine recover_symmetric
 
-    logical function alone_in_row(pattern, row_start, row_cols, colour, row, col) &
+    logical function alone_in_row(row_start, row_cols, colour, row, col) &
         result(yes)
         !! Whether `col` is the only column of its colour nonzero in `row`.
-        type(sparsity_t), intent(in) :: pattern
         integer, intent(in) :: row_start(:), row_cols(:), colour(:), row, col
         integer :: k, other
 

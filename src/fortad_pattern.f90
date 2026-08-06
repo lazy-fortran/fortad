@@ -210,7 +210,7 @@ contains
         integer, intent(in) :: n_names
         logical, intent(in) :: dependencies(:, :)
         logical, intent(inout) :: out(:)
-        integer :: i, name_index
+        integer :: i, j, name_index
 
         if (index <= 0 .or. index > proc%n_exprs) return
         select case (proc%exprs(index)%kind)
@@ -218,7 +218,11 @@ contains
             return
         case (FAD_VAR, FAD_INDEX)
             name_index = find_name(names, n_names, proc%exprs(index)%text)
-            if (name_index > 0) out = out .or. dependencies(name_index, :)
+            if (name_index > 0) then
+                do j = 1, size(out)
+                    if (dependencies(name_index, j)) out(j) = .true.
+                end do
+            end if
         end select
         do i = 1, size(proc%exprs(index)%args)
             call expression_dependencies(proc, proc%exprs(index)%args(i), names, &
