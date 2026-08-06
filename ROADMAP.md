@@ -657,6 +657,15 @@ problem-specific rule.
       `pass(arg)`, `nopass`, inherited bindings, overrides, and type-bound
       generics. A same-file implementation is inlined or emitted as a separate
       derivative procedure according to the existing call policy.
+      - [x] **P8.3a bounded concrete call.** A statically declared `type(t)`
+            receiver with the default implicit PASS and a same-file function is
+            normalized to an ordinary call before JVP/VJP generation. Named
+            PASS, NOPASS, inherited, generic, and deferred bindings are named
+            refusals. The compiled oracle is
+            [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90);
+            it checks generated JVP/VJP values, a central-difference JVP, the
+            adjoint seed, and all five refusal cases. This does not cover
+            active receiver cotangents, overrides, or runtime dispatch.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through

@@ -5,7 +5,9 @@ module fortad_lower_statements
         declaration_node, do_loop_node, if_node, parameter_declaration_node, &
         subroutine_call_node, use_statement_node, comment_node, &
         get_select_type_info, get_type_guard_info, component_access_query_t, &
-        query_component_access
+        query_component_access, query_derived_type, query_type_binding, &
+        derived_type_query_t, type_binding_query_t, query_program_unit, &
+        program_unit_query_t
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
@@ -511,7 +513,10 @@ contains
                 args(i) = lower_expr(arena, n%arg_indices(i), proc, status)
                 if (.not. status%ok) return
             end do
-            if (is_array_name(proc, n%name)) then
+            if (n%base_expr_index > 0) then
+                out = lower_type_bound_call(arena, n, proc, status)
+                if (.not. status%ok) return
+            else if (is_array_name(proc, n%name)) then
                 e%kind = FAD_INDEX
                 e%text = n%name
                 e%args = args
@@ -525,6 +530,222 @@ contains
                 itoa(node_line(arena, idx))
         end select
     end function lower_expr
+
+    recursive integer function lower_type_bound_call(arena, node, proc, status) &
+            result(out)
+        !! Lower one concrete same-file type-bound function call.
+        !!
+        !! The bounded contract is deliberately narrow: the receiver is a
+        !! statically declared `type(t)` object, the binding uses the default
+        !! implicit PASS argument, and the implementation is a local function.
+        !! Runtime dispatch, inherited bindings, named PASS, NOPASS, generic,
+        !! and deferred bindings remain explicit refusal cases.
+        type(ast_arena_t), intent(in) :: arena
+        type(call_or_subscript_node), intent(in) :: node
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+        type(component_access_query_t) :: access
+        type(derived_type_query_t) :: dtype
+        type(type_binding_query_t) :: binding
+        type(program_unit_query_t) :: unit
+        character(len=:), allocatable :: object_type, type_name, method, impl
+        integer, allocatable :: args(:)
+        integer :: receiver, i, j, dtype_index, binding_index
+        logical :: found_type, found_binding, found_function
+
+        out = 0
+        access = query_component_access(arena, node%base_expr_index)
+        if (.not. access%found .or. access%base_node_index <= 0) then
+            call refuse_type_bound(status, node%name, &
+                "the receiver is not a component access")
+            return
+        end if
+        if (trim(arena%entries(access%base_node_index)%node_type) /= "identifier") then
+            call refuse_type_bound(status, node%name, &
+                "only a simple concrete receiver is supported")
+            return
+        end if
+        receiver = lower_expr(arena, access%base_node_index, proc, status)
+        if (.not. status%ok) return
+        call static_object_type(arena, access%base_node_index, object_type)
+        if (.not. allocated(object_type)) then
+            call refuse_type_bound(status, node%name, &
+                "the receiver has no statically declared type")
+            return
+        end if
+        type_name = canonical_type_name(object_type)
+        if (.not. allocated(type_name)) then
+            call refuse_type_bound(status, node%name, &
+                "the receiver must be a concrete type(t) object")
+            return
+        end if
+        method = trim(access%component_name)
+        found_type = .false.
+        dtype_index = 0
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) /= "derived_type") cycle
+            dtype = query_derived_type(arena, i)
+            if (.not. dtype%found) cycle
+            if (.not. same_name(dtype%name, type_name)) cycle
+            found_type = .true.
+            dtype_index = i
+            exit
+        end do
+        if (.not. found_type) then
+            call refuse_type_bound(status, method, &
+                "the concrete type is not defined in this source")
+            return
+        end if
+        if (allocated(dtype%extends_parent)) then
+            if (len_trim(dtype%extends_parent) > 0) then
+                call refuse_type_bound(status, method, "inherited bindings are unsupported")
+                return
+            end if
+        end if
+        found_binding = .false.
+        binding_index = 0
+        if (allocated(dtype%binding_indices)) then
+            do i = 1, size(dtype%binding_indices)
+                binding = query_type_binding(arena, dtype%binding_indices(i))
+                if (.not. binding%found) cycle
+                if (.not. same_name(binding%binding_name, method)) cycle
+                found_binding = .true.
+                binding_index = dtype%binding_indices(i)
+                exit
+            end do
+        end if
+        if (.not. found_binding) then
+            call refuse_type_bound(status, method, "no local type-bound binding")
+            return
+        end if
+        binding = query_type_binding(arena, binding_index)
+        if (binding%is_generic) then
+            call refuse_type_bound(status, method, "generic bindings are unsupported")
+            return
+        end if
+        if (binding%is_deferred) then
+            call refuse_type_bound(status, method, "deferred bindings are unsupported")
+            return
+        end if
+        if (.not. binding%pass_arg) then
+            call refuse_type_bound(status, method, "NOPASS bindings are unsupported")
+            return
+        end if
+        if (allocated(binding%pass_name)) then
+            if (len_trim(binding%pass_name) > 0) then
+                call refuse_type_bound(status, method, "named PASS bindings are unsupported")
+                return
+            end if
+        end if
+        impl = trim(binding%binding_name)
+        if (allocated(binding%implementation)) then
+            if (len_trim(binding%implementation) > 0) impl = trim(binding%implementation)
+        end if
+        found_function = .false.
+        do j = 1, arena%size
+            if (.not. arena%has_node_at(j)) cycle
+            if (trim(arena%entries(j)%node_type) /= "function_def") cycle
+            unit = query_program_unit(arena, j)
+            if (unit%found .and. same_name(unit%name, impl)) then
+                found_function = .true.
+                exit
+            end if
+        end do
+        if (.not. found_function) then
+            call refuse_type_bound(status, method, &
+                "the binding implementation is not a same-file function")
+            return
+        end if
+        allocate (args(size(node%arg_indices) + 1))
+        args(1) = receiver
+        do i = 1, size(node%arg_indices)
+            args(i + 1) = lower_expr(arena, node%arg_indices(i), proc, status)
+            if (.not. status%ok) return
+        end do
+        out = proc%add_expr(expr_call(impl, args))
+    end function lower_type_bound_call
+
+    subroutine refuse_type_bound(status, name, reason)
+        type(lower_status_t), intent(inout) :: status
+        character(len=*), intent(in) :: name, reason
+
+        status%ok = .false.
+        status%message = "unsupported type-bound call '"//trim(name)//"': "//trim(reason)
+    end subroutine refuse_type_bound
+
+    recursive subroutine static_object_type(arena, idx, type_name)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        character(len=:), allocatable, intent(out) :: type_name
+        integer :: i, j
+
+        if (idx <= 0 .or. idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        select type (id => arena%entries(idx)%node)
+            type is (identifier_node)
+            do i = 1, arena%size
+                if (.not. arena%has_node_at(i)) cycle
+                select type (decl => arena%entries(i)%node)
+                    type is (declaration_node)
+                    if (allocated(decl%var_name)) then
+                        if (same_name(decl%var_name, id%name)) then
+                            if (allocated(decl%type_name)) type_name = decl%type_name
+                            return
+                        end if
+                    end if
+                    if (allocated(decl%var_names)) then
+                        do j = 1, size(decl%var_names)
+                            if (.not. same_name(decl%var_names(j), id%name)) cycle
+                            if (allocated(decl%type_name)) type_name = decl%type_name
+                            return
+                        end do
+                    end if
+                class default
+                end select
+            end do
+        class default
+        end select
+    end subroutine static_object_type
+
+    function canonical_type_name(raw) result(name)
+        character(len=*), intent(in) :: raw
+        character(len=:), allocatable :: name
+        character(len=:), allocatable :: compact
+        integer :: i
+
+        compact = ""
+        do i = 1, len_trim(raw)
+            if (raw(i:i) == " " .or. raw(i:i) == achar(9)) cycle
+            compact = compact//lower_char(raw(i:i))
+        end do
+        if (len(compact) < 7) return
+        if (compact(:5) /= "type(") return
+        if (compact(len(compact):len(compact)) /= ")") return
+        if (len(compact) <= 6) return
+        name = compact(6:len(compact) - 1)
+    end function canonical_type_name
+
+    logical function same_name(a, b) result(equal)
+        character(len=*), intent(in) :: a, b
+        integer :: i
+
+        equal = len_trim(a) == len_trim(b)
+        if (.not. equal) return
+        do i = 1, len_trim(a)
+            if (lower_char(a(i:i)) /= lower_char(b(i:i))) then
+                equal = .false.
+                return
+            end if
+        end do
+    end function same_name
+
+    character function lower_char(c)
+        character, intent(in) :: c
+
+        lower_char = c
+        if (c >= "A" .and. c <= "Z") lower_char = achar(iachar(c) + 32)
+    end function lower_char
 
     recursive function render_component_access(arena, idx, proc, status) &
             result(text)
