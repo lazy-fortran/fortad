@@ -1,7 +1,7 @@
 # Abstract and deferred bindings
 
-FortAD has a bounded positive slice for a statically known concrete child. The
-child may override a deferred binding through one intermediate level:
+FortAD supports a statically declared concrete child with at most one
+intermediate inheritance level. The child may override a deferred binding:
 
 ```fortran
 type, abstract :: base_t
@@ -29,7 +29,7 @@ end function evaluate
 The lowerer resolves `leaf_t%value` to the local `leaf_value` override, then
 inlines that body before generating both JVP and VJP code. A `type(mid_t)`
 receiver follows the corresponding `mid_value` path. The receiver is passive.
-Active fields of the receiver are still outside this slice.
+Receiver components are not differentiated in this case.
 
 The compiled oracle
 [`test_abstract_hierarchy_oracle.f90`](../../test/test_abstract_hierarchy_oracle.f90)
@@ -38,9 +38,8 @@ JVP/VJP adjoint identity. It also checks named refusals for a direct
 `class(base_t)` dispatch, an inherited-only binding, and an unresolved
 deferred binding.
 
-This is fixed dispatch, not a derivative hierarchy. The implementation does
-not yet preserve a runtime type tag through a type-bound call, emit derivative
-bindings for every child, differentiate polymorphic ownership, or define a
-rule when a perturbation changes the selected child. Those remain P8.4--P8.7
-work. Use `select type` for the currently supported fixed-trace runtime
-dispatch shape.
+This case resolves `type(mid_t)` and `type(leaf_t)` bindings at generation time.
+It does not preserve a runtime type tag for polymorphic type-bound calls. Use
+the existing `select type` path for runtime dispatch. Derivative bindings for
+every child, polymorphic ownership, and a rule for perturbations that change
+the selected child remain P8.4--P8.7 work.
