@@ -62,6 +62,9 @@ Complex forward examples and the real-coordinate contract are in
 [the complex-values design note](docs/design/complex-values.md).
 The bounded derived-component contract and its JVP/VJP oracle are in
 [the derived-components design note](docs/design/derived-components.md).
+Allocatable components and lifetime-changing statements are currently refused
+with a source-line diagnostic. The boundary and primal oracle are in
+[the allocation-lifetime design note](docs/design/allocation-lifetime.md).
 The storage-identity boundary and its executable refusal oracle are in
 [the aliasing and sections design note](docs/design/aliasing.md).
 
