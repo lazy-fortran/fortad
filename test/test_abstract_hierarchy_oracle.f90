@@ -131,6 +131,7 @@ program test_abstract_hierarchy_oracle
         "        if (abs(y_d - 2.0d0*x_d) > 1.0d-13) error stop 3"//nl// &
         "        call evaluate_mid_vjp(mid, x, y, y_b, x_b)"//nl// &
         "        if (abs(x_b - 2.0d0*y_b) > 1.0d-13) error stop 4"//nl// &
+        "        if (abs(y_b*y_d - x_b*x_d) > 1.0d-13) error stop 10"//nl// &
         "        h = 1.0d-6"//nl// &
         "        fp = evaluate_mid(mid, x + h)"//nl// &
         "        fm = evaluate_mid(mid, x - h)"//nl// &
@@ -143,6 +144,7 @@ program test_abstract_hierarchy_oracle
         "        if (abs(y_d - 2.0d0*x_d) > 1.0d-13) error stop 6"//nl// &
         "        call evaluate_leaf_vjp(leaf, x, y, y_b, x_b)"//nl// &
         "        if (abs(x_b - 2.0d0*y_b) > 1.0d-13) error stop 7"//nl// &
+        "        if (abs(y_b*y_d - x_b*x_d) > 1.0d-13) error stop 11"//nl// &
         "        h = 1.0d-6"//nl// &
         "        fp = evaluate_leaf(leaf, x + h)"//nl// &
         "        fm = evaluate_leaf(leaf, x - h)"//nl// &
