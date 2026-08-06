@@ -490,6 +490,14 @@ contains
                 subs(i) = lower_expr(arena, n%arg_indices(i), proc, status)
                 if (.not. status%ok) return
             end do
+            if (n%base_expr_index == 0) then
+                if (is_array_name(proc, n%name)) then
+                    if (has_vector_subscript(arena, n%arg_indices, subs, proc)) then
+                        call refuse_vector_subscript(arena, idx, status)
+                        return
+                    end if
+                end if
+            end if
             if (is_component_base(arena, n%base_expr_index)) then
                 if (size(n%arg_indices) == 0) then
                     s%target = component_reference_text(arena, &
@@ -590,6 +598,14 @@ contains
                 args(i) = lower_expr(arena, n%arg_indices(i), proc, status)
                 if (.not. status%ok) return
             end do
+            if (n%base_expr_index == 0) then
+                if (is_array_name(proc, n%name)) then
+                    if (has_vector_subscript(arena, n%arg_indices, args, proc)) then
+                        call refuse_vector_subscript(arena, idx, status)
+                        return
+                    end if
+                end if
+            end if
             if (n%base_expr_index > 0) then
                 if (is_component_base(arena, n%base_expr_index)) then
                     if (is_type_bound_reference(arena, n%base_expr_index, proc)) then
@@ -653,6 +669,59 @@ contains
             itoa(node_line(arena, idx))//": noncontiguous and overlapping "// &
             "storage identity is not tracked"
     end subroutine refuse_array_section
+
+    logical function has_vector_subscript(arena, arg_indices, lowered_args, proc) &
+            result(found)
+        !! Whether an array access receives an array-valued subscript.
+        !!
+        !! A vector subscript has no range node: ``x(idx)`` is represented as
+        !! an identifier argument, so declaration rank must be consulted after
+        !! lowering the arguments. An indexed expression is also array-valued
+        !! and is conservatively refused here.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: arg_indices(:), lowered_args(:)
+        type(fad_proc_t), intent(in) :: proc
+        integer :: i, node_idx, expr_idx, decl_idx
+        character(len=:), allocatable :: name
+
+        found = .false.
+        do i = 1, size(arg_indices)
+            node_idx = arg_indices(i)
+            if (node_idx <= 0 .or. node_idx > arena%size) cycle
+            if (.not. arena%has_node_at(node_idx)) cycle
+            select type (node => arena%entries(node_idx)%node)
+                type is (identifier_node)
+                name = node%name
+                decl_idx = proc%decl_index(name)
+                if (decl_idx > 0) then
+                    if (proc%decls(decl_idx)%is_array) then
+                        found = .true.
+                        return
+                    end if
+                end if
+            end select
+
+            if (i > size(lowered_args)) cycle
+            expr_idx = lowered_args(i)
+            if (expr_idx <= 0 .or. expr_idx > proc%n_exprs) cycle
+            if (proc%exprs(expr_idx)%kind == FAD_INDEX) then
+                found = .true.
+                return
+            end if
+        end do
+    end function has_vector_subscript
+
+    subroutine refuse_vector_subscript(arena, idx, status)
+        !! Refuse array-valued subscripts until storage identity is tracked.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .false.
+        status%message = "unsupported vector subscript at line "// &
+            itoa(node_line(arena, idx))//": section storage identity is not "// &
+            "tracked"
+    end subroutine refuse_vector_subscript
 
     recursive integer function lower_type_bound_call(arena, node, proc, status) &
             result(out)
