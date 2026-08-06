@@ -90,9 +90,9 @@ the current integration gate is still open:
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
-      GNU is current: `fo check` builds all 407 targets and runs 29 tests.
+      GNU is current: `fo check` builds all 407 targets and runs 30 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
-      hazards; 91 pre-existing `-Warray-temporaries` diagnostics still keep
+      hazards; 94 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
       predates the latest lowering work.
 - [ ] Every operator shared by fortnum and fortfem has same-machine FortAD and
@@ -104,13 +104,13 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `bb9caeb` (including the FortFront boundary
+The implementation snapshot is `0e13d89` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, bounded concrete type-bound calls, and the lint
-hazard cleanup, the real-coordinate complex JVP slice, and the select-type
-reverse finite-difference closeout). Its GNU behavioral gate is green
-(407/407 targets, 29/29 tests). The remaining lint diagnostics
-are the 91 array-temporary warnings
+hazard cleanup, the real-coordinate complex JVP slice, the select-type reverse
+finite-difference closeout, and the bounded derived-component slice). Its GNU
+behavioral gate is green (407/407 targets, 30/30 tests). The remaining lint
+diagnostics are the 94 array-temporary warnings
 listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
@@ -606,8 +606,8 @@ of selected child ends the fixed-path derivative contract.
       nested, and inherited real or complex components. Shadow values retain
       the primal layout needed by callees. Integer and logical components
       remain passive. Character and procedure components are passive.
-      - [x] **P7.1a bounded concrete value slice.** Commit `dcf40a8` supports
-        component-named independents on a concrete `type(t)` value, preserving
+      - [x] **P7.1a bounded concrete value slice.** Commits `dcf40a8` and
+        `2aa8e32` support component-named independents on a concrete `type(t)` value, preserving
         scalar, inherited, nested, and array component paths in JVP/VJP shadows.
         The independent object itself is refused; allocation, alias, character,
         logical, and procedure-component activity remain open.
@@ -672,7 +672,7 @@ problem-specific rule.
       checks hand gradients, two-step central differences of the untouched
       primal, and the reverse adjoint identity for every arm. The verified
       scope is fixed-shape arms with matching writes and an active scalar input.
-      Active derived components remain P7.1 work, while dynamic ownership and
+      Broader active derived components remain P7.1 work, while dynamic ownership and
       dispatch-boundary diagnostics remain P8.5 and P8.7 work.
 - [ ] **P8.3 Concrete type-bound calls.** Resolve and transform `pass`, named
       `pass(arg)`, `nopass`, inherited bindings, overrides, and type-bound
