@@ -142,9 +142,76 @@ module fortad_ir
     end type fad_proc_t
 
     public :: expr_const, expr_var, expr_binop, expr_unop, expr_call
+    public :: fad_base_name, fad_suffix_name
     public :: fad_expr_equal, copy_decl
 
 contains
+
+    function fad_base_name(raw) result(base)
+        !! Return the declared object behind an array or component reference.
+        !!
+        !! The expression arena deliberately keeps component accesses as text
+        !! (for example ``state%position%x``).  Activity and SSA bookkeeping
+        !! still need the declaration which owns that storage, namely
+        !! ``state``.  This helper also handles ``a(i)`` and
+        !! ``state%values(i)`` without attempting to parse Fortran generally.
+        character(len=*), intent(in) :: raw
+        character(len=:), allocatable :: base
+        integer :: cut, pos
+
+        cut = len_trim(raw) + 1
+        pos = index(raw, "%")
+        if (pos > 0) cut = min(cut, pos)
+        pos = index(raw, "(")
+        if (pos > 0) cut = min(cut, pos)
+        if (cut <= 1) then
+            base = trim(raw)
+        else
+            base = trim(raw(:cut - 1))
+        end if
+    end function fad_base_name
+
+    function fad_suffix_name(raw, suffix, vector) result(name)
+        !! Put a derivative suffix on the owning object, preserving access.
+        !!
+        !! ``x(i)`` becomes ``x_d(i)`` and ``state%values(i)`` becomes
+        !! ``state_d%values(i)``.  In vector mode the leading lane is inserted
+        !! before the existing subscript, so the result is
+        !! ``state_d%values(:, i)``.
+        character(len=*), intent(in) :: raw, suffix
+        logical, intent(in), optional :: vector
+        character(len=:), allocatable :: name
+        integer :: percent, open
+        logical :: lanes
+
+        lanes = .false.
+        if (present(vector)) lanes = vector
+        percent = index(raw, "%")
+        open = index(raw, "(")
+        if (percent > 0) then
+            if (open > 0) then
+                name = trim(raw(:percent - 1))//trim(suffix)// &
+                    raw(percent:open - 1)
+                if (lanes) then
+                    name = name//"(:, "//raw(open + 1:)
+                else
+                    name = name//raw(open:)
+                end if
+            else
+                name = trim(raw(:percent - 1))//trim(suffix)//raw(percent:)
+            end if
+        else if (open > 0) then
+            if (lanes) then
+                name = trim(raw(:open - 1))//trim(suffix)//"(:, "// &
+                    raw(open + 1:)
+            else
+                name = trim(raw(:open - 1))//trim(suffix)//raw(open:)
+            end if
+        else
+            name = trim(raw)//trim(suffix)
+            if (lanes) name = name//"(:)"
+        end if
+    end function fad_suffix_name
 
     integer function proc_add_expr(self, e) result(idx)
         !! Append an expression, sharing it with an identical existing one.

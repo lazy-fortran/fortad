@@ -31,10 +31,10 @@ module fortad_reverse_loop
     !! A loop that does not fit this shape - a nonlinear loop-carried
     !! recurrence, for instance - is refused by name. That needs per-iteration
     !! storage and belongs to the next milestone.
-    use fortad_ir, only: fad_proc_t, &
-                        FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
-                        FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_BINOP, FAD_CONST, &
-                        FAD_UNOP
+    use fortad_ir, only: fad_proc_t, fad_base_name, &
+        FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
+        FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_BINOP, FAD_CONST, &
+        FAD_UNOP
     implicit none
     private
 
@@ -119,7 +119,7 @@ contains
             room = max(16, shape%last - shape%first)
             allocate (shape%accumulators(room), shape%temporaries(room))
             allocate (shape%elements(room), shape%carried(room), &
-                      shape%linear(room))
+                shape%linear(room))
         end block
         shape%n_headers = 1
         shape%header_stmt(1) = first
@@ -177,7 +177,7 @@ contains
                     ! emitter gives each write its own version, exactly as it
                     ! does outside a loop. It is recorded once here.
                     if (.not. is_known(shape%temporaries, shape%n_temporaries, &
-                                       target)) then
+                        target)) then
                         call add_name(shape%temporaries, shape%n_temporaries, target)
                     end if
                 end if
@@ -299,7 +299,7 @@ contains
         do k = shape%first + 1, shape%last - 1
             if (p%stmts(k)%kind /= FAD_ASSIGN) cycle
             if (.not. expr_linear(p, p%stmts(k)%value, tainted, n_tainted, &
-                                  active)) then
+                active)) then
                 yes = .false.
                 return
             end if
@@ -307,7 +307,7 @@ contains
     end function body_linear_in
 
     recursive logical function expr_linear(p, idx, tainted, n_tainted, active) &
-        result(yes)
+            result(yes)
         !! Whether an expression is linear in the tainted set.
         type(fad_proc_t), intent(in) :: p
         integer, intent(in) :: idx, n_tainted
@@ -330,19 +330,19 @@ contains
             select case (trim(p%exprs(idx)%text))
             case ("+", "-")
                 yes = expr_linear(p, p%exprs(idx)%args(1), tainted, n_tainted, active) &
-                      .and. expr_linear(p, p%exprs(idx)%args(2), tainted, n_tainted, active)
+                    .and. expr_linear(p, p%exprs(idx)%args(2), tainted, n_tainted, active)
             case ("*")
                 ! A product is linear only if one side is independent.
                 if (l_dep .and. r_dep) then
                     yes = .false.
                 else if (l_dep) then
                     yes = expr_linear(p, p%exprs(idx)%args(1), tainted, &
-                                      n_tainted, active) .and. &
-                          .not. reads_active(p, p%exprs(idx)%args(2), active)
+                        n_tainted, active) .and. &
+                        .not. reads_active(p, p%exprs(idx)%args(2), active)
                 else
                     yes = expr_linear(p, p%exprs(idx)%args(2), tainted, &
-                                      n_tainted, active) .and. &
-                          .not. reads_active(p, p%exprs(idx)%args(1), active)
+                        n_tainted, active) .and. &
+                        .not. reads_active(p, p%exprs(idx)%args(1), active)
                 end if
             case ("/")
                 ! Dividing by something dependent is not linear.
@@ -350,8 +350,8 @@ contains
                     yes = .false.
                 else
                     yes = expr_linear(p, p%exprs(idx)%args(1), tainted, &
-                                      n_tainted, active) .and. &
-                          .not. reads_active(p, p%exprs(idx)%args(2), active)
+                        n_tainted, active) .and. &
+                        .not. reads_active(p, p%exprs(idx)%args(2), active)
                 end if
             case default
                 yes = .false.
@@ -515,7 +515,7 @@ contains
         logical :: split_ok
 
         call split_accumulation(p, p%stmts(stmt)%value, target, terms, signs, n, &
-                                split_ok)
+            split_ok)
         yes = .false.
         if (.not. split_ok) return
         do i = 1, n
@@ -606,15 +606,15 @@ contains
             select case (trim(p%exprs(idx)%text))
             case ("+")
                 call walk_spine(p, p%exprs(idx)%args(1), target, sign, terms, &
-                                signs, n, n_found)
+                    signs, n, n_found)
                 call walk_spine(p, p%exprs(idx)%args(2), target, sign, terms, &
-                                signs, n, n_found)
+                    signs, n, n_found)
                 return
             case ("-")
                 call walk_spine(p, p%exprs(idx)%args(1), target, sign, terms, &
-                                signs, n, n_found)
+                    signs, n, n_found)
                 call walk_spine(p, p%exprs(idx)%args(2), target, -sign, terms, &
-                                signs, n, n_found)
+                    signs, n, n_found)
                 return
             end select
         end if
@@ -638,14 +638,7 @@ contains
         !! The array name of an element target, without its subscript.
         character(len=*), intent(in) :: target
         character(len=:), allocatable :: base
-        integer :: pos
-
-        pos = index(target, "(")
-        if (pos > 0) then
-            base = target(1:pos - 1)
-        else
-            base = target
-        end if
+        base = fad_base_name(target)
     end function target_base
 
     recursive logical function reads_name(p, idx, name) result(yes)

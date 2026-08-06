@@ -14,6 +14,7 @@ defaults.
 | [Derivative products](products.md) | first-order products, HVPs, UQ, sparse recovery, checkpointing, and Taylor mode |
 | [Public API](design/public-api.md) | exported Fortran calls and types, with defaults and CLI syntax |
 | [Procedure interfaces](design/procedure-interfaces.md) | optional dummies, `present`, and generated call shape |
+| [Derived components](design/derived-components.md) | bounded scalar, nested, inherited, and array component derivatives |
 | [Complex values](design/complex-values.md) | real-coordinate JVP contract and reverse boundary |
 
 The worked gradient, Jacobian, and linear-UQ constructions in the product guide
