@@ -104,7 +104,7 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `0e13d89` (including the FortFront boundary
+The implementation snapshot is `8016f1b` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, bounded concrete type-bound calls, and the lint
 hazard cleanup, the real-coordinate complex JVP slice, the select-type reverse
