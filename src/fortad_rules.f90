@@ -379,8 +379,10 @@ contains
         select case (p%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
             di = p%decl_index(trim(p%exprs(idx)%text))
-            if (di > 0 .and. allocated(p%decls(di)%type_name)) then
-                yes = index(lower(p%decls(di)%type_name), "complex") == 1
+            if (di > 0) then
+                if (allocated(p%decls(di)%type_name)) then
+                    yes = index(lower(p%decls(di)%type_name), "complex") == 1
+                end if
             end if
         case (FAD_BINOP)
             if (.not. allocated(p%exprs(idx)%args)) return
