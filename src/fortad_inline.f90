@@ -469,6 +469,9 @@ contains
                     ! properties such as VALUE when the callee dummy is
                     ! copied over that declaration during inlining.
                     d%is_value = target%decls(actual_index)%is_value
+                    d%is_optional = target%decls(actual_index)%is_optional
+                else
+                    d%is_optional = .false.
                 end if
                 ignored = target%add_decl(d)
                 exit
