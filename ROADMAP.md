@@ -712,7 +712,7 @@ problem-specific rule.
       - [x] **P8.3a bounded concrete call.** A statically declared `type(t)`
             receiver with the default implicit PASS or `NOPASS` and a same-file
             function is normalized to an ordinary call before JVP/VJP
-            generation. Named PASS, inherited, generic, deferred, and
+            generation. Named PASS, inherited-only, generic, deferred, and
             ambiguous type/implementation names remain named refusals. The
             compiled oracle is
             [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90). It
@@ -726,6 +726,16 @@ problem-specific rule.
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through
       multi-level inheritance.
+      - [x] **P8.4a fixed-dispatch override slice.** A statically declared
+            concrete child may override an abstract deferred binding through
+            one intermediate level. FortAD resolves each local override and
+            generates its JVP and VJP. The independent
+            [`test_abstract_hierarchy_oracle.f90`](test/test_abstract_hierarchy_oracle.f90)
+            checks both levels with hand values, central finite differences,
+            and the adjoint identity. Direct `class(base)` dispatch,
+            inherited-only bindings, and unresolved deferred bindings remain
+            named refusals. Runtime type-tag preservation and a derivative
+            hierarchy remain open P8.4 work.
 - [ ] **P8.5 Polymorphic ownership.** Cover allocatable base-class components,
       factories, `allocate(source=child)`, nested field/coordinate objects,
       arrays of polymorphic holders, assignment, and destruction.

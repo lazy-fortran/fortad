@@ -15,6 +15,7 @@ defaults.
 | [Public API](design/public-api.md) | exported Fortran calls and types, with defaults and CLI syntax |
 | [Procedure interfaces](design/procedure-interfaces.md) | optional dummies, `present`, and generated call shape |
 | [Derived components](design/derived-components.md) | bounded scalar, nested, inherited, and array component derivatives |
+| [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch overrides across an abstract/deferred hierarchy |
 | [Complex values](design/complex-values.md) | real-coordinate JVP contract and bounded real-objective VJP |
 | [Allocation lifetime](design/allocation-lifetime.md) | executable refusal boundary for allocatable storage |
 | [Aliasing and sections](design/aliasing.md) | explicit pointer, target, and noncontiguous-section refusal boundary |
@@ -39,6 +40,7 @@ independent oracle.
 | [Library rules](design/library-rules.md) | FFT, quadrature, interpolation, and `erf` callbacks | [`test_library_rules_oracle.f90`](../test/test_library_rules_oracle.f90) |
 | [Complex values](design/complex-values.md) | complex intrinsic JVPs, bounded projection VJP, and explicit reverse refusal | [`test_complex_intrinsic_oracle.f90`](../test/test_complex_intrinsic_oracle.f90), [`test_complex_reverse_oracle.f90`](../test/test_complex_reverse_oracle.f90) |
 | [Allocation lifetime](design/allocation-lifetime.md) | allocatable storage and lifetime refusal boundary | [`test_allocation_lifetime_oracle.f90`](../test/test_allocation_lifetime_oracle.f90) |
+| [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch concrete overrides and named runtime/deferred refusals | [`test_abstract_hierarchy_oracle.f90`](../test/test_abstract_hierarchy_oracle.f90) |
 | [GPU emission](design/gpu.md) | restricted OpenMP target and OpenACC loop shape | external `fortad-bench` device record |
 
 ## Planning and evidence

@@ -730,8 +730,9 @@ contains
         !! The bounded contract is deliberately narrow: the receiver is a
         !! statically declared `type(t)` object, the binding uses either the
         !! default implicit PASS or NOPASS, and the implementation is a local
-        !! function. Runtime dispatch, inherited bindings, named PASS, generic,
-        !! deferred, and ambiguous bindings remain explicit refusals.
+        !! function. A local override on an abstract/deferred parent is also
+        !! accepted. Runtime dispatch, inherited-only bindings, named PASS,
+        !! generic, deferred, and ambiguous bindings remain explicit refusals.
         type(ast_arena_t), intent(in) :: arena
         type(call_or_subscript_node), intent(in) :: node
         type(fad_proc_t), intent(inout) :: proc
@@ -810,12 +811,6 @@ contains
                 "the concrete type name is ambiguous in this source")
             return
         end if
-        if (allocated(dtype%extends_parent)) then
-            if (len_trim(dtype%extends_parent) > 0) then
-                call refuse_type_bound(status, method, "inherited bindings are unsupported")
-                return
-            end if
-        end if
         found_binding = .false.
         binding_index = 0
         if (allocated(dtype%binding_indices)) then
@@ -829,6 +824,13 @@ contains
             end do
         end if
         if (.not. found_binding) then
+            if (allocated(dtype%extends_parent)) then
+                if (len_trim(dtype%extends_parent) > 0) then
+                    call refuse_type_bound(status, method, &
+                        "inherited bindings are unsupported")
+                    return
+                end if
+            end if
             call refuse_type_bound(status, method, "no local type-bound binding")
             return
         end if
