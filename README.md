@@ -50,6 +50,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Long integrations | Revolve checkpoint schedules supplied to a caller-owned time loop |
 | Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
 | Derived components | bounded concrete scalar, nested, inherited, and array component paths |
+| Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known child overrides |
 | Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
 | Aliasing and sections | named refusal for `pointer`, `target`, pointer association, and noncontiguous sections |
 | GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |
@@ -69,6 +70,8 @@ with a source-line diagnostic. The boundary and primal oracle are in
 [the allocation-lifetime design note](docs/design/allocation-lifetime.md).
 The storage-identity boundary and its executable refusal oracle are in
 [the aliasing and sections design note](docs/design/aliasing.md).
+The fixed-dispatch abstract/deferred hierarchy slice and its multi-level
+oracle are in [the abstract hierarchy design note](docs/design/abstract-hierarchy.md).
 
 Same-file callees can be inlined before differentiation. A call whose body is
 unavailable needs a registered derivative rule. The built-in structured rules
