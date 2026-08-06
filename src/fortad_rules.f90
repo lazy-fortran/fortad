@@ -15,7 +15,7 @@ module fortad_rules
     !! inside another call that also takes `p` is an aliasing hazard - Fortran
     !! does not order argument evaluation, and the arena may reallocate under
     !! the outer call. Verbose, but the alternative is silently wrong output.
-    use fortad_ir, only: fad_proc_t, expr_const, expr_var, expr_binop, &
+    use fortad_ir, only: fad_proc_t, expr_const, expr_binop, &
                         expr_unop, expr_call, FAD_CONST
     use fortad_registry, only: registry_has, registry_n_args, registry_partial
     implicit none
@@ -133,6 +133,8 @@ contains
         character(len=*), intent(in) :: op
         integer, intent(in) :: a, da
 
+        associate (unused => a)
+        end associate
         select case (trim(op))
         case ("-")
             out = fad_neg(p, da)

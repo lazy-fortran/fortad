@@ -82,7 +82,7 @@ contains
                 cycle
             end if
             call collapse_one(p, first, last)
-            call extent(p, first, first, last)
+            call refresh_extent(p, first, last)
             i = last + 1
         end do
     end subroutine collapse_affine_loops
@@ -629,6 +629,16 @@ contains
             end select
         end do
     end subroutine extent
+
+    subroutine refresh_extent(p, first, last)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(inout) :: first
+        integer, intent(out) :: last
+        integer :: lo
+
+        call extent(p, first, lo, last)
+        first = lo
+    end subroutine refresh_extent
 
     recursive logical function reads(p, idx, name) result(yes)
         type(fad_proc_t), intent(in) :: p

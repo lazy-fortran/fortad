@@ -8,7 +8,6 @@ program test_gradient_only_oracle
     !! *original* kernel, and it must equal the gradient the with-primal
     !! routine produces. Finite differences pin the value; the agreement
     !! between the two routines pins that only dead code was removed.
-    use, intrinsic :: iso_fortran_env, only: dp => real64
     use fortad, only: fad_vjp, fad_result_t
     implicit none
 

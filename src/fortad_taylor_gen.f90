@@ -16,7 +16,7 @@ module fortad_taylor_gen
     !! so an array-valued kernel would need a rank more than fortad's IR carries,
     !! and loops would need the temporaries to be loop-local. Both are refused
     !! by name.
-    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
+    use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, FAD_CONST, FAD_VAR, FAD_BINOP, &
         FAD_UNOP, FAD_CALL, FAD_INDEX, FAD_ASSIGN, &
         FAD_CALL_STMT, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &

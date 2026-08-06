@@ -10,7 +10,7 @@ program test_forward_oracle
     !! that is wrong by a constant factor at one point, so each case also
     !! verifies that halving the step reduces the error roughly fourfold, which
     !! is what a correct central difference must do.
-    use fortad, only: fad_jvp, fad_roundtrip, fad_result_t
+    use fortad, only: fad_jvp, fad_result_t
     implicit none
 
     character(len=1), parameter :: nl = achar(10)

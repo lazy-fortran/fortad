@@ -188,7 +188,13 @@ contains
 
         do i = 1, size(guards)
             call get_type_guard_info(arena, guards(i), guard_kind, type_index, body)
-            if (type_index <= 0 .or. .not. arena%has_node_at(type_index)) then
+            if (type_index <= 0) then
+                status%ok = .false.
+                status%message = "select type guard at line "// &
+                    itoa(node_line(arena, guards(i)))//" has no type name"
+                return
+            end if
+            if (.not. arena%has_node_at(type_index)) then
                 status%ok = .false.
                 status%message = "select type guard at line "// &
                     itoa(node_line(arena, guards(i)))//" has no type name"

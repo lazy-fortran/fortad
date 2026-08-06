@@ -536,6 +536,8 @@ contains
         type(fad_decl_t) :: d
         integer :: i, n, di, ignored
 
+        associate (unused => active)
+        end associate
         allocate (names(2*(size(primal%params) + size(spec%independents) + 4)))
         n = 0
 
@@ -2714,6 +2716,8 @@ contains
         integer :: ignored
         logical :: force_bind
 
+        associate (unused => ssa)
+        end associate
         force_bind = .false.
         if (present(force)) force_bind = force
 
@@ -2916,6 +2920,8 @@ contains
         character(len=:), allocatable, intent(out) :: base
         integer :: pos
 
+        associate (unused => ssa)
+        end associate
         pos = index(ssa_name, "_v", back=.true.)
         if (pos > 1) then
             if (verify(ssa_name(pos + 2:), "0123456789") == 0 .and. &

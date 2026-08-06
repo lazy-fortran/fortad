@@ -444,6 +444,8 @@ contains
         integer :: ignored
         logical :: vec, optional_arg
 
+        associate (unused => is_value)
+        end associate
         vec = .false.
         if (present(vector)) vec = vector
         optional_arg = .false.
@@ -567,6 +569,8 @@ contains
         type(fad_stmt_t) :: s
         integer :: i, di, ignored, n_args
 
+        associate (unused => vector)
+        end associate
         if (.not. call_rule_has(ps%target)) then
             status%ok = .false.
             status%message = "no derivative rule for the call to '"//ps%target// &

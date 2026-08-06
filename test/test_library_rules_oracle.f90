@@ -287,7 +287,8 @@ contains
             "    values = [1.1d0, -0.7d0, 0.4d0, 1.8d0]"//nl// &
             "    values_d = [-0.2d0, 0.3d0, -0.1d0, 0.25d0]"//nl// &
             "    alpha = 0.1d0; alpha_d = -0.15d0; h = 1.0d-6"//nl// &
-            "    call k_jvp(signal, signal_d, nodes, nodes_d, values, values_d, alpha, alpha_d, sc, scd, ss, ssd, q, qd, y, yd, z, zd, s, sd)"//nl// &
+            "    call k_jvp(signal, signal_d, nodes, nodes_d, values, values_d, alpha, alpha_d, sc, scd, ss, ssd, &"//nl// &
+            "        q, qd, y, yd, z, zd, s, sd)"//nl// &
             "    pp_signal = signal+h*signal_d; mm_signal = signal-h*signal_d"//nl// &
             "    pp_nodes = nodes+h*nodes_d; mm_nodes = nodes-h*nodes_d"//nl// &
             "    pp_values = values+h*values_d; mm_values = values-h*values_d"//nl// &
@@ -298,23 +299,29 @@ contains
             "    if (err > 1.0d-7) then; print *, 'jvp error', err, sd, fd; error stop 2; end if"//nl// &
             "    sb = 1.0d0"//nl// &
             "    call k_vjp(signal, nodes, values, alpha, sc, ss, q, y, z, s, sb, signal_b, nodes_b, values_b, alpha_b)"//nl// &
-            "    err = abs(sd-sum(signal_b*signal_d)-sum(nodes_b*nodes_d)-sum(values_b*values_d)-alpha_b*alpha_d)/max(1.0d0,abs(sd))"//nl// &
+            "    err = abs(sd-sum(signal_b*signal_d)-sum(nodes_b*nodes_d)-sum(values_b*values_d)-&"//nl// &
+            "        alpha_b*alpha_d)/max(1.0d0,abs(sd))"//nl// &
             "    if (err > 1.0d-8) then; print *, 'vjp identity error', err; error stop 3; end if"//nl// &
             "    do i = 1, 8"//nl// &
-            "        pp_signal = signal; mm_signal = signal; pp_signal(i)=pp_signal(i)+h; mm_signal(i)=mm_signal(i)-h"//nl// &
-            "        call evaluate(pp_signal,nodes,values,alpha,sc,ss,q,y,z,sp); call evaluate(mm_signal,nodes,values,alpha,sc,ss,q,y,z,sm)"//nl// &
+            "        pp_signal = signal; mm_signal = signal"//nl// &
+            "        pp_signal(i)=pp_signal(i)+h; mm_signal(i)=mm_signal(i)-h"//nl// &
+            "        call evaluate(pp_signal,nodes,values,alpha,sc,ss,q,y,z,sp)"//nl// &
+            "        call evaluate(mm_signal,nodes,values,alpha,sc,ss,q,y,z,sm)"//nl// &
             "        fd=(sp-sm)/(2.0d0*h); if (abs(signal_b(i)-fd)>1.0d-7) error stop 4"//nl// &
             "    end do"//nl// &
             "    do i = 1, 4"//nl// &
             "        pp_nodes = nodes; mm_nodes = nodes; pp_nodes(i)=pp_nodes(i)+h; mm_nodes(i)=mm_nodes(i)-h"//nl// &
-            "        call evaluate(signal,pp_nodes,values,alpha,sc,ss,q,y,z,sp); call evaluate(signal,mm_nodes,values,alpha,sc,ss,q,y,z,sm)"//nl// &
+            "        call evaluate(signal,pp_nodes,values,alpha,sc,ss,q,y,z,sp)"//nl// &
+            "        call evaluate(signal,mm_nodes,values,alpha,sc,ss,q,y,z,sm)"//nl// &
             "        fd=(sp-sm)/(2.0d0*h); if (abs(nodes_b(i)-fd)>1.0d-7) error stop 5"//nl// &
             "        pp_values = values; mm_values = values; pp_values(i)=pp_values(i)+h; mm_values(i)=mm_values(i)-h"//nl// &
-            "        call evaluate(signal,nodes,pp_values,alpha,sc,ss,q,y,z,sp); call evaluate(signal,nodes,mm_values,alpha,sc,ss,q,y,z,sm)"//nl// &
+            "        call evaluate(signal,nodes,pp_values,alpha,sc,ss,q,y,z,sp)"//nl// &
+            "        call evaluate(signal,nodes,mm_values,alpha,sc,ss,q,y,z,sm)"//nl// &
             "        fd=(sp-sm)/(2.0d0*h); if (abs(values_b(i)-fd)>1.0d-7) error stop 6"//nl// &
             "    end do"//nl// &
             "    pp_alpha=alpha+h; mm_alpha=alpha-h"//nl// &
-            "    call evaluate(signal,nodes,values,pp_alpha,sc,ss,q,y,z,sp); call evaluate(signal,nodes,values,mm_alpha,sc,ss,q,y,z,sm)"//nl// &
+            "    call evaluate(signal,nodes,values,pp_alpha,sc,ss,q,y,z,sp)"//nl// &
+            "    call evaluate(signal,nodes,values,mm_alpha,sc,ss,q,y,z,sm)"//nl// &
             "    fd=(sp-sm)/(2.0d0*h); if (abs(alpha_b*1.0d0-fd)>1.0d-7) error stop 7"//nl// &
             "end program driver"//nl
     end function driver_text

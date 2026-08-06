@@ -328,9 +328,12 @@ contains
             candidates = s%target(index(s%target, "|") + 1:)
         end if
         do_stmt = directive_index
-        if (do_stmt <= 0 .or. do_stmt > p%n_stmts .or. &
-            p%stmts(do_stmt)%kind /= FAD_DO) then
+        if (do_stmt <= 0 .or. do_stmt > p%n_stmts) then
             do_stmt = 0
+        else if (p%stmts(do_stmt)%kind /= FAD_DO) then
+            do_stmt = 0
+        end if
+        if (do_stmt == 0) then
             do i = directive_index + 1, p%n_stmts
                 if (p%stmts(i)%kind == FAD_DO) then
                     do_stmt = i
