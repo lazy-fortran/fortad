@@ -225,6 +225,7 @@ contains
 
         line = d%type_name
         if (d%is_value) line = line//", value"
+        if (d%is_optional) line = line//", optional"
         select case (d%intent)
         case (FAD_INTENT_IN)
             line = line//", intent(in)"
