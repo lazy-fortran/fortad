@@ -108,7 +108,7 @@ The implementation snapshot is `a34fd53` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, bounded concrete type-bound calls, and the lint
 hazard cleanup). Its GNU behavioral gate is green (407/407 targets, 28/28
-tests); the remaining lint diagnostics are the 91 array-temporary warnings
+tests. The remaining lint diagnostics are the 91 array-temporary warnings
 listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
@@ -617,7 +617,7 @@ of selected child ends the fixed-path derivative contract.
       `present` branches, generic resolution by type, kind, and rank, elemental
       calls, and user-defined operators. FortAD remains a source transformer.
       Commit `0209b3a` now preserves optional dummies and `present` branches in
-      generated JVP/VJP interfaces; keyword mapping across inlined siblings,
+      generated JVP/VJP interfaces. Keyword mapping across inlined siblings,
       generic resolution, elemental calls, and operator-overloaded inputs
       remain open. Commit `08201bf` rejects active optional tangents/adjoints
       explicitly and keeps optional metadata off generated locals and SSA
@@ -654,7 +654,7 @@ problem-specific rule.
       n-way SSA values, and propagate one seed through that guard only. Check
       both children with component finite differences and the adjoint identity.
       The current implementation covers fixed-shape arms with matching writes
-      and has a compiled adjoint-identity oracle; the broader n-way and finite-
+      and has a compiled adjoint-identity oracle. The broader n-way and finite-
       difference closeout is still open.
 - [ ] **P8.3 Concrete type-bound calls.** Resolve and transform `pass`, named
       `pass(arg)`, `nopass`, inherited bindings, overrides, and type-bound
@@ -663,9 +663,8 @@ problem-specific rule.
       - [x] **P8.3a bounded concrete call.** A statically declared `type(t)`
             receiver with the default implicit PASS and a same-file function is
             normalized to an ordinary call before JVP/VJP generation. Named
-            PASS, NOPASS, inherited, generic, and deferred bindings are named
-            refusals. The compiled oracle is
-            [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90);
+            all other binding forms are named refusals. The compiled oracle is
+            [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90).
             it checks generated JVP/VJP values, a central-difference JVP, the
             adjoint seed, and all five refusal cases. This does not cover
             active receiver cotangents, overrides, or runtime dispatch.
