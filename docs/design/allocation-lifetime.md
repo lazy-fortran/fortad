@@ -10,14 +10,15 @@ The boundary is explicit and source-local. `fad_jvp`, `fad_vjp`,
 line, for example:
 
 ```text
-unsupported allocation lifetime construct 'allocatable declaration/component' at line 4; active allocation state is not represented yet
+unsupported allocation lifetime construct 'allocatable declaration/component' at line 4
+active allocation state is not represented yet
 ```
 
 The scanner recognises allocatable declarations/components and explicit
 `allocate`, `deallocate`, and `move_alloc` statements, including
 `allocate(source=...)` and `allocate(mold=...)`. Automatic reallocation and
 deep assignment are refused because the same source also carries allocatable
-state; the oracle exercises both behaviors. Comments and quoted strings are
+state. The oracle exercises both behaviors. Comments and quoted strings are
 ignored. This is a refusal contract, not a derivative approximation.
 
 The executable boundary is
