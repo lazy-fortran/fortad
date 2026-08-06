@@ -111,6 +111,9 @@ module fortad_ir
         !! see might not be, and claiming purity it cannot verify would be a
         !! promise to the compiler that the compiler will act on.
         logical :: is_pure = .true.
+        !! Whether the primal was declared ELEMENTAL. Keeping this bit in the
+        !! procedure IR preserves elemental array semantics in its derivative.
+        logical :: is_elemental = .false.
         !! `use` statements copied verbatim from the primal.
         !!
         !! The derivative names the same kinds and calls the same helpers as the

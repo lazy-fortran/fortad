@@ -13,7 +13,7 @@ defaults.
 | [Rosenbrock example](../example/README.md) | generate, compile, and check a reverse-mode derivative |
 | [Derivative products](products.md) | first-order products, HVPs, UQ, sparse recovery, checkpointing, and Taylor mode |
 | [Public API](design/public-api.md) | exported Fortran calls and types, with defaults and CLI syntax |
-| [Procedure interfaces](design/procedure-interfaces.md) | optional dummies, `present`, and generated call shape |
+| [Procedure interfaces](design/procedure-interfaces.md) | optional dummies, `present`, elemental procedures, and generated call shape |
 | [Derived components](design/derived-components.md) | bounded scalar, nested, inherited, and array component derivatives |
 | [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch overrides across an abstract/deferred hierarchy |
 | [Complex values](design/complex-values.md) | real-coordinate JVP contract and bounded real-objective VJP |
@@ -42,6 +42,7 @@ independent oracle.
 | [Allocation lifetime](design/allocation-lifetime.md) | allocatable storage and lifetime refusal boundary | [`test_allocation_lifetime_oracle.f90`](../test/test_allocation_lifetime_oracle.f90) |
 | [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch concrete overrides and named runtime/deferred refusals | [`test_abstract_hierarchy_oracle.f90`](../test/test_abstract_hierarchy_oracle.f90) |
 | [GPU emission](design/gpu.md) | restricted OpenMP target and OpenACC loop shape | external `fortad-bench` device record |
+| [Procedure interfaces](design/procedure-interfaces.md) | elemental JVP/VJP preservation and array calls | [`test_elemental_interface_oracle.f90`](../test/test_elemental_interface_oracle.f90) |
 
 ## Planning and evidence
 

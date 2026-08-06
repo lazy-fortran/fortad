@@ -199,7 +199,8 @@ contains
         ! stops at 132, and gfortran accepting it quietly does not make it
         ! portable.
         line = ""
-        if (p%is_pure) line = "pure "
+        if (p%is_elemental) line = "elemental "
+        if (p%is_pure) line = line//"pure "
         if (p%is_function) then
             line = line//"function "//p%name//"("
         else

@@ -105,6 +105,7 @@ contains
         tangent%name = primal%name//"_jvp"
         if (allocated(spec%name)) tangent%name = spec%name
         tangent%is_function = .false.
+        tangent%is_elemental = primal%is_elemental
         tangent%real_suffix = "d0"
         if (allocated(primal%real_suffix)) tangent%real_suffix = primal%real_suffix
         ! The derivative names the same kinds as the primal, so it needs the

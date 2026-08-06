@@ -49,6 +49,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Higher derivatives | univariate Taylor transformation for straight-line scalar kernels |
 | Long integrations | Revolve checkpoint schedules supplied to a caller-owned time loop |
 | Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
+| Elemental procedures | same-file elemental functions retain elemental JVP/VJP array calls |
 | Derived components | bounded concrete scalar, nested, inherited, and array component paths |
 | Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known child overrides |
 | Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
@@ -78,6 +79,12 @@ unavailable needs a registered derivative rule. The built-in structured rules
 cover an opt-in `dgesv` path. The same interface supports caller-supplied rules
 for nonlinear roots and fixed points, as well as selected numerical-library
 operations.
+
+Elemental procedures are differentiated as elemental procedures too. The
+generated JVP and VJP can therefore be called with scalar or conformable array
+actuals. See [`test_elemental_interface_oracle.f90`](test/test_elemental_interface_oracle.f90)
+for the finite-difference and compiled array oracle. Generic resolution by
+type, kind, or rank and user-defined operators still need explicit support.
 
 Unsupported constructs return `fad_result_t%ok = .false.` and name the
 refused construct in `message`. This release is not a complete Fortran
