@@ -68,8 +68,13 @@ contains
             type is (declaration_node)
             if (n%is_pointer .or. n%is_target) then
                 if (allocated(n%var_names)) then
-                    call refuse_alias_declaration(n%var_names(1), n%line, &
-                        n%is_pointer, n%is_target, status)
+                    if (size(n%var_names) > 0) then
+                        call refuse_alias_declaration(n%var_names(1), n%line, &
+                            n%is_pointer, n%is_target, status)
+                    else
+                        call refuse_alias_declaration(n%var_name, n%line, &
+                            n%is_pointer, n%is_target, status)
+                    end if
                 else
                     call refuse_alias_declaration(n%var_name, n%line, &
                         n%is_pointer, n%is_target, status)
