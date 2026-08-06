@@ -51,14 +51,20 @@ contains
         character(len=*), intent(in) :: module_name
         character(len=*), intent(in), optional :: generator
         character(len=:), allocatable :: text
+        character(len=:), allocatable :: wrapper_name
         type(buffer_t) :: b
+
+        wrapper_name = trim(module_name)
+        if (same_fortran_name(wrapper_name, p%name)) then
+            wrapper_name = wrapper_name//"_module"
+        end if
 
         if (present(generator)) then
             call put_banner(b, generator, note=OUTPUT_LICENCE_NOTE)
         else
             call put_banner(b, "fortad", note=OUTPUT_LICENCE_NOTE)
         end if
-        call b%line("module "//module_name)
+        call b%line("module "//wrapper_name)
         call b%line("    implicit none")
         call b%line("    private")
         call b%line("")
@@ -68,9 +74,29 @@ contains
         call b%line("")
         call b%put(indent_block(emit_proc(p, nested=4)))
         call b%line("")
-        call b%line("end module "//module_name)
+        call b%line("end module "//wrapper_name)
         text = b%str()
     end function emit_module
+
+    logical function same_fortran_name(a, b) result(equal)
+        !! Fortran identifiers compare without regard to ASCII letter case.
+        character(len=*), intent(in) :: a, b
+        integer :: i
+
+        equal = .false.
+        if (len_trim(a) /= len_trim(b)) return
+        do i = 1, len_trim(a)
+            if (lower_ascii(a(i:i)) /= lower_ascii(b(i:i))) return
+        end do
+        equal = .true.
+    end function same_fortran_name
+
+    character function lower_ascii(c)
+        character, intent(in) :: c
+
+        lower_ascii = c
+        if (c >= "A" .and. c <= "Z") lower_ascii = achar(iachar(c) + 32)
+    end function lower_ascii
 
 
     function indent_block(text) result(out)
