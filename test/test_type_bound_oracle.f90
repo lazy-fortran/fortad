@@ -1,7 +1,7 @@
 program test_type_bound_oracle
     !! Behavioral oracle for one concrete, same-file type-bound function.
     !! The receiver is passive; the method's real argument is differentiated
-    !! after implicit PASS is normalized to an ordinary local call.
+    !! after implicit PASS or NOPASS is normalized to an ordinary local call.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
