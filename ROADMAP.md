@@ -90,9 +90,10 @@ the current integration gate is still open:
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
-      GNU is current: `fo check` builds all 407 targets and runs 30 tests.
+      GNU is current: `fo check` builds 408 targets, checks 407 derivative
+      targets, and runs 32 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
-      hazards. 96 `-Warray-temporaries` diagnostics still keep
+      hazards. 101 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
       predates the latest lowering work. `fo fmt --check` still reports
       formatting debt in legacy files. The files touched by the current slices
@@ -106,13 +107,14 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `f2fc745` (including the FortFront boundary
+The implementation snapshot is `97bff6e` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
-active-optional refusal, bounded concrete type-bound calls, and the lint
-hazard cleanup, the real-coordinate complex JVP slice, the select-type reverse
-finite-difference closeout, and the bounded derived-component slice). Its GNU
-behavioral gate is green (407/407 targets, 30/30 tests). The remaining lint
-diagnostics are the 96 array-temporary warnings
+active-optional refusal, bounded concrete type-bound calls with procedure
+scope-correct binding resolution, the real-coordinate complex JVP slice, the
+select-type reverse finite-difference closeout, the bounded derived-component
+slice, allocation-lifetime refusals, and alias/section refusals). Its GNU
+behavioral gate is green (408 build targets, 407 derivative targets, 32/32
+tests). The remaining lint diagnostics are the 101 array-temporary warnings
 listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
@@ -705,8 +707,8 @@ problem-specific rule.
             generation. Named PASS, inherited, generic, and deferred bindings
             remain named refusals. The compiled oracle is
             [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90). It
-            checks generated JVP/VJP values for both binding forms, central
-            finite differences, the adjoint seed, and all four refusal cases;
+            checks generated JVP/VJP values for both binding forms. It uses central
+            finite differences, the adjoint seed, and all four refusal cases.
             its second NOPASS case uses same-named locals in two procedures to
             verify scope-correct binding resolution. This does not cover
             active receiver cotangents, overrides, or runtime dispatch.
