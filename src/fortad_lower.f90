@@ -153,7 +153,7 @@ contains
         ! calls reaches exactly what inlining needs.
         chosen = 0
         do i = 1, res%arena%size
-            if (.not. allocated(res%arena%entries(i)%node)) cycle
+            if (.not. res%arena%has_node_at(i)) cycle
             select type (n => res%arena%entries(i)%node)
             type is (function_def_node)
                 if (wanted(n%name, proc_name, chosen)) then
@@ -194,7 +194,7 @@ contains
             do i = 1, res%arena%size
                 if (i == chosen) cycle
                 if (n_others >= MAX_PROCS) exit
-                if (.not. allocated(res%arena%entries(i)%node)) cycle
+                if (.not. res%arena%has_node_at(i)) cycle
                 ! A fresh one each time: lowering adds to whatever the
                 ! procedure already holds, so reusing one buffer gave the
                 ! second callee the first one's body as well.
@@ -329,7 +329,7 @@ contains
         do i = 1, size(param_indices)
             if (param_indices(i) <= 0) cycle
             if (param_indices(i) > arena%size) cycle
-            if (.not. allocated(arena%entries(param_indices(i))%node)) cycle
+            if (.not. arena%has_node_at(param_indices(i))) cycle
             select type (pn => arena%entries(param_indices(i))%node)
             type is (identifier_node)
                 n = n + 1
@@ -376,7 +376,7 @@ contains
 
         status%ok = .true.
         if (idx <= 0 .or. idx > arena%size) return
-        if (.not. allocated(arena%entries(idx)%node)) return
+        if (.not. arena%has_node_at(idx)) return
 
         select type (n => arena%entries(idx)%node)
         type is (comment_node)
@@ -541,7 +541,7 @@ contains
         integer :: i, j, index
 
         do i = 1, arena%size
-            if (.not. allocated(arena%entries(i)%node)) cycle
+            if (.not. arena%has_node_at(i)) cycle
             select type (m => arena%entries(i)%node)
             type is (module_node)
                 if (.not. allocated(m%procedure_indices)) cycle
@@ -550,7 +550,7 @@ contains
                 do j = 1, size(m%declaration_indices)
                     index = m%declaration_indices(j)
                     if (index <= 0 .or. index > arena%size) cycle
-                    if (.not. allocated(arena%entries(index)%node)) cycle
+                    if (.not. arena%has_node_at(index)) cycle
                     select type (n => arena%entries(index)%node)
                     type is (use_statement_node)
                         call add_use(proc, n)
@@ -587,7 +587,7 @@ contains
 
         text = ":"
         if (idx <= 0 .or. idx > arena%size) return
-        if (.not. allocated(arena%entries(idx)%node)) return
+        if (.not. arena%has_node_at(idx)) return
         select type (n => arena%entries(idx)%node)
         type is (identifier_node)
             text = n%name
@@ -713,7 +713,7 @@ contains
             status%message = "empty expression"
             return
         end if
-        if (.not. allocated(arena%entries(idx)%node)) then
+        if (.not. arena%has_node_at(idx)) then
             status%ok = .false.
             status%message = "empty expression node"
             return
@@ -773,7 +773,7 @@ contains
 
         line = 0
         if (idx <= 0 .or. idx > arena%size) return
-        if (.not. allocated(arena%entries(idx)%node)) return
+        if (.not. arena%has_node_at(idx)) return
         line = arena%entries(idx)%node%line
     end function node_line
 
