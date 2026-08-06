@@ -104,11 +104,12 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `159a686` (including the FortFront boundary
+The implementation snapshot is `bb9caeb` (including the FortFront boundary
 fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, bounded concrete type-bound calls, and the lint
-hazard cleanup and the real-coordinate complex JVP slice). Its GNU behavioral
-gate is green (407/407 targets, 29/29 tests). The remaining lint diagnostics
+hazard cleanup, the real-coordinate complex JVP slice, and the select-type
+reverse finite-difference closeout). Its GNU behavioral gate is green
+(407/407 targets, 29/29 tests). The remaining lint diagnostics
 are the 91 array-temporary warnings
 listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
@@ -665,8 +666,8 @@ problem-specific rule.
       exercises four runtime arms (three named children plus `class default`),
       checks hand gradients, two-step central differences of the untouched
       primal, and the reverse adjoint identity for every arm. The verified
-      scope is fixed-shape arms with matching writes and an active scalar input;
-      active derived components remain P7.1 work, while dynamic ownership and
+      scope is fixed-shape arms with matching writes and an active scalar input.
+      Active derived components remain P7.1 work, while dynamic ownership and
       dispatch-boundary diagnostics remain P8.5 and P8.7 work.
 - [ ] **P8.3 Concrete type-bound calls.** Resolve and transform `pass`, named
       `pass(arg)`, `nopass`, inherited bindings, overrides, and type-bound
