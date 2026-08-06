@@ -109,6 +109,11 @@ contains
         integer :: source_comma, source_depth, source_n_params
 
         opts%input_mode = INPUT_MODE_STANDARD
+        ! FortAD lowers from the parsed/query AST and performs its own
+        ! derivative checks.  Running FortFront's optional semantic pass here
+        ! is redundant and trips an NVFORTRAN allocator bug for scalar
+        ! external CALL statements; keep the frontend boundary parse-only.
+        opts%run_semantics = .false.
         opts%standardize = .false.
         call compile_frontend_from_string(source, res, opts)
 
