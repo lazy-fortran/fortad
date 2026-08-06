@@ -26,7 +26,8 @@ module fortad_reverse
         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, &
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
-        FAD_DIRECTIVE, FAD_SELECT_TYPE, &
+        FAD_DIRECTIVE, FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, &
+        FAD_CLASS_DEFAULT, FAD_END_SELECT, &
         FAD_INTENT_OUT, &
         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
@@ -111,6 +112,7 @@ module fortad_reverse
     integer, parameter :: ORDER_LOOP = 2
     integer, parameter :: ORDER_BRANCH = 3
     integer, parameter :: ORDER_CALL = 4
+    integer, parameter :: ORDER_SELECT = 5
 
     type :: call_record_t
         !! An opaque call whose registered rule is applied in reverse.
@@ -135,6 +137,24 @@ module fortad_reverse
         character(len=64), allocatable :: merge_from_else(:)
         integer :: n_merge = 0
     end type branch_record_t
+
+    type :: select_arm_record_t
+        !! One dynamic-type guard and the SSA assignments in that arm.
+        integer :: kind = 0
+        character(len=:), allocatable :: target
+        character(len=64), allocatable :: lhs(:)
+        integer, allocatable :: rhs(:)
+        integer :: n = 0
+    end type select_arm_record_t
+
+    type :: select_record_t
+        !! Runtime type dispatch is discrete and therefore passive. Both
+        !! sweeps repeat the same selector, while only arithmetic in the arm
+        !! chosen at runtime contributes derivatives.
+        integer :: selector = 0
+        type(select_arm_record_t), allocatable :: arms(:)
+        integer :: n_arms = 0
+    end type select_record_t
 
     type :: ssa_map_t
         !! Current SSA name of each declared variable, and the version counter.
@@ -161,9 +181,10 @@ contains
         integer, allocatable :: rhs_exprs(:)
         type(loop_record_t), allocatable :: loops(:)
         type(branch_record_t), allocatable :: branches(:)
+        type(select_record_t), allocatable :: selections(:)
         type(call_record_t), allocatable :: calls(:)
         integer, allocatable :: order_kind(:), order_index(:)
-        integer :: n_rec, n_loops, n_branches, n_calls, n_order
+        integer :: n_rec, n_loops, n_branches, n_selects, n_calls, n_order
 
         status%ok = .true.
         suffix = "_b"
@@ -207,6 +228,7 @@ contains
         call build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
             is_element, &
             n_rec, loops, n_loops, branches, n_branches, &
+            selections, n_selects, &
             calls, n_calls, &
             order_kind, order_index, n_order, active, &
             status)
@@ -214,6 +236,7 @@ contains
         call build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
             is_element, &
             n_rec, loops, n_loops, branches, n_branches, &
+            selections, n_selects, &
             calls, n_calls, &
             order_kind, order_index, n_order, &
             spec, dependent, suffix, active, status)
@@ -294,10 +317,11 @@ contains
                 ! Branches are handled by re-evaluating the condition in the
                 ! reverse sweep; see emit_branch_forward.
                 continue
-            case (FAD_SELECT_TYPE)
-                status%ok = .false.
-                status%message = "reverse mode: select type is not supported yet"
-                return
+            case (FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, &
+                    FAD_CLASS_DEFAULT, FAD_END_SELECT)
+                ! The selector is passive. Its dynamic type chooses which
+                ! smooth arm both the forward and reverse sweeps execute.
+                continue
             case (FAD_CALL_STMT)
                 if (.not. call_rule_has(primal%stmts(i)%target)) then
                     status%ok = .false.
@@ -565,6 +589,7 @@ contains
     subroutine build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
             is_element, &
             n_rec, loops, n_loops, branches, n_branches, &
+            selections, n_selects, &
             calls, n_calls, &
             order_kind, order_index, n_order, active, &
             status)
@@ -588,6 +613,8 @@ contains
         integer, intent(out) :: n_loops
         type(branch_record_t), allocatable, intent(out) :: branches(:)
         integer, intent(out) :: n_branches
+        type(select_record_t), allocatable, intent(out) :: selections(:)
+        integer, intent(out) :: n_selects
         type(call_record_t), allocatable, intent(out) :: calls(:)
         integer, intent(out) :: n_calls
         !! Blocks in forward program order, so the reverse sweep can walk them
@@ -612,12 +639,14 @@ contains
         is_element = .false.
         allocate (loops(max(1, primal%n_stmts)))
         allocate (branches(max(1, primal%n_stmts)))
+        allocate (selections(max(1, primal%n_stmts)))
         allocate (calls(max(1, primal%n_stmts)))
         allocate (order_kind(max(1, primal%n_stmts)))
         allocate (order_index(max(1, primal%n_stmts)))
         n_rec = 0
         n_loops = 0
         n_branches = 0
+        n_selects = 0
         n_calls = 0
         n_order = 0
 
@@ -693,6 +722,16 @@ contains
                 order_index(n_order) = n_branches
                 i = after
 
+            case (FAD_SELECT_TYPE)
+                n_selects = n_selects + 1
+                call emit_select_forward(primal, adjoint, ssa, i, &
+                    selections(n_selects), after, status)
+                if (.not. status%ok) return
+                n_order = n_order + 1
+                order_kind(n_order) = ORDER_SELECT
+                order_index(n_order) = n_selects
+                i = after
+
             case (FAD_CALL_STMT)
                 ! Calls are opaque, but a registered rule makes their primal
                 ! statement and reverse statement sequence explicit. Keep the
@@ -735,6 +774,146 @@ contains
             end select
         end do
     end subroutine build_forward_sweep
+
+    subroutine emit_select_forward(primal, adjoint, ssa, first, rec, after, &
+            status)
+        !! Re-emit one SELECT TYPE and put every guard arm in an independent
+        !! SSA state. The dynamic type is a passive runtime choice; all arms
+        !! must advance the same variables by the same number of versions so a
+        !! single post-select state exists without differentiating that choice.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(inout) :: ssa
+        integer, intent(in) :: first
+        type(select_record_t), intent(out) :: rec
+        integer, intent(out) :: after
+        type(reverse_status_t), intent(inout) :: status
+        type(fad_stmt_t) :: s
+        type(ssa_map_t) :: before, arm_ssa, common
+        integer, allocatable :: guard_at(:)
+        integer :: a, body_last, depth, end_at, i, ignored, n_guards
+        logical :: has_default
+
+        after = first + 1
+        allocate (guard_at(max(1, primal%n_stmts - first)))
+        depth = 0
+        end_at = 0
+        n_guards = 0
+        has_default = .false.
+        do i = first, primal%n_stmts
+            select case (primal%stmts(i)%kind)
+            case (FAD_SELECT_TYPE)
+                depth = depth + 1
+            case (FAD_END_SELECT)
+                depth = depth - 1
+                if (depth == 0) then
+                    end_at = i
+                    exit
+                end if
+            case (FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT)
+                if (depth /= 1) cycle
+                n_guards = n_guards + 1
+                guard_at(n_guards) = i
+                if (primal%stmts(i)%kind == FAD_CLASS_DEFAULT) then
+                    has_default = .true.
+                end if
+            end select
+        end do
+        if (end_at == 0) then
+            status%ok = .false.
+            status%message = "unterminated select type construct"
+            return
+        end if
+        if (n_guards == 0) then
+            status%ok = .false.
+            status%message = "reverse mode: select type has no guard arms"
+            return
+        end if
+        after = end_at + 1
+
+        rec%n_arms = n_guards
+        if (.not. has_default) rec%n_arms = rec%n_arms + 1
+        allocate (rec%arms(rec%n_arms))
+        rec%selector = copy_renamed(primal, adjoint, &
+            primal%stmts(first)%value, ssa)
+        before = ssa
+
+        s%kind = FAD_SELECT_TYPE
+        s%value = rec%selector
+        ignored = adjoint%add_stmt(s)
+
+        do a = 1, n_guards
+            rec%arms(a)%kind = primal%stmts(guard_at(a))%kind
+            if (allocated(primal%stmts(guard_at(a))%target)) then
+                rec%arms(a)%target = primal%stmts(guard_at(a))%target
+            end if
+            s%kind = rec%arms(a)%kind
+            s%value = 0
+            if (allocated(s%target)) deallocate (s%target)
+            if (allocated(rec%arms(a)%target)) s%target = rec%arms(a)%target
+            ignored = adjoint%add_stmt(s)
+
+            body_last = end_at - 1
+            if (a < n_guards) body_last = guard_at(a + 1) - 1
+            allocate (rec%arms(a)%lhs(max(1, body_last - guard_at(a))))
+            allocate (rec%arms(a)%rhs(max(1, body_last - guard_at(a))))
+            arm_ssa = before
+            call emit_arm(primal, adjoint, arm_ssa, guard_at(a) + 1, &
+                body_last, rec%arms(a)%lhs, rec%arms(a)%rhs, &
+                rec%arms(a)%n, status)
+            if (.not. status%ok) return
+            if (a == 1) then
+                common = arm_ssa
+            else
+                if (.not. same_ssa_state(common, arm_ssa)) then
+                    status%ok = .false.
+                    status%message = "reverse mode: select type arms must assign "// &
+                        "the same variables the same number of times"
+                    return
+                end if
+            end if
+        end do
+
+        if (.not. has_default) then
+            a = rec%n_arms
+            rec%arms(a)%kind = FAD_CLASS_DEFAULT
+            allocate (rec%arms(a)%lhs(max(1, primal%n_decls)))
+            allocate (rec%arms(a)%rhs(max(1, primal%n_decls)))
+            s%kind = FAD_CLASS_DEFAULT
+            s%value = 0
+            if (allocated(s%target)) deallocate (s%target)
+            ignored = adjoint%add_stmt(s)
+            do i = 1, primal%n_decls
+                if (trim(common%current(i)) == trim(before%current(i))) cycle
+                s%kind = FAD_ASSIGN
+                s%target = trim(common%current(i))
+                s%value = adjoint%add_expr(expr_var(trim(before%current(i))))
+                ignored = adjoint%add_stmt(s)
+                rec%arms(a)%n = rec%arms(a)%n + 1
+                rec%arms(a)%lhs(rec%arms(a)%n) = trim(common%current(i))
+                rec%arms(a)%rhs(rec%arms(a)%n) = s%value
+            end do
+        end if
+
+        s%kind = FAD_END_SELECT
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        ignored = adjoint%add_stmt(s)
+        ssa = common
+    end subroutine emit_select_forward
+
+    logical function same_ssa_state(a, b) result(same)
+        type(ssa_map_t), intent(in) :: a, b
+        integer :: i
+
+        same = .false.
+        if (a%n /= b%n) return
+        do i = 1, a%n
+            if (trim(a%current(i)) /= trim(b%current(i))) return
+            if (a%version(i) /= b%version(i)) return
+        end do
+        same = .true.
+    end function same_ssa_state
 
     subroutine emit_branch_forward(primal, adjoint, ssa, first, rec, after, status)
         !! Emit one if/else, renaming each arm independently and merging.
@@ -1343,6 +1522,7 @@ contains
     subroutine build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
             is_element, &
             n_rec, loops, n_loops, branches, n_branches, &
+            selections, n_selects, &
             calls, n_calls, &
             order_kind, order_index, n_order, &
             spec, dependent, suffix, active, status)
@@ -1362,6 +1542,8 @@ contains
         integer, intent(in) :: n_loops
         type(branch_record_t), intent(in) :: branches(:)
         integer, intent(in) :: n_branches
+        type(select_record_t), intent(in) :: selections(:)
+        integer, intent(in) :: n_selects
         type(call_record_t), intent(in) :: calls(:)
         integer, intent(in) :: n_calls
         integer, intent(in) :: order_kind(:), order_index(:), n_order
@@ -1429,6 +1611,10 @@ contains
             call zero_branch_adjoints(primal, adjoint, ssa, branches(k), suffix, &
                 active, zero)
         end do
+        do k = 1, n_selects
+            call zero_select_adjoints(primal, adjoint, ssa, selections(k), &
+                suffix, active, zero)
+        end do
         do k = 1, n_calls
             call zero_call_adjoints(primal, adjoint, ssa, calls(k), suffix, zero)
         end do
@@ -1486,6 +1672,9 @@ contains
                 call emit_branch_reverse(primal, adjoint, ssa, &
                     branches(order_index(k)), suffix, &
                     active, n_tmp, status)
+            case (ORDER_SELECT)
+                call emit_select_reverse(primal, adjoint, ssa, &
+                    selections(order_index(k)), suffix, active, n_tmp, status)
             case (ORDER_LOOP)
                 call emit_loop_reverse(primal, adjoint, ssa, &
                     loops(order_index(k)), suffix, &
@@ -1675,6 +1864,83 @@ contains
         s%value = 0
         ignored = adjoint%add_stmt(s)
     end subroutine emit_branch_reverse
+
+    subroutine zero_select_adjoints(primal, adjoint, ssa, rec, suffix, active, &
+            zero)
+        !! Declare and clear the SSA adjoints introduced in SELECT TYPE arms.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(in) :: ssa
+        type(select_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: active(:)
+        integer, intent(in) :: zero
+        type(fad_stmt_t) :: s
+        character(len=64), allocatable :: seen(:)
+        integer :: a, capacity, i, ignored, n_seen
+
+        capacity = 0
+        do a = 1, rec%n_arms
+            capacity = capacity + rec%arms(a)%n
+        end do
+        allocate (seen(max(1, capacity)))
+        n_seen = 0
+        do a = 1, rec%n_arms
+            do i = 1, rec%arms(a)%n
+                if (.not. adjoint_is_live(primal, ssa, rec%arms(a)%lhs(i), &
+                    active)) cycle
+                if (is_known_name(seen, n_seen, &
+                    trim(rec%arms(a)%lhs(i)))) cycle
+                n_seen = n_seen + 1
+                seen(n_seen) = trim(rec%arms(a)%lhs(i))
+                call declare_adjoint(primal, adjoint, ssa, &
+                    trim(rec%arms(a)%lhs(i)), suffix)
+                s%kind = FAD_ASSIGN
+                s%target = trim(rec%arms(a)%lhs(i))//suffix
+                s%value = zero
+                ignored = adjoint%add_stmt(s)
+            end do
+        end do
+    end subroutine zero_select_adjoints
+
+    subroutine emit_select_reverse(primal, adjoint, ssa, rec, suffix, active, &
+            n_tmp, status)
+        !! Repeat the passive runtime dispatch and unwind only its chosen arm.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(in) :: ssa
+        type(select_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: active(:)
+        integer, intent(inout) :: n_tmp
+        type(reverse_status_t), intent(inout) :: status
+        type(fad_stmt_t) :: s
+        integer :: a, i, ignored, seed_expr
+
+        s%kind = FAD_SELECT_TYPE
+        s%value = rec%selector
+        ignored = adjoint%add_stmt(s)
+        do a = 1, rec%n_arms
+            s%kind = rec%arms(a)%kind
+            s%value = 0
+            if (allocated(s%target)) deallocate (s%target)
+            if (allocated(rec%arms(a)%target)) s%target = rec%arms(a)%target
+            ignored = adjoint%add_stmt(s)
+            do i = rec%arms(a)%n, 1, -1
+                if (.not. adjoint_is_live(primal, ssa, rec%arms(a)%lhs(i), &
+                    active)) cycle
+                seed_expr = adjoint%add_expr( &
+                    expr_var(trim(rec%arms(a)%lhs(i))//suffix))
+                call accumulate(primal, adjoint, rec%arms(a)%rhs(i), seed_expr, &
+                    ssa, suffix, active, n_tmp, status)
+                if (.not. status%ok) return
+            end do
+        end do
+        s%kind = FAD_END_SELECT
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        ignored = adjoint%add_stmt(s)
+    end subroutine emit_select_reverse
 
     subroutine declare_array_adjoint(primal, adjoint, base, suffix, zero)
         !! Declare and zero the adjoint array of an array written in a loop.

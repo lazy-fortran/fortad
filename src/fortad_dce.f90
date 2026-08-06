@@ -16,10 +16,12 @@ module fortad_dce
     !! read nowhere later. Inside a loop the test is stricter: the variable must
     !! not be read anywhere in that loop body at all, because a read earlier in
     !! the body is a read of the *next* iteration's value.
-    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
+    use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_decl_t, &
         copy_decl, &
         FAD_VAR, FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, &
         FAD_IF, FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
+        FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT, &
+        FAD_END_SELECT, &
         FAD_INTENT_NONE
     implicit none
     private
@@ -345,7 +347,9 @@ contains
                     end if
                     ! Control flow between the two makes the fold unsound.
                     select case (p%stmts(k)%kind)
-                    case (FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, FAD_END_IF)
+                    case (FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, FAD_END_IF, &
+                            FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, &
+                            FAD_CLASS_DEFAULT, FAD_END_SELECT)
                         j = 0
                         exit
                     end select
@@ -523,7 +527,7 @@ contains
             if (allocated(p%stmts(idx)%target)) then
                 if (trim(p%stmts(idx)%target) == name) yes = .true.
             end if
-        case (FAD_IF)
+        case (FAD_IF, FAD_SELECT_TYPE)
             yes = expr_reads(p, p%stmts(idx)%value, name)
         case (FAD_CALL_STMT)
             if (.not. allocated(p%stmts(idx)%call_args)) return

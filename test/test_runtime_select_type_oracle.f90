@@ -1,7 +1,9 @@
 program test_runtime_select_type_oracle
-    !! A runtime type choice must select the matching primal and tangent arm.
-    !! The expected derivatives below are hand-derived from two different
-    !! concrete models; inspecting generated source would not test dispatch.
+    !! A runtime type choice must select matching primal, tangent, and adjoint
+    !! arms. The selector and its dynamic type stay passive: only `x` is an
+    !! independent. Hand gradients and the adjoint identity cover two named
+    !! child types and the class-default path; source inspection would not test
+    !! the runtime dispatch.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -17,6 +19,8 @@ program test_runtime_select_type_oracle
         "    type, extends(model_t) :: quadratic_t"//nl// &
         "        real(8) :: scale"//nl// &
         "    end type quadratic_t"//nl// &
+        "    type, extends(model_t) :: fallback_t"//nl// &
+        "    end type fallback_t"//nl// &
         "end module runtime_models"//nl// &
         "module runtime_kernel"//nl// &
         "    use runtime_models, only: model_t, linear_t, quadratic_t"//nl// &
@@ -29,10 +33,10 @@ program test_runtime_select_type_oracle
         "        select type (model)"//nl// &
         "        type is (linear_t)"//nl// &
         "            y = model%scale*x"//nl// &
-        "        type is (quadratic_t)"//nl// &
+        "        class is (quadratic_t)"//nl// &
         "            y = model%scale*x*x"//nl// &
         "        class default"//nl// &
-        "            y = 0.0d0"//nl// &
+        "            y = -2.0d0*x"//nl// &
         "        end select"//nl// &
         "    end function evaluate"//nl// &
         "end module runtime_kernel"//nl
@@ -48,8 +52,9 @@ program test_runtime_select_type_oracle
     end if
 
     adjoint = fad_vjp(source, ["x"], dependent="y", from="evaluate")
-    if (adjoint%ok .or. index(adjoint%message, "select type") == 0) then
-        error stop "reverse mode must name its unsupported dispatch boundary"
+    if (.not. adjoint%ok) then
+        print *, "reverse generation failed: ", adjoint%message
+        error stop 1
     end if
 
     dir = "build/oracle/runtime_select_type"
@@ -67,24 +72,56 @@ program test_runtime_select_type_oracle
     write (unit, '(a)') "end module runtime_generated"
     close (unit)
 
+    open (newunit=unit, file=dir//"/adjoint.f90", status="replace", &
+        action="write")
+    write (unit, '(a)') "module runtime_adjoint_generated"
+    write (unit, '(a)') "contains"
+    write (unit, '(a)') adjoint%code
+    write (unit, '(a)') "end module runtime_adjoint_generated"
+    close (unit)
+
     driver = &
         "program driver"//nl// &
-        "    use runtime_models, only: linear_t, quadratic_t"//nl// &
+        "    use runtime_models, only: model_t, linear_t, quadratic_t, fallback_t"//nl// &
         "    use runtime_generated, only: evaluate_jvp"//nl// &
+        "    use runtime_adjoint_generated, only: evaluate_vjp"//nl// &
         "    implicit none"//nl// &
         "    type(linear_t) :: linear"//nl// &
         "    type(quadratic_t) :: quadratic"//nl// &
-        "    real(8) :: x, x_d, y, y_d"//nl// &
-        "    x = 2.0d0"//nl// &
-        "    x_d = 1.0d0"//nl// &
+        "    type(fallback_t) :: fallback"//nl// &
         "    linear%scale = 3.0d0"//nl// &
-        "    call evaluate_jvp(linear, x, x_d, y, y_d)"//nl// &
-        "    if (abs(y - 6.0d0) > 1.0d-13) error stop 1"//nl// &
-        "    if (abs(y_d - 3.0d0) > 1.0d-13) error stop 2"//nl// &
         "    quadratic%scale = 3.0d0"//nl// &
-        "    call evaluate_jvp(quadratic, x, x_d, y, y_d)"//nl// &
-        "    if (abs(y - 12.0d0) > 1.0d-13) error stop 3"//nl// &
-        "    if (abs(y_d - 12.0d0) > 1.0d-13) error stop 4"//nl// &
+        "    call check(linear, 6.0d0, 3.0d0, 'linear')"//nl// &
+        "    call check(quadratic, 12.0d0, 12.0d0, 'quadratic')"//nl// &
+        "    call check(fallback, -4.0d0, -2.0d0, 'class default')"//nl// &
+        "contains"//nl// &
+        "    subroutine check(model, expected_y, expected_grad, label)"//nl// &
+        "        class(model_t), intent(in) :: model"//nl// &
+        "        real(8), intent(in) :: expected_y, expected_grad"//nl// &
+        "        character(len=*), intent(in) :: label"//nl// &
+        "        real(8) :: x, x_d, y, y_d, y_b, x_b"//nl// &
+        "        x = 2.0d0"//nl// &
+        "        x_d = -0.4d0"//nl// &
+        "        y_b = 1.7d0"//nl// &
+        "        call evaluate_jvp(model, x, x_d, y, y_d)"//nl// &
+        "        if (abs(y - expected_y) > 1.0d-13) then"//nl// &
+        "            print *, label, ' primal', y, expected_y"//nl// &
+        "            error stop 1"//nl// &
+        "        end if"//nl// &
+        "        call evaluate_vjp(model, x, y, y_b, x_b)"//nl// &
+        "        if (abs(y - expected_y) > 1.0d-13) then"//nl// &
+        "            print *, label, ' vjp primal', y, expected_y"//nl// &
+        "            error stop 2"//nl// &
+        "        end if"//nl// &
+        "        if (abs(x_b - y_b*expected_grad) > 1.0d-13) then"//nl// &
+        "            print *, label, ' gradient', x_b, y_b*expected_grad"//nl// &
+        "            error stop 3"//nl// &
+        "        end if"//nl// &
+        "        if (abs(y_b*y_d - x_b*x_d) > 1.0d-13) then"//nl// &
+        "            print *, label, ' adjoint identity', y_b*y_d, x_b*x_d"//nl// &
+        "            error stop 4"//nl// &
+        "        end if"//nl// &
+        "    end subroutine check"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", action="write")
     write (unit, '(a)') driver
@@ -93,7 +130,8 @@ program test_runtime_select_type_oracle
     call execute_command_line( &
         "gfortran -std=f2018 -O2 -J"//dir//" -I"//dir//" -o "// &
         dir//"/run "//dir//"/primal.f90 "// &
-        dir//"/tangent.f90 "//dir//"/driver.f90 > "//dir//"/build.log 2>&1", &
+        dir//"/tangent.f90 "//dir//"/adjoint.f90 "// &
+        dir//"/driver.f90 > "//dir//"/build.log 2>&1", &
         exitstat=stat)
     if (stat /= 0) then
         print *, "generated source did not compile; see ", dir//"/build.log"
