@@ -301,9 +301,23 @@ contains
         !! assembled here for dummy-argument extraction.
         character(len=*), intent(in) :: header, attribute
         character(len=:), allocatable :: text, needle
-        integer :: i, last
+        integer :: i, last, comment, keyword
 
-        text = " "//trim(lower_ascii(header))//" "
+        text = lower_ascii(header)
+        comment = index(text, "!")
+        if (comment == 1) then
+            text = ""
+        else if (comment > 1) then
+            text = text(:comment - 1)
+        end if
+        keyword = index(text, "function")
+        if (keyword == 0) keyword = index(text, "subroutine")
+        if (keyword == 1) then
+            text = ""
+        else if (keyword > 1) then
+            text = text(:keyword - 1)
+        end if
+        text = " "//trim(text)//" "
         needle = " "//trim(attribute)//" "
         found = .false.
         last = len_trim(text) - len(needle) + 1
