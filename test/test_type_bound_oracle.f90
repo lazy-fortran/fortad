@@ -46,6 +46,7 @@ program test_type_bound_oracle
     call check_nopass(nopass_source(), "nopass_case")
     call check_nopass(nopass_scope_source(), "nopass_scope_case")
     call expect_refusal(ambiguous_source(), "ambiguous type", "ambiguous")
+    call expect_active_receiver_refusal(active_receiver_source())
     call expect_refusal(inherited_source(), "inheritance", "inherited")
     call expect_refusal(generic_source(), "generic", "generic")
     call expect_refusal(deferred_source(), "deferred", "deferred")
@@ -145,7 +146,54 @@ contains
                 result%message
             error stop 1
         end if
+
+        result = fad_vjp(case_source, ["x"], dependent="y", from="top")
+        if (result%ok) then
+            print *, "FAIL type-bound ", label, ": VJP refusal was accepted"
+            error stop 1
+        end if
+        if (.not. allocated(result%message)) then
+            print *, "FAIL type-bound ", label, ": VJP refusal was not named"
+            error stop 1
+        else if (index(result%message, needle) == 0) then
+            print *, "FAIL type-bound ", label, ": VJP refusal was not named: ", &
+                result%message
+            error stop 1
+        end if
     end subroutine expect_refusal
+
+    subroutine expect_active_receiver_refusal(case_source)
+        character(len=*), intent(in) :: case_source
+        type(fad_result_t) :: result
+
+        result = fad_jvp(case_source, ["model"], from="top")
+        if (result%ok) then
+            print *, "FAIL active receiver: JVP was accepted"
+            error stop 1
+        end if
+        if (.not. allocated(result%message)) then
+            print *, "FAIL active receiver: JVP refusal was not named"
+            error stop 1
+        else if (index(result%message, "active derived object") == 0) then
+            print *, "FAIL active receiver: JVP refusal was not named: ", &
+                result%message
+            error stop 1
+        end if
+
+        result = fad_vjp(case_source, ["model"], dependent="y", from="top")
+        if (result%ok) then
+            print *, "FAIL active receiver: VJP was accepted"
+            error stop 1
+        end if
+        if (.not. allocated(result%message)) then
+            print *, "FAIL active receiver: VJP refusal was not named"
+            error stop 1
+        else if (index(result%message, "active derived object") == 0) then
+            print *, "FAIL active receiver: VJP refusal was not named: ", &
+                result%message
+            error stop 1
+        end if
+    end subroutine expect_active_receiver_refusal
 
     subroutine check_nopass(case_source, case_module)
         character(len=*), intent(in) :: case_source, case_module
@@ -336,6 +384,28 @@ contains
             "    end function top"//nl// &
             "end module ambiguous_two"//nl
     end function ambiguous_source
+
+    function active_receiver_source() result(text)
+        character(len=:), allocatable :: text
+        text = "module active_receiver_case"//nl// &
+            "    type :: box_t"//nl// &
+            "        real(8) :: scale"//nl// &
+            "    contains"//nl// &
+            "        procedure :: value"//nl// &
+            "    end type box_t"//nl// &
+            "contains"//nl// &
+            "    pure real(8) function value(self, x) result(y)"//nl// &
+            "        class(box_t), intent(in) :: self"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = self%scale*x"//nl// &
+            "    end function value"//nl// &
+            "    pure real(8) function top(model, x) result(y)"//nl// &
+            "        type(box_t), intent(in) :: model"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = model%value(x)"//nl// &
+            "    end function top"//nl// &
+            "end module active_receiver_case"//nl
+    end function active_receiver_source
 
     function inherited_source() result(text)
         character(len=:), allocatable :: text
