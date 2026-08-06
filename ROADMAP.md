@@ -91,9 +91,9 @@ the current integration gate is still open:
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds 408 targets, checks 407 derivative
-      targets, and runs 32 tests.
+      targets, and runs 33 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
-      hazards. 104 `-Warray-temporaries` diagnostics still keep
+      hazards. 106 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
       predates the latest lowering work. `fo fmt --check` still reports
       formatting debt in legacy files. The files touched by the current slices
@@ -112,9 +112,9 @@ fix, the portable CLI oracle, optional-dummy preservation, the explicit
 active-optional refusal, bounded concrete type-bound calls with procedure
 scope-correct binding resolution, the real-coordinate complex JVP slice, the
 select-type reverse finite-difference closeout, the bounded derived-component
-slice, allocation-lifetime refusals, and alias/section refusals). Its GNU
-behavioral gate is green (408 build targets, 407 derivative targets, 32/32
-tests). The remaining lint diagnostics are the 104 array-temporary warnings
+ slice, allocation-lifetime refusals, and alias/section refusals). Its GNU
+ behavioral gate is green (408 build targets, 407 derivative targets, 33/33
+tests). The remaining lint diagnostics are the 106 array-temporary warnings
 listed above. The three previously failing nvfortran rule
 oracles now pass after `a85aab9` moves lowering to FortFront's parse/query
 boundary and adds a scalar external-CALL refusal oracle. The complete
@@ -661,8 +661,16 @@ of selected child ends the fixed-path derivative contract.
             [`test_complex_intrinsic_oracle.f90`](test/test_complex_intrinsic_oracle.f90).
             Active complex reverse paths now refuse before emission with a
             named diagnostic rather than producing invalid Fortran.
-      Complex reverse rules, complex BLAS, and non-holomorphic objective
-      conventions remain open.
+      - [x] **P7.5b bounded real-objective projection VJP.** A real-valued
+            objective may depend on an active complex input through direct
+            `real(z)` or `dble(z)` projections and ordinary real arithmetic.
+            The generated complex adjoint stores the two coordinate gradients;
+            [`test_complex_reverse_oracle.f90`](test/test_complex_reverse_oracle.f90)
+            checks hand values, central differences, and the real adjoint
+            identity. Complex arithmetic, `aimag`, `conjg`, `abs`, complex
+            outputs, and BLAS remain named refusal boundaries.
+      Complex reverse rules beyond this projection, complex BLAS, and
+      non-holomorphic objective conventions remain open.
 - [ ] **P7.6 Source forms.** Accept fixed form, CPP and includes,
       semicolon-separated statements, mixed legacy modules, and generated
       interfaces on the same path used by the production build.
