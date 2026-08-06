@@ -9,3 +9,4 @@ build-*/
 # The third-party study corpus and the literature live in fortad-bench.
 # Nothing third-party belongs in this repository at all.
 build/
+.provenance/
