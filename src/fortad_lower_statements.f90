@@ -21,7 +21,10 @@ module fortad_lower_statements
         FAD_END_SELECT, FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC
     use fortad_lower_types, only: lower_status_t
     use fortad_use_store, only: ensure_use_capacity
-    use frontend_compiler_queries, only: storage_query_t, query_storage
+    use fortad_emit, only: emit_expr
+    use frontend_compiler_queries, only: storage_query_t, query_storage, &
+        array_slice_query_t, array_bounds_query_t, range_expression_query_t, &
+        query_array_slice, query_array_bounds, query_range_expression
     implicit none
     private
 
@@ -883,6 +886,7 @@ contains
         type(fad_expr_t) :: e
         integer :: i
         integer, allocatable :: subs(:)
+        integer :: section_expr
 
         if (idx <= 0 .or. idx > arena%size) then
             status%ok = .false.
@@ -890,7 +894,8 @@ contains
             return
         end if
         if (is_section_node(arena, idx)) then
-            call refuse_array_section(arena, idx, status)
+            section_expr = lower_array_section(arena, idx, proc, status)
+            if (status%ok) s%target = emit_expr(proc, section_expr)
             return
         end if
         select type (n => arena%entries(idx)%node)
@@ -977,7 +982,7 @@ contains
         end if
 
         if (is_section_node(arena, idx)) then
-            call refuse_array_section(arena, idx, status)
+            out = lower_array_section(arena, idx, proc, status)
             return
         end if
 
@@ -1138,17 +1143,218 @@ contains
             index(node_type, "range_subscript") > 0
     end function is_section_node
 
+    recursive integer function lower_array_section(arena, idx, proc, status) &
+            result(out)
+        !! Lower one proven-contiguous rank-one section into an indexed value.
+        !!
+        !! A range is kept as a passive textual IR argument because section
+        !! bounds select storage; they are not differentiable values on the
+        !! fixed execution path. The accepted base cases are deliberately
+        !! narrow: no component expression, no vector or stride subscript, and
+        !! only storage whose contiguity is known from the declaration.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+        type(array_slice_query_t) :: slice
+        type(array_bounds_query_t) :: bounds
+        type(range_expression_query_t) :: range
+        type(fad_expr_t) :: e
+        character(len=:), allocatable :: base_name
+        integer :: base_expr, decl_idx, bound_expr
+
+        out = 0
+        status%ok = .true.
+        if (trim(arena%entries(idx)%node_type) /= "array_slice") then
+            call refuse_array_section(arena, idx, status)
+            return
+        end if
+
+        slice = query_array_slice(arena, idx)
+        if (.not. slice%found) then
+            call refuse_section(arena, idx, "the frontend did not provide slice facts", &
+                status)
+            return
+        end if
+        if (slice%is_character_substring) then
+            call refuse_section(arena, idx, &
+                "character substrings are not array storage", status)
+            return
+        end if
+        if (.not. allocated(slice%bounds_node_indices)) then
+            call refuse_section(arena, idx, "missing section bounds", status)
+            return
+        end if
+        if (size(slice%bounds_node_indices) /= 1) then
+            call refuse_section(arena, idx, &
+                "only rank-one sections have a storage proof", status)
+            return
+        end if
+        if (.not. arena%has_node_at(slice%base_node_index)) then
+            call refuse_section(arena, idx, &
+                "the section base is not a declared object", status)
+            return
+        end if
+        select type (base => arena%entries(slice%base_node_index)%node)
+            type is (identifier_node)
+            base_name = trim(base%name)
+        class default
+            call refuse_section(arena, idx, &
+                "component or computed bases have untracked storage identity", status)
+            return
+        end select
+
+        decl_idx = proc%decl_index(base_name)
+        if (decl_idx <= 0) then
+            call refuse_section(arena, idx, "the section base is not declared", status)
+            return
+        end if
+        if (.not. proc%decls(decl_idx)%is_array) then
+            call refuse_section(arena, idx, "the section base is not an array", status)
+            return
+        end if
+        if (.not. section_base_contiguous(proc, decl_idx)) then
+            call refuse_section(arena, idx, &
+                "the section base is not declared contiguous or owning", status)
+            return
+        end if
+
+        base_expr = lower_expr(arena, slice%base_node_index, proc, status)
+        if (.not. status%ok) return
+        e%kind = FAD_INDEX
+        e%text = emit_expr(proc, base_expr)
+        allocate (e%args(1))
+        bounds = query_array_bounds(arena, slice%bounds_node_indices(1))
+        if (bounds%found) then
+            if (bounds%stride_node_index > 0) then
+                call refuse_section(arena, idx, &
+                    "a stride makes the section noncontiguous", status)
+                return
+            end if
+            if (bounds%is_assumed_size .or. bounds%is_assumed_rank) then
+                call refuse_section(arena, idx, &
+                    "assumed-size or assumed-rank storage is not proven", status)
+                return
+            end if
+            bound_expr = lower_section_bound(arena, bounds, proc, status)
+        else
+            range = query_range_expression(arena, slice%bounds_node_indices(1))
+            if (.not. range%found) then
+                call refuse_section(arena, idx, &
+                    "the frontend did not provide bound facts", status)
+                return
+            end if
+            if (range%stride_node_index > 0) then
+                call refuse_section(arena, idx, &
+                    "a stride makes the section noncontiguous", status)
+                return
+            end if
+            bound_expr = lower_range_bound(arena, range, proc, status)
+        end if
+        if (.not. status%ok) return
+        e%args(1) = bound_expr
+        out = proc%add_expr(e)
+    end function lower_array_section
+
+    integer function lower_section_bound(arena, bounds, proc, status) result(out)
+        !! Keep a non-strided range as one passive IR argument, e.g. `2:n`.
+        type(ast_arena_t), intent(in) :: arena
+        type(array_bounds_query_t), intent(in) :: bounds
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+        type(fad_expr_t) :: e
+        integer :: lower, upper
+        character(len=:), allocatable :: lower_text, upper_text
+
+        out = 0
+        lower_text = ""
+        upper_text = ""
+        if (bounds%lower_bound_node_index > 0) then
+            lower = lower_expr(arena, bounds%lower_bound_node_index, proc, status)
+            if (.not. status%ok) return
+            lower_text = emit_expr(proc, lower)
+        end if
+        if (bounds%upper_bound_node_index > 0) then
+            upper = lower_expr(arena, bounds%upper_bound_node_index, proc, status)
+            if (.not. status%ok) return
+            upper_text = emit_expr(proc, upper)
+        end if
+        e%kind = FAD_VAR
+        e%text = lower_text//":"//upper_text
+        out = proc%add_expr(e)
+    end function lower_section_bound
+
+    integer function lower_range_bound(arena, range, proc, status) result(out)
+        !! Keep a parser range expression as one passive IR argument.
+        type(ast_arena_t), intent(in) :: arena
+        type(range_expression_query_t), intent(in) :: range
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+        type(fad_expr_t) :: e
+        integer :: start, finish
+        character(len=:), allocatable :: start_text, finish_text
+
+        out = 0
+        start_text = ""
+        finish_text = ""
+        if (range%start_node_index > 0) then
+            start = lower_expr(arena, range%start_node_index, proc, status)
+            if (.not. status%ok) return
+            start_text = emit_expr(proc, start)
+        end if
+        if (range%end_node_index > 0) then
+            finish = lower_expr(arena, range%end_node_index, proc, status)
+            if (.not. status%ok) return
+            finish_text = emit_expr(proc, finish)
+        end if
+        e%kind = FAD_VAR
+        e%text = start_text//":"//finish_text
+        out = proc%add_expr(e)
+    end function lower_range_bound
+
+    logical function section_base_contiguous(proc, decl_idx) result(yes)
+        !! Whether a declaration proves contiguous storage without aliases.
+        type(fad_proc_t), intent(in) :: proc
+        integer, intent(in) :: decl_idx
+        character(len=:), allocatable :: dims
+
+        yes = .false.
+        if (decl_idx <= 0 .or. decl_idx > proc%n_decls) return
+        if (proc%decls(decl_idx)%is_allocatable) then
+            yes = .true.
+            return
+        end if
+        if (proc%decls(decl_idx)%is_contiguous) then
+            yes = .true.
+            return
+        end if
+        if (.not. allocated(proc%decls(decl_idx)%dims)) return
+        dims = trim(proc%decls(decl_idx)%dims)
+        if (len_trim(dims) == 0) return
+        if (index(dims, ":") > 0 .or. index(dims, "*") > 0) return
+        yes = index(dims, ",") == 0
+    end function section_base_contiguous
+
     subroutine refuse_array_section(arena, idx, status)
-        !! Refuse non-element sections until storage identity is tracked.
+        !! Refuse a range-subscript or otherwise unclassified section.
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: idx
         type(lower_status_t), intent(inout) :: status
 
+        call refuse_section(arena, idx, "section storage identity is not represented", &
+            status)
+    end subroutine refuse_array_section
+
+    subroutine refuse_section(arena, idx, reason, status)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: reason
+        type(lower_status_t), intent(inout) :: status
+
         status%ok = .false.
         status%message = "unsupported array section at line "// &
-            itoa(node_line(arena, idx))//": noncontiguous and overlapping "// &
-            "storage identity is not tracked"
-    end subroutine refuse_array_section
+            itoa(node_line(arena, idx))//": "//trim(reason)
+    end subroutine refuse_section
 
     logical function has_vector_subscript(arena, arg_indices, lowered_args, proc) &
             result(found)
