@@ -87,7 +87,7 @@ contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, and GOTO extractions,
 the rebased integer(8)/descriptor dispatch guard, the bare-DIMENSION #2848
 fix, and the GCC14-safe host exports needed for clean linking. Clean
-validation is `fo clean && fo build` 446/446 on the current head; focused
+validation is `fo clean && fo build` 447/447 on the current head; focused
 structured-control, DIMENSION/Lazy-array, TRANSFER, deep-copy, and integer
 oracles pass with independent gfortran differentials. PR #699 merged as
 `b0b7775`, PR #700 as `cc91e32`, and the structured-control wave as
