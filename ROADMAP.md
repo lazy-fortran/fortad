@@ -20,6 +20,52 @@ work**. A complete but unmeasured mode matrix is unfinished, and a benchmark
 win on one kernel is not generalized beyond its evidence. The reasoning behind
 every choice below is in [docs/dossier.md](docs/dossier.md).
 
+## Product direction and priority order
+
+FortAD targets modern Fortran dataflow in the maintained lazy-fortran and
+itpplasma applications. The product model includes explicit ownership,
+procedure interfaces, derived values, allocatable data, abstract classes,
+deferred bindings, and runtime polymorphism on a fixed execution path. The
+compiler must differentiate the abstraction boundary itself, so an abstract
+base class may expose a deferred operation and a concrete child may implement
+that operation without flattening the application's design by hand.
+
+Active global mutable state is outside this model. FortAD refuses active
+`COMMON`, mutable module or `SAVE` state, uncontrolled aliasing, active I/O,
+and opaque calls without derivative rules. Passive constants, configuration,
+and runtime tags remain allowed when they do not enter the derivative graph.
+The refusal names the missing contract and its source location.
+
+The implementation priorities are now:
+
+1. **Correct lowering and diagnostics.** Repair generated reverse signatures,
+   hidden extents, call-graph edges, and procedure interfaces. A successful
+   transform must produce independently compilable Fortran or a precise
+   source-local refusal.
+2. **Owned modern data.** Implement allocatable lifetime, reallocation,
+   deep assignment, `move_alloc`, derived-value activity, and storage-aware
+   array sections. Support safe ownership patterns and refuse untracked
+   aliasing.
+3. **Abstraction and polymorphism.** Complete abstract and deferred binding
+   hierarchies, inherited overrides, type-bound generics, direct class
+   dispatch, `select type`, polymorphic allocation, nested polymorphic values,
+   and active receiver components. The derivative must follow the selected
+   child while treating the runtime type choice as passive on the fixed path.
+4. **Application interfaces and rules.** Cover optional and keyword calls,
+   generic resolution, procedure pointers, callbacks, numerical libraries,
+   MPI, OpenMP, and accelerator operations through explicit derivative rules.
+5. **Reverse storage and scale.** Add general loop replay, checkpointing,
+   batched reverse products, memory controls, and code-generation performance
+   after the semantic model can represent the application paths.
+6. **Corpus and compatibility.** Use Tapenade as a migration and regression
+   matrix. Automate its classification, but do not spend feature budget on
+   legacy-only patterns or active global state that the product deliberately
+   rejects.
+
+The first five priorities are product work. A Tapenade refusal that falls
+inside the deliberate boundary is a useful negative test, not a roadmap
+failure. A refusal for a modern application construct is an open defect.
+
 ## Hard execution rules
 
 Work through this file one checkbox at a time.
@@ -150,8 +196,9 @@ FortAD gate.
 - [ ] Complete result tables and plot links have been posted to Zulip.
 
 The work after this gate is Phases 7 through 12. It extends FortAD from the
-current arithmetic subset to the program semantics used by the pinned
-itpplasma applications.
+current arithmetic subset to the modern program semantics used by the pinned
+lazy-fortran and itpplasma applications. The priority order above governs the
+phase checklist below.
 
 The implementation snapshot is the current `main` head. Its GNU behavioral gate is green
 (408 build targets, 407 derivative targets, 36/36 tests); `fo lint` still has
@@ -707,10 +754,11 @@ of selected child ends the fixed-path derivative contract.
 
 ## Phase 7: Data and call semantics
 
-- [ ] **P7.0 Batched reverse.** Add an explicit cotangent-count API and a
+- [ ] **P7.0 Deferred: batched reverse.** Add an explicit cotangent-count API and a
       leading contiguous lane dimension. Check it against repeated scalar VJPs
       and the adjoint identity, then measure scaling in seed count. The forward
-      `--directions` option must not silently acquire reverse semantics.
+      `--directions` option must not silently acquire reverse semantics. Start
+      this item after the ownership and polymorphism priorities have closed.
 - [ ] **P7.1 Derived values.** Differentiate reads and writes of scalar, array,
       nested, and inherited real or complex components. Shadow values retain
       the primal layout needed by callees. Integer and logical components
@@ -937,16 +985,15 @@ Each item is one executable case with an independent oracle and the six
 measurements in the end-to-end contract. Another AD engine is corroboration.
 An unsupported result is recorded as such and never counted as a runtime win.
 
-- [ ] **B0 Tapenade corpus closeout.** The companion manifest
+- [ ] **B0 Tapenade corpus classification.** The companion manifest
       (`fortad-bench/docs/corpora/tapenade.toml`) pins the upstream tree and
-      inventories 2,014 candidate cases. Classify
-      every candidate and close **all 1,432 strict pure-Fortran rows**. Each
-      pure-Fortran row ends as a measured support case or a reproducible,
-      source-located refusal. A static queue, parser acceptance, or compiler
-      syntax check never counts as support. Port runnable cases with an
-      independent oracle and record transform, compile, runtime, memory, and
-      generated-source measurements. Mixed C/C++-Fortran rows remain a
-      separate dependency lane and do not dilute the pure-Fortran target.
+      inventories 2,014 candidate cases. Automate parser, compiler, Tapenade,
+      and FortAD probes across all rows. Use independent derivative oracles
+      for representative support cases and feature families. A refusal inside
+      the product boundary is classified evidence. A refusal for a required
+      modern application construct remains an implementation defect. Static
+      queueing, parser acceptance, or compiler syntax checks never count as
+      support. Mixed C/C++-Fortran rows remain a separate dependency lane.
 
 - [x] **B1** abstract base with runtime `select type` children, JVP and VJP;
       measured in the itpplasma polymorphism case linked under P8.4b
@@ -1019,9 +1066,12 @@ it remains pending rather than passing.
       frozen random path.
 - [ ] **A14 Dependency rules.** Cover the used spline, VODE, QUADPACK, and
       BOOZER_MAGFIE interfaces without importing their source into FortAD.
-- [ ] **A15 Completion.** Every required manifest entry is green, every
-      exception has a file-and-line diagnostic, and discovery finds no
-      unclassified maintained computational Fortran repository.
+- [ ] **A15 Completion.** Every maintained production differentiable path in
+      the required manifest is green or has an approved product-boundary
+      contract with a file-and-line diagnostic. Discovery finds no unclassified
+      maintained computational Fortran repository. Historical fixtures,
+      legacy-only patterns, and active global state remain explicitly labeled
+      outside the support target.
 
 ---
 

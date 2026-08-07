@@ -75,6 +75,14 @@ The storage-identity boundary and its executable refusal oracle are in
 The fixed-dispatch abstract/deferred hierarchy slice and its multi-level
 oracle are in [the abstract hierarchy design note](docs/design/abstract-hierarchy.md).
 
+FortAD's product target is modern Fortran with explicit data ownership,
+procedure interfaces, derived values, and abstract or polymorphic components.
+The target applications are the maintained production code in the
+lazy-fortran and itpplasma groups. Active `COMMON`, mutable module or `SAVE`
+state, uncontrolled aliasing, active I/O, and opaque calls without derivative
+rules are deliberate refusal boundaries. See the [product scope](docs/design/product-scope.md)
+for the full contract and priority order.
+
 Same-file callees can be inlined before differentiation. A call whose body is
 unavailable needs a registered derivative rule. The built-in structured rules
 cover an opt-in `dgesv` path. The same interface supports caller-supplied rules
@@ -97,6 +105,9 @@ language implementation. In particular:
 
 - vector reverse mode is absent;
 - Taylor transformation refuses arrays, loops, and branches;
+- active global mutable state is outside the product scope;
+- allocatable lifetime and arbitrary storage aliasing remain open semantic
+  implementation areas;
 - GPU emission is limited to the reduction shape described above;
 - assumed-size dummy arrays currently emerge as assumed-shape arrays, so do
   not differentiate a procedure that declares an active dummy with `(*)`;
