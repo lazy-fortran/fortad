@@ -159,8 +159,9 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is pinned to `c02068e5`. This handoff includes the
+FortFront source `main` is pinned to `bf335f50`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
+including declared `class(T)` versus `class(*)` ownership facts,
 along with the earlier procedure-name, #2980, and public array-query fixes.
 The focused `test_ownership_dispatch_metadata` oracle passes on the current
 378-target GNU build. FortFront's broader GNU gate remains green at 1,545
@@ -207,9 +208,10 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-      The current FortFront `main` handoff is `c02068e5`, which includes the
-      ownership and dispatch metadata query contract from `e4d9e169`; its
-      focused `test_ownership_dispatch_metadata` oracle passes on the current
+      The current FortFront `main` handoff is `bf335f50`, which includes the
+      ownership and dispatch metadata query contract from `e4d9e169` and
+      declared polymorphic ownership facts; its focused
+      `test_ownership_dispatch_metadata` oracle passes on the current
       378-target GNU build.
 - [ ] FortFront `main` is green on Windows. The latest procedure-name
       observation is run
@@ -346,7 +348,7 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `c02068e5` (the ownership/storage and dispatch
+`fo` must consume FortFront `bf335f50` (the ownership/storage and dispatch
 metadata handoff plus the merged procedure-name, #2980, and public array-query
 fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
