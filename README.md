@@ -127,25 +127,30 @@ with independent results.
 
 ## Command line
 
-The command reads one Fortran source file and writes generated Fortran to
-standard output. Start with one of these four forms:
+The command reads one Fortran source file. Explicit forms write generated
+Fortran to standard output; the source-only compact form writes a predictable
+derivative file beside the input. Start with one of these four forms:
 
 ```console
-$ fortad jvp kernel.f90 x                 # forward derivative
-$ fortad vjp kernel.f90 x --dep objective  # reverse derivative
-$ fortad hvp kernel.f90 x                 # Hessian-vector product
+$ fortad jvp kernel.f90                    # infer inputs; write kernel_jvp.f90
+$ fortad vjp kernel.f90                    # infer inputs and the sole output
+$ fortad hvp kernel.f90                    # infer inputs; write kernel_hvp.f90
 $ fortad check kernel.f90                 # parser/round-trip check
 ```
 
-Names are comma-separated. `--output PATH` writes a file. `--proc NAME` selects
-a procedure in a multi-procedure source. The source-first form keeps the file
-visible at the start of the command; it still requires explicit independent
-names. The full option and custom-rule reference is in [the CLI API
+With source-first compact syntax, omitted names are inferred from the selected
+procedure's dummy arguments: explicit `intent(out)` dummies are outputs and
+the other dummies are treated as differentiable inputs. The first procedure is
+the default; `--proc NAME` selects another one. FortAD also chooses the
+`<procedure>_<product>` symbol, a checked wrapper module, and a sibling output
+file. Add `--verbose` to print those decisions. `--output PATH`, `--module
+NAME`, `--name NAME`, `--dep NAME`, and explicit comma-separated names override
+the defaults. The full option and custom-rule reference is in [the CLI API
 section](docs/design/public-api.md#cli). The flag form and names-first compact
 form remain available for scripts and advanced rules:
 
 ```text
-fortad jvp|vjp|hvp FILE NAMES [OPTIONS]
+fortad jvp|vjp|hvp FILE [NAMES] [OPTIONS]
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE

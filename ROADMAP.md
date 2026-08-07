@@ -153,7 +153,7 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `fae0129`. Its GNU behavioral gate is green
+The implementation snapshot is the current `main` head. Its GNU behavioral gate is green
 (408 build targets, 407 derivative targets, 36/36 tests); `fo lint` still has
 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
@@ -186,7 +186,10 @@ and higher-order Taylor. Batched reverse is P7.0, not a current CLI feature.
 
 The CLI surface is `--mode`, `--indep`, `--dep`, `--name`, `--output`,
 `--directions`, `--no-primal`, `--module`, `--proc`, `--roundtrip`, `--rule`,
-`--call-rule`, `--version`, and `--help`.
+`--call-rule`, `--verbose`, `--version`, and `--help`. Source-first compact
+commands can infer the active dummies, first procedure, generated symbol,
+wrapper module, and sibling output file; names-first and flag forms remain
+stable compatibility interfaces.
 
 - `--proc NAME` lowers one target and follows its call graph. Lowering the
   whole file crashes `collect_params` on a benchmark driver.
@@ -624,21 +627,18 @@ does not support a general build-time advantage.
       behavioral oracle compares compact output with the legacy interface,
       checks generated modules, and verifies invalid option combinations. The
       advanced flags remain available for rules and multi-procedure sources.
-- [ ] **P6.4b Guided inference.** Add a source-first spelling such as
-      `fortad jvp kernel.f90 x,y`. The explicit-name spelling is now accepted
-      and covered by a compiled oracle; target-procedure, generated-name,
-      module-name, and output-path inference remain open. Keep refusal
-      diagnostics explicit when inference would be ambiguous. Every inferred
-      command needs its own behavioral oracle and copyable example.
-- [ ] **P6.4c One-command defaults.** Make the source-first spelling the
-      documented path: `fortad jvp kernel.f90` and `fortad vjp kernel.f90`
-      infer names only when the procedure has one unambiguous active input and
-      scalar output. Infer the procedure, generated symbol, module wrapper,
-      and sibling output filename; print the decisions in `--verbose` mode.
-      Otherwise fail with a copyable command showing the one missing choice.
-      Keep `jvp NAMES FILE` and the flag interface as stable compatibility
-      forms. Add an independent oracle for inferred defaults and keep the
-      README to one quick-start table plus links to the advanced reference.
+- [x] **P6.4b Guided inference.** The source-first spelling
+      `fortad jvp kernel.f90 x,y` is covered by the compiled CLI oracle, and
+      `--proc` selects a different target without changing the source-first
+      shape. Explicit names remain available whenever source metadata is not
+      sufficient.
+- [x] **P6.4c One-command defaults.** `fortad jvp kernel.f90` and its VJP/HVP
+      siblings infer active dummies from FortAD's lowered procedure metadata,
+      select the first procedure unless `--proc` is given, and choose the
+      generated symbol, wrapper module, and sibling output file. `--verbose`
+      prints those decisions. The compiled CLI oracle runs the generated JVP
+      against the hand derivative `d(x*x)/dx = 2*x`. Names-first and flag
+      forms remain stable compatibility interfaces.
 - [ ] **P6.5 Automated source workflow.** Add a manifest-aware command that
       discovers procedures, runs the appropriate forward/reverse probes, and
       writes generated source, diagnostics, and a machine-readable result

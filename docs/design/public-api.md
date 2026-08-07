@@ -245,22 +245,34 @@ directional coefficient. `tay_derivative` multiplies coefficient `k` by `k!`.
 ## CLI
 
 ```text
-fortad jvp|vjp|hvp FILE NAMES [OPTIONS]
+fortad jvp|vjp|hvp FILE [NAMES] [OPTIONS]
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
 ```
 
-The source-first form is the normal interactive path: `fortad vjp kernel.f90 x
---dep y`. It removes the repetitive `--mode` and `--indep` flags while keeping
-the input visible at the start of the command. The names-first compact form,
+The source-first form is the normal interactive path: `fortad vjp kernel.f90`.
+When `NAMES` is omitted, FortAD lowers the first procedure (or the one named by
+`--proc`), infers its non-`intent(out)` dummies, uses the function result or
+sole `intent(out)` dummy as the reverse dependent, and chooses these defaults:
+
+```text
+generated procedure: <procedure>_<product>
+wrapper module:      <source-stem>_<product>_mod
+output file:         <source-stem>_<product>.f90
+```
+
+The source stem is sanitized into a Fortran identifier for the module. Use
+`--verbose` to print the decisions. Explicit names, `--proc`, `--dep`,
+`--name`, `--module`, and `--output` override the inferred values. If the
+source does not provide enough information, the command fails and the
+explicit forms remain available. The names-first compact form,
 `fortad vjp x --dep y kernel.f90`, and the original flag form remain stable for
 existing scripts.
 
 Source-first parsing is selected when the first positional argument is an
-existing file. It still requires explicit independent names; procedure and
-dependent inference remain conservative. Supplying two positional paths is
-rejected as ambiguous instead of choosing one silently.
+existing file. Supplying two positional paths is rejected as ambiguous instead
+of choosing one silently.
 
 Values must be separate arguments. `--mode reverse` is accepted, while
 `--mode=reverse` is not. In the names-first compact form, the independent-name
@@ -280,9 +292,9 @@ file or that FortAD can differentiate it.
 
 | Option | Scope | Meaning |
 | --- | --- | --- |
-| `jvp`, `vjp`, `hvp` | compact derivative form | product followed by `FILE NAMES` or `NAMES ... FILE` |
+| `jvp`, `vjp`, `hvp` | compact derivative form | product followed by `FILE [NAMES]` or `NAMES ... FILE` |
 | `check` | compact round-trip form | validate and re-emit source without differentiation |
-| `-i`, `--indep a,b` | derivative modes | independent variables, required |
+| `-i`, `--indep a,b` | legacy derivative form | explicit independent variables; source-first compact form can infer them |
 | `-m`, `--mode MODE` | derivative modes | `forward`, `reverse`, or `hessian` |
 | `--dep name` | reverse | dependent when the default is ambiguous |
 | `-d`, `--directions name` | forward | generated direction-count dummy and vector mode |
@@ -290,6 +302,7 @@ file or that FortAD can differentiate it.
 | `--module name` | derivative modes | generated wrapper module |
 | `--proc name` | all transformations | target in multi-procedure input |
 | `--no-primal` | forward and reverse | omit results needed only for the primal value |
+| `--verbose` | inferred source-first form | print selected procedure, names, module, and output path |
 | `--roundtrip` | standalone mode | parse and emit without requiring `--indep` |
 | `--rule spec` | current process | scalar rule in `NAME:partial;partial` form |
 | `--call-rule spec` | current process | statement rule in `NAME:n_args:tangent;...|adjoint;...` form |
