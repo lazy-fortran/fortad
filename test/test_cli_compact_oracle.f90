@@ -11,6 +11,8 @@ program test_cli_compact_oracle
     character(len=:), allocatable :: automatic_path, automatic_driver_path
     character(len=:), allocatable :: automatic_executable
     character(len=:), allocatable :: bare_path, bare_driver_path
+    character(len=:), allocatable :: source_mode_path, source_mode_driver_path
+    character(len=:), allocatable :: source_mode_executable
     character(len=7), parameter :: modes(3) = [character(len=7) :: &
         'forward', 'reverse', 'hessian']
     character(len=3), parameter :: products(3) = [character(len=3) :: &
@@ -76,6 +78,7 @@ program test_cli_compact_oracle
     call require_ambiguous_source_first()
     call require_automatic_jvp()
     call require_bare_source_jvp()
+    call require_bare_source_reverse()
 
     call delete_file(input_path)
     print *, 'pass cli_compact'
@@ -291,6 +294,54 @@ contains
         call delete_file(automatic_executable)
         call delete_if_present('fortad_compact_input_jvp_mod.mod')
     end subroutine require_bare_source_jvp
+
+    subroutine require_bare_source_reverse()
+        !! Source-first mode and explicit names must produce a real gradient.
+        integer :: driver_unit, compiler_length
+        character(len=:), allocatable :: compiler
+
+        source_mode_path = directory // separator // 'fortad-compact-input_vjp.f90'
+        source_mode_driver_path = directory // separator // 'fortad-source-mode-driver.f90'
+        source_mode_executable = directory // separator // 'fortad-source-mode-run'
+        command = quote(cli_path) // ' ' // quote(input_path) // &
+            ' --mode reverse --indep x'
+        call execute_command_line(command, wait=.true., exitstat=stat)
+        if (stat /= 0) call fail('bare source reverse command failed')
+
+        open (newunit=driver_unit, file=source_mode_driver_path, &
+            status='replace', action='write')
+        write (driver_unit, '(a)') 'program source_mode_driver'
+        write (driver_unit, '(a)') &
+            '    use fortad_compact_input_vjp_mod, only: square_vjp'
+        write (driver_unit, '(a)') '    real :: x, y, y_b, x_b'
+        write (driver_unit, '(a)') '    x = 3.0; y_b = 1.0; x_b = 0.0'
+        write (driver_unit, '(a)') '    call square_vjp(x, y, y_b, x_b)'
+        write (driver_unit, '(a)') &
+            '    if (abs(y - 9.0) > 1.0e-5 .or. abs(x_b - 6.0) > 1.0e-5) error stop 1'
+        write (driver_unit, '(a)') 'end program source_mode_driver'
+        close (driver_unit)
+
+        call get_environment_variable('FC', environment_buffer, &
+            length=compiler_length)
+        if (compiler_length > 0) then
+            compiler = environment_buffer(:compiler_length)
+        else
+            compiler = 'gfortran'
+        end if
+        command = compiler // ' -o ' // quote(source_mode_executable) // ' ' // &
+            quote(input_path) // ' ' // quote(source_mode_path) // ' ' // &
+            quote(source_mode_driver_path)
+        call execute_command_line(command, wait=.true., exitstat=stat)
+        if (stat /= 0) call fail('bare source reverse did not compile')
+        call execute_command_line(quote(source_mode_executable), wait=.true., &
+            exitstat=stat)
+        if (stat /= 0) call fail('bare source reverse failed its hand-derived oracle')
+
+        call delete_file(source_mode_path)
+        call delete_file(source_mode_driver_path)
+        call delete_file(source_mode_executable)
+        call delete_if_present('fortad_compact_input_vjp_mod.mod')
+    end subroutine require_bare_source_reverse
 
     subroutine delete_file(path)
         character(len=*), intent(in) :: path

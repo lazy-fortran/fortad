@@ -23,14 +23,17 @@ program fortad_cli
     character(len=:), allocatable :: directions, proc_name, source, mode
     character(len=:), allocatable :: module_name
     character(len=:), allocatable :: inference_message
+    character(len=:), allocatable :: explicit_indep
     character(len=32), allocatable :: independents(:)
     type(fad_result_t) :: res
     logical :: roundtrip_only, with_primal, verbose, all_products
+    logical :: source_first_inference
     integer :: unit, stat
 
     call parse_arguments(input_path, output_path, indep_list, directions, &
         proc_name, mode, module_name, roundtrip_only, &
-        with_primal, dep_name, from_name, verbose, all_products, stat)
+        with_primal, dep_name, from_name, verbose, all_products, &
+        source_first_inference, stat)
     if (stat /= 0) then
         call usage()
         error stop 2
@@ -55,13 +58,16 @@ program fortad_cli
         stop
     end if
 
-    if (len_trim(indep_list) == 0 .and. .not. roundtrip_only) then
+    if (.not. roundtrip_only .and. (len_trim(indep_list) == 0 .or. &
+        source_first_inference)) then
+        explicit_indep = indep_list
         call infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
             output_path, module_name, indep_list, inference_message, verbose, stat)
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
             error stop 2
         end if
+        if (len_trim(explicit_indep) > 0) indep_list = explicit_indep
     end if
 
     if (roundtrip_only) then
@@ -332,7 +338,8 @@ contains
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
             proc_name, mode, module_name, roundtrip_only, &
-            with_primal, dep_name, from_name, verbose, all_products, stat)
+            with_primal, dep_name, from_name, verbose, all_products, &
+            source_first_inference, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
         character(len=:), allocatable, intent(out) :: indep_list, directions
@@ -341,7 +348,7 @@ contains
         logical, intent(out) :: roundtrip_only, with_primal
         character(len=:), allocatable, intent(out) :: dep_name
         character(len=:), allocatable, intent(out) :: from_name
-        logical, intent(out) :: verbose, all_products
+        logical, intent(out) :: verbose, all_products, source_first_inference
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
@@ -361,6 +368,7 @@ contains
         from_name = ""
         verbose = .false.
         all_products = .false.
+        source_first_inference = .false.
         stat = 0
         check_syntax = .false.
         compact_syntax = .false.
@@ -398,6 +406,7 @@ contains
                         ! so the compact parser does not reinterpret the path.
                         compact_syntax = .true.
                         bare_source_syntax = .true.
+                        source_first_inference = .true.
                         source_first_syntax = .true.
                         mode = "forward"
                         input_path = trim(arg(1:length))
@@ -474,7 +483,8 @@ contains
             call get_command_argument(i, arg, length)
             select case (trim(arg(1:length)))
             case ("--indep", "-i")
-                if (compact_syntax .or. check_syntax) then
+                if ((compact_syntax .and. .not. bare_source_syntax) .or. &
+                    check_syntax) then
                     stat = 1
                     return
                 end if
@@ -522,7 +532,8 @@ contains
                 call get_command_argument(i, arg, length)
                 output_path = trim(arg(1:length))
             case ("-m", "--mode")
-                if (compact_syntax .or. check_syntax) then
+                if ((compact_syntax .and. .not. bare_source_syntax) .or. &
+                    check_syntax) then
                     stat = 1
                     return
                 end if
@@ -845,7 +856,7 @@ contains
         write (*, '(a)') "fortad "//fad_version()// &
             " - source-transformation automatic differentiation for Fortran"
         write (*, '(a)') ""
-        write (*, '(a)') "       fortad <file.f90> [names]     (inferred JVP)"
+        write (*, '(a)') "       fortad <file.f90> [names] [options] (inferred)"
         write (*, '(a)') "usage: fortad PRODUCT <file.f90> [names] [options]"
         write (*, '(a)') "       fortad PRODUCT <names> [options] <file.f90>"
         write (*, '(a)') "       fortad all <file.f90> [names]"

@@ -133,6 +133,7 @@ derivative file beside the input. Start with one of these forms:
 
 ```console
 $ fortad kernel.f90                       # infer inputs; write kernel_jvp.f90
+$ fortad kernel.f90 --mode reverse         # same inference; write kernel_vjp.f90
 $ fortad jvp kernel.f90                    # infer inputs; write kernel_jvp.f90
 $ fortad vjp kernel.f90                    # infer inputs and the sole output
 $ fortad hvp kernel.f90                    # infer inputs; write kernel_hvp.f90
@@ -146,6 +147,12 @@ Add a comma-separated positional name list only when you want to override the
 inferred inputs. Use `fortad all FILE` when both JVP and VJP siblings are
 needed; explicit product names and flags remain available for multi-procedure
 files, custom interfaces, and registered rules.
+
+The bare source-first form also accepts `--mode forward|reverse|hessian` and
+`--indep NAMES`, so a reverse product with inferred output selection can be
+written as `fortad kernel.f90 --mode reverse`. The explicit `jvp`, `vjp`, and
+`hvp` forms remain strict compact spellings: their product name already fixes
+the mode.
 
 With source-first compact syntax, omitted names are inferred from the selected
 procedure's dummy arguments: explicit `intent(out)` dummies are outputs and

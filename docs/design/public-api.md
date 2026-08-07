@@ -254,7 +254,9 @@ fortad --indep NAMES [OPTIONS] FILE
 ```
 
 The shortest source-first form is `fortad kernel.f90`, which emits a JVP. The
-explicit product form `fortad vjp kernel.f90` selects reverse mode. In both
+source-first form also accepts `--mode reverse` or `--mode hessian`, so
+`fortad kernel.f90 --mode reverse` writes the inferred VJP. The explicit
+product form `fortad vjp kernel.f90` selects reverse mode. In both
 forms, when `NAMES` is omitted, FortAD lowers the first procedure (or the one
 named by `--proc`), infers its non-`intent(out)` dummies, uses the function
 result or sole `intent(out)` dummy as the reverse dependent, and chooses these
@@ -282,11 +284,12 @@ flag form still accepts its input path after the options.
 Values must be separate arguments. `--mode reverse` is accepted, while
 `--mode=reverse` is not. In the names-first compact form, the independent-name
 list follows the product immediately; in the source-first form, the existing
-input path follows the product and the names follow it. Mixing compact syntax
-with `--mode`, `--indep`, or `--roundtrip` is rejected instead of silently
-choosing one spelling. The product names are deliberately distinct from the
-legacy mode values, so an existing positional input path named `forward`,
-`reverse`, or `hessian` keeps its old meaning.
+input path follows the product and the names follow it. The bare source-first
+form accepts `--mode` and `--indep` after the path; the explicit `jvp`, `vjp`,
+and `hvp` forms reject those redundant selectors instead of silently choosing
+one spelling. `--roundtrip` remains standalone. The product names are
+deliberately distinct from the legacy mode values, so an existing positional
+input path named `forward`, `reverse`, or `hessian` keeps its old meaning.
 
 `fortad check FILE` is the compact spelling of the existing `--roundtrip`
 operation. It parses the file and re-emits its default procedure, or the one
@@ -308,8 +311,8 @@ rejected because one path or name would be ambiguous for two products.
 | bare `FILE` | inferred JVP form | infer the first procedure and write `<stem>_jvp.f90` |
 | `all` | compact paired-product form | infer and write both JVP and VJP siblings |
 | `check` | compact round-trip form | validate and re-emit source without differentiation |
-| `-i`, `--indep a,b` | legacy derivative form | explicit independent variables; source-first compact form can infer them |
-| `-m`, `--mode MODE` | derivative modes | `forward`, `reverse`, or `hessian` |
+| `-i`, `--indep a,b` | legacy and bare source-first forms | explicit independent variables; source-first form can infer them |
+| `-m`, `--mode MODE` | legacy and bare source-first forms | `forward`, `reverse`, or `hessian` |
 | `--dep name` | reverse | dependent when the default is ambiguous |
 | `-d`, `--directions name` | forward | generated direction-count dummy and vector mode |
 | `--name name` | derivative modes | generated procedure name |
