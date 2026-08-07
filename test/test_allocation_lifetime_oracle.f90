@@ -49,9 +49,39 @@ program test_allocation_lifetime_oracle
         "        deallocate(state)"//nl// &
         "    end function uses_state"//nl// &
         "end module global_state_case"//nl
+    character(len=*), parameter :: reverse_source = &
+        "module allocation_reverse_case"//nl// &
+        "    implicit none"//nl// &
+        "contains"//nl// &
+        "    function allocation_reverse_path(x, n) result(out)"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        integer, intent(in) :: n"//nl// &
+        "        integer :: i"//nl// &
+        "        real(8), allocatable :: scratch(:)"//nl// &
+        "        real(8) :: out"//nl// &
+        "        allocate(scratch(n), mold=x)"//nl// &
+        "        do i = 1, n"//nl// &
+        "            scratch(i) = 2.0d0*x"//nl// &
+        "        end do"//nl// &
+        "        out = sum(scratch)"//nl// &
+        "        deallocate(scratch)"//nl// &
+        "    end function allocation_reverse_path"//nl// &
+        "    function dummy_allocation_path(x, buf) result(out)"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        real(8), allocatable, intent(out) :: buf(:)"//nl// &
+        "        integer :: i"//nl// &
+        "        real(8) :: out"//nl// &
+        "        allocate(buf(3), mold=x)"//nl// &
+        "        do i = 1, 3"//nl// &
+        "            buf(i) = 2.0d0*x"//nl// &
+        "        end do"//nl// &
+        "        out = sum(buf)"//nl// &
+        "        deallocate(buf)"//nl// &
+        "    end function dummy_allocation_path"//nl// &
+        "end module allocation_reverse_case"//nl
 
-    type(fad_result_t) :: clean, global, jvp, vjp
-    character(len=:), allocatable :: dir, driver, derivatives
+    type(fad_result_t) :: clean, global, jvp, vjp, dummy_vjp
+    character(len=:), allocatable :: dir, driver, derivatives, reverse_derivatives
     integer :: unit, stat
 
     clean = fad_jvp(clean_source, [character(len=1) :: "x"], from="source_name")
@@ -78,6 +108,20 @@ program test_allocation_lifetime_oracle
     vjp = fad_vjp(source, [character(len=1) :: "x"], dependent="out", &
         from="allocation_path")
     call assert_replay_refusal(vjp)
+    vjp = fad_vjp(reverse_source, [character(len=1) :: "x"], &
+        dependent="out", from="allocation_reverse_path", &
+        name="allocation_reverse_path_vjp")
+    if (.not. vjp%ok) then
+        print *, "FAIL allocation lifetime VJP generation: ", vjp%message
+        error stop 9
+    end if
+    dummy_vjp = fad_vjp(reverse_source, [character(len=1) :: "x"], &
+        dependent="out", from="dummy_allocation_path", &
+        name="dummy_allocation_path_vjp")
+    if (.not. dummy_vjp%ok) then
+        print *, "FAIL dummy allocation VJP generation: ", dummy_vjp%message
+        error stop 12
+    end if
 
     dir = "build/oracle/allocation_lifetime"
     call execute_command_line("mkdir -p "//dir, exitstat=stat)
@@ -86,6 +130,10 @@ program test_allocation_lifetime_oracle
     open (newunit=unit, file=dir//"/primal.f90", status="replace", action="write")
     write (unit, '(a)') source
     close (unit)
+    open (newunit=unit, file=dir//"/reverse_primal.f90", status="replace", &
+        action="write")
+    write (unit, '(a)') reverse_source
+    close (unit)
     derivatives = "module allocation_lifetime_derivatives"//nl// &
         "contains"//nl//jvp%code//nl// &
         "end module allocation_lifetime_derivatives"//nl
@@ -93,13 +141,25 @@ program test_allocation_lifetime_oracle
         action="write")
     write (unit, '(a)') derivatives
     close (unit)
+    reverse_derivatives = "module allocation_reverse_derivatives"//nl// &
+        "contains"//nl//vjp%code//nl//dummy_vjp%code//nl// &
+        "end module allocation_reverse_derivatives"//nl
+    open (newunit=unit, file=dir//"/reverse_derivatives.f90", &
+        status="replace", action="write")
+    write (unit, '(a)') reverse_derivatives
+    close (unit)
 
     driver = &
         "program driver"//nl// &
         "    use allocation_lifetime_case, only: allocation_path"//nl// &
+        "    use allocation_reverse_case, only: allocation_reverse_path, "// &
+        "dummy_allocation_path"//nl// &
         "    use allocation_lifetime_derivatives, only: allocation_path_jvp"//nl// &
+        "    use allocation_reverse_derivatives, only: "// &
+        "allocation_reverse_path_vjp, dummy_allocation_path_vjp"//nl// &
         "    implicit none"//nl// &
-        "    real(8) :: out, out_d, x, x_d, h, fp, fm, fd"//nl// &
+        "    real(8) :: out, out_d, out_b, x, x_d, x_b, h, fp, fm, fd"//nl// &
+        "    real(8), allocatable :: buf(:)"//nl// &
         "    x = 1.25d0"//nl// &
         "    x_d = -0.75d0"//nl// &
         "    call allocation_path_jvp(x, x_d, 3, out, out_d)"//nl// &
@@ -110,6 +170,23 @@ program test_allocation_lifetime_oracle
         "    fm = allocation_path(x - h*x_d, 3)"//nl// &
         "    fd = (fp - fm)/(2.0d0*h)"//nl// &
         "    if (abs(out_d - fd) > 1.0d-7) error stop 5"//nl// &
+        "    x = 1.25d0"//nl// &
+        "    out_b = 1.0d0"//nl// &
+        "    call allocation_reverse_path_vjp(x, 3, out, out_b, x_b)"//nl// &
+        "    if (abs(x_b - 6.0d0) > 1.0d-12) error stop 10"//nl// &
+        "    h = 1.0d-6"//nl// &
+        "    fp = allocation_reverse_path(x + h, 3)"//nl// &
+        "    fm = allocation_reverse_path(x - h, 3)"//nl// &
+        "    fd = (fp - fm)/(2.0d0*h)"//nl// &
+        "    if (abs(x_b - fd) > 1.0d-7) error stop 11"//nl// &
+        "    call dummy_allocation_path_vjp(x, buf, out, out_b, x_b)"//nl// &
+        "    if (abs(x_b - 6.0d0) > 1.0d-12) error stop 13"//nl// &
+        "    if (allocated(buf)) error stop 14"//nl// &
+        "    h = 1.0d-6"//nl// &
+        "    fp = dummy_allocation_path(x + h, buf)"//nl// &
+        "    fm = dummy_allocation_path(x - h, buf)"//nl// &
+        "    fd = (fp - fm)/(2.0d0*h)"//nl// &
+        "    if (abs(x_b - fd) > 1.0d-7) error stop 15"//nl// &
         "    print *, 'allocation lifetime JVP oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", action="write")
@@ -117,7 +194,9 @@ program test_allocation_lifetime_oracle
     close (unit)
 
     call execute_command_line("gfortran -std=f2018 -O2 -o "//dir//"/run "// &
-        dir//"/primal.f90 "//dir//"/derivatives.f90 "//dir//"/driver.f90 > "// &
+        dir//"/primal.f90 "//dir//"/reverse_primal.f90 "// &
+        dir//"/derivatives.f90 "// &
+        dir//"/reverse_derivatives.f90 "//dir//"/driver.f90 > "// &
         dir//"/build.log 2>&1", exitstat=stat)
     if (stat /= 0) then
         print *, "FAIL allocation lifetime: generated code did not compile"
