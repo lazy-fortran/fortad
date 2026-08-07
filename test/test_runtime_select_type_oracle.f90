@@ -85,7 +85,7 @@ program test_runtime_select_type_oracle
         "        class is (cubic_t)"//nl// &
         "            y = model%value(x)"//nl// &
         "        class default"//nl// &
-        "            y = 0.0d0"//nl// &
+        "            y = -2.0d0*x"//nl// &
         "        end select"//nl// &
         "    end function evaluate"//nl// &
         "end module runtime_kernel"//nl
@@ -146,7 +146,7 @@ program test_runtime_select_type_oracle
         "    call check(linear, 6.0d0, 3.0d0, 'linear')"//nl// &
         "    call check(quadratic, 12.0d0, 12.0d0, 'quadratic')"//nl// &
         "    call check(cubic, 24.0d0, 36.0d0, 'cubic')"//nl// &
-        "    call check(fallback, 0.0d0, 0.0d0, 'class default')"//nl// &
+        "    call check(fallback, -4.0d0, -2.0d0, 'class default')"//nl// &
         "contains"//nl// &
         "    subroutine check(model, expected_y, expected_grad, label)"//nl// &
         "        class(model_t), intent(in) :: model"//nl// &
