@@ -66,6 +66,16 @@ The first five priorities are product work. A Tapenade refusal that falls
 inside the deliberate boundary is a useful negative test, not a roadmap
 failure. A refusal for a modern application construct is an open defect.
 
+The immediate execution split is deliberately narrow. FortFront must first
+make ownership, storage identity, type hierarchy, binding, call, and global
+state facts queryable. FortAD then consumes those facts to implement one
+independently tested semantic slice at a time. The next slices are nested
+polymorphic ownership and abstract/deferred dispatch; procedure interfaces,
+callbacks, and general reverse lifetime replay follow only after their facts
+and refusal contracts are available. This keeps upstream work about facts and
+FortAD work about differentiation, rather than adding product semantics to
+the parser.
+
 ## Repository responsibilities
 
 FortAD owns differentiation semantics. Its IR and lowering passes must carry
@@ -159,10 +169,11 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is pinned to `bf335f50`. This handoff includes the
+FortFront source `main` is currently `69a55a80`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
-along with the earlier procedure-name, #2980, and public array-query fixes.
+along with the earlier procedure-name, #2980, public array-query, nested
+substring, and issue-1968 assumed-shape fixes.
 The focused `test_ownership_dispatch_metadata` oracle passes on the current
 378-target GNU build. FortFront's broader GNU gate remains green at 1,545
 static modules, 381 build targets, 378 derivative targets, and 483/483 tests;
@@ -208,7 +219,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-      The current FortFront `main` handoff is `bf335f50`, which includes the
+      The current FortFront `main` handoff is `69a55a80`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts; its focused
       `test_ownership_dispatch_metadata` oracle passes on the current
@@ -226,7 +237,7 @@ FortAD gate.
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds 408 targets, checks 407 derivative
-      targets, and runs 45 tests.
+      targets, and runs 46 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
       hazards. 108 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
@@ -243,9 +254,9 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is the current `main` head. Its GNU behavioral gate is green
-(408 build targets, 407 derivative targets, 45/45 tests); `fo lint` still has
-108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
+The implementation snapshot is FortAD `main` at `5ba0610`. Its GNU behavioral
+gate is green (408 build targets, 407 derivative targets, 46/46 tests);
+`fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
 scalar external-CALL refusal oracle. The complete multi-compiler gate remains
@@ -348,9 +359,9 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `bf335f50` (the ownership/storage and dispatch
-metadata handoff plus the merged procedure-name, #2980, and public array-query
-fixes), while fpm caches
+`fo` must consume FortFront `69a55a80` (the ownership/storage and dispatch
+metadata handoff plus the merged procedure-name, #2980, public array-query,
+nested-substring, and issue-1968 fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
 and `build/cache.toml` before reinstalling `fo`, or the old revision will be
 reused. Record the exact FortFront pin in every downstream gate so a warm
