@@ -1063,8 +1063,10 @@ problem-specific rule.
       - [x] **P8.3a bounded concrete call.** A statically declared `type(t)`
             receiver with the default implicit PASS or `NOPASS` and a same-file
             function is normalized to an ordinary call before JVP/VJP
-            generation. Named PASS, inherited-only, generic, deferred, and
-            ambiguous type/implementation names remain named refusals. The
+            generation. A statically declared child may also resolve an
+            inherited binding through the FortFront hierarchy query. Named
+            PASS, generic, deferred, and ambiguous type/implementation names
+            remain named refusals. The
             compiled oracle is
             [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90). It
             checks generated JVP/VJP values for both binding forms. It uses central
@@ -1080,9 +1082,10 @@ problem-specific rule.
             PASS/NOPASS lowering, procedure-scope receiver lookup, ambiguity
             refusals, and independent JVP/VJP refusal checks were already
             present in the mainline. Commit `769d5c7` records the review. No
-            source transplant was needed. The active receiver, inherited,
-            generic, deferred, and dynamic-dispatch refusal boundaries remain
-            deliberate and open.
+            source transplant was needed. The active receiver, generic,
+            deferred, named-PASS, and dynamic-dispatch refusal boundaries
+            remain deliberate and open. The inherited static slice is covered
+            by the current type-bound oracle.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through
@@ -1093,9 +1096,10 @@ problem-specific rule.
             generates its JVP and VJP. The independent
             [`test_abstract_hierarchy_oracle.f90`](test/test_abstract_hierarchy_oracle.f90)
             checks both levels with hand values, central finite differences,
-            and the adjoint identity. Direct `class(base)` dispatch,
-            inherited-only bindings, and unresolved deferred bindings remain
-            named refusals. Runtime type-tag preservation through an explicit
+            and the adjoint identity. Direct `class(base)` dispatch and
+            unresolved deferred bindings remain named refusals. Static
+            inherited bindings are covered by P8.3a. Runtime type-tag
+            preservation through an explicit
             `SELECT TYPE` arm is covered by P8.4b. A general derivative
             hierarchy remains open P8.4 work.
       - [x] **P8.4b bounded runtime dispatch.** A simple `class(base_t)` dummy

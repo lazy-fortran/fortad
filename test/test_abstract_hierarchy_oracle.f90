@@ -2,8 +2,8 @@ program test_abstract_hierarchy_oracle
     !! Independent oracle for a bounded abstract/deferred hierarchy slice.
     !! A statically declared concrete child may override a deferred binding
     !! through one intermediate level.  The derivative follows that fixed
-    !! override path.  Runtime CLASS dispatch, inherited-only bindings, and
-    !! direct deferred calls remain named refusals.
+    !! override path.  Runtime CLASS dispatch and direct deferred calls
+    !! remain named refusals.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -81,8 +81,6 @@ program test_abstract_hierarchy_oracle
 
     call expect_refusal(runtime_source(), "runtime CLASS dispatch", &
         "concrete type")
-    call expect_refusal(inherited_only_source(), "inherited-only binding", &
-        "inherited")
     call expect_refusal(deferred_source(), "deferred binding", "deferred")
 
     dir = "build/oracle/abstract_hierarchy"
@@ -249,43 +247,6 @@ contains
             "    end function top"//nl// &
             "end module runtime_abstract_case"//nl
     end function runtime_source
-
-    function inherited_only_source() result(text)
-        character(len=:), allocatable :: text
-        text = "module inherited_abstract_case"//nl// &
-            "    type, abstract :: base_t"//nl// &
-            "    contains"//nl// &
-            "        procedure(value_iface), deferred :: value"//nl// &
-            "    end type base_t"//nl// &
-            "    abstract interface"//nl// &
-            "        pure function value_iface(self, x) result(y)"//nl// &
-            "            import base_t"//nl// &
-            "            class(base_t), intent(in) :: self"//nl// &
-            "            real(8), intent(in) :: x"//nl// &
-            "            real(8) :: y"//nl// &
-            "        end function value_iface"//nl// &
-            "    end interface"//nl// &
-            "    type, extends(base_t) :: mid_t"//nl// &
-            "    contains"//nl// &
-            "        procedure :: value => mid_value"//nl// &
-            "    end type mid_t"//nl// &
-            "    type, extends(mid_t) :: leaf_t"//nl// &
-            "    end type leaf_t"//nl// &
-            "contains"//nl// &
-            "    pure function mid_value(self, x) result(y)"//nl// &
-            "        class(mid_t), intent(in) :: self"//nl// &
-            "        real(8), intent(in) :: x"//nl// &
-            "        real(8) :: y"//nl// &
-            "        y = x"//nl// &
-            "    end function mid_value"//nl// &
-            "    pure function top(x) result(y)"//nl// &
-            "        real(8), intent(in) :: x"//nl// &
-            "        type(leaf_t) :: model"//nl// &
-            "        real(8) :: y"//nl// &
-            "        y = model%value(x)"//nl// &
-            "    end function top"//nl// &
-            "end module inherited_abstract_case"//nl
-    end function inherited_only_source
 
     function deferred_source() result(text)
         character(len=:), allocatable :: text

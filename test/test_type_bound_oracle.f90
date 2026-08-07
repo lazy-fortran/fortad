@@ -2,6 +2,8 @@ program test_type_bound_oracle
     !! Behavioral oracle for one concrete, same-file type-bound function.
     !! The receiver is passive; the method's real argument is differentiated
     !! after implicit PASS or NOPASS is normalized to an ordinary local call.
+    !! A statically declared child may also use an inherited binding resolved
+    !! through FortFront's local-to-parent hierarchy query.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -47,7 +49,7 @@ program test_type_bound_oracle
     call check_nopass(nopass_scope_source(), "nopass_scope_case")
     call expect_refusal(ambiguous_source(), "ambiguous type", "ambiguous")
     call expect_active_receiver_refusal(active_receiver_source())
-    call expect_refusal(inherited_source(), "inheritance", "inherited")
+    call check_inherited(inherited_source(), "inherited_case")
     call expect_refusal(generic_source(), "generic", "generic")
     call expect_refusal(deferred_source(), "deferred", "deferred")
 
@@ -276,6 +278,92 @@ contains
         end if
     end subroutine check_nopass
 
+    subroutine check_inherited(case_source, case_module)
+        character(len=*), intent(in) :: case_source, case_module
+        type(fad_result_t) :: jvp_case, vjp_case
+        character(len=:), allocatable :: case_dir, case_driver
+        integer :: case_unit, case_stat
+
+        jvp_case = fad_jvp(case_source, ["x"], from="top", &
+            name="top_inherited_jvp")
+        if (.not. jvp_case%ok) then
+            print *, "FAIL inherited binding JVP generation: ", jvp_case%message
+            error stop 1
+        end if
+        vjp_case = fad_vjp(case_source, ["x"], dependent="y", from="top", &
+            name="top_inherited_vjp")
+        if (.not. vjp_case%ok) then
+            print *, "FAIL inherited binding VJP generation: ", vjp_case%message
+            error stop 1
+        end if
+
+        case_dir = "build/oracle/type_bound_"//trim(case_module)
+        call execute_command_line("mkdir -p "//case_dir, exitstat=case_stat)
+        if (case_stat /= 0) error stop "could not create inherited oracle directory"
+
+        open (newunit=case_unit, file=case_dir//"/primal.f90", status="replace", &
+            action="write")
+        write (case_unit, '(a)') case_source
+        close (case_unit)
+        open (newunit=case_unit, file=case_dir//"/derivatives.f90", &
+            status="replace", action="write")
+        write (case_unit, '(a)') "module type_bound_inherited_derivatives"
+        write (case_unit, '(a)') "    use "//trim(case_module)//", only: box_t"
+        write (case_unit, '(a)') "contains"
+        write (case_unit, '(a)') jvp_case%code
+        write (case_unit, '(a)') vjp_case%code
+        write (case_unit, '(a)') "end module type_bound_inherited_derivatives"
+        close (case_unit)
+
+        case_driver = &
+            "program driver"//nl// &
+            "    use "//trim(case_module)//", only: box_t, top"//nl// &
+            "    use type_bound_inherited_derivatives, only: "// &
+            "top_inherited_jvp, top_inherited_vjp"//nl// &
+            "    implicit none"//nl// &
+            "    type(box_t) :: model"//nl// &
+            "    real(8) :: x, x_d, y, y_d, x_b, y_b, h, fp, fm"//nl// &
+            "    model%scale = 2.0d0"//nl// &
+            "    x = 1.5d0"//nl// &
+            "    x_d = -0.7d0"//nl// &
+            "    y_b = 1.3d0"//nl// &
+            "    call top_inherited_jvp(model, x, x_d, y, y_d)"//nl// &
+            "    if (abs(y - 4.0d0) > 1.0d-13) error stop 2"//nl// &
+            "    if (abs(y_d - 2.0d0*x_d) > 1.0d-13) error stop 3"//nl// &
+            "    h = 1.0d-6"//nl// &
+            "    fp = top(model, x + h)"//nl// &
+            "    fm = top(model, x - h)"//nl// &
+            "    if (abs(y_d - (fp - fm)/(2.0d0*h)*x_d) > 1.0d-7) "// &
+            "error stop 4"//nl// &
+            "    call top_inherited_vjp(model, x, y, y_b, x_b)"//nl// &
+            "    if (abs(y - 4.0d0) > 1.0d-13) error stop 5"//nl// &
+            "    if (abs(x_b - 2.0d0*y_b) > 1.0d-13) error stop 6"//nl// &
+            "    if (abs(y_b*y_d - x_b*x_d) > 1.0d-13) error stop 7"//nl// &
+            "    print *, 'inherited type-bound oracle pass'"//nl// &
+            "end program driver"//nl
+        open (newunit=case_unit, file=case_dir//"/driver.f90", status="replace", &
+            action="write")
+        write (case_unit, '(a)') case_driver
+        close (case_unit)
+
+        call execute_command_line("gfortran -std=f2018 -O2 -o "//case_dir//"/run "// &
+            case_dir//"/primal.f90 "//case_dir//"/derivatives.f90 "// &
+            case_dir//"/driver.f90 > "//case_dir//"/build.log 2>&1", &
+            exitstat=case_stat)
+        if (case_stat /= 0) then
+            print *, "FAIL inherited binding: generated code did not compile"
+            call show_file(case_dir//"/build.log")
+            error stop 1
+        end if
+        call execute_command_line("./"//case_dir//"/run > "//case_dir//"/out.txt 2>&1", &
+            exitstat=case_stat)
+        if (case_stat /= 0) then
+            print *, "FAIL inherited binding: independent oracle failed"
+            call show_file(case_dir//"/out.txt")
+            error stop 1
+        end if
+    end subroutine check_inherited
+
     function named_pass_source() result(text)
         character(len=:), allocatable :: text
         text = "module named_pass"//nl// &
@@ -411,6 +499,7 @@ contains
         character(len=:), allocatable :: text
         text = "module inherited_case"//nl// &
             "    type :: base_t"//nl// &
+            "        real(8) :: scale"//nl// &
             "    contains"//nl// &
             "        procedure :: value"//nl// &
             "    end type base_t"//nl// &
@@ -421,13 +510,13 @@ contains
             "        class(base_t), intent(in) :: self"//nl// &
             "        real(8), intent(in) :: x"//nl// &
             "        real(8) :: y"//nl// &
-            "        y = x"//nl// &
+            "        y = self%scale*x + 1.0d0"//nl// &
             "    end function value"//nl// &
-            "    pure function top(x) result(y)"//nl// &
+            "    pure function top(model, x) result(y)"//nl// &
+            "        type(box_t), intent(in) :: model"//nl// &
             "        real(8), intent(in) :: x"//nl// &
-            "        type(box_t) :: b"//nl// &
             "        real(8) :: y"//nl// &
-            "        y = b%value(x)"//nl// &
+            "        y = model%value(x)"//nl// &
             "    end function top"//nl// &
             "end module inherited_case"//nl
     end function inherited_source
