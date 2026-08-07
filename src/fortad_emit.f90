@@ -142,6 +142,7 @@ contains
         end do
         call b%line("    implicit none")
         do i = 1, p%n_decls
+            if (p%decls(i)%is_select_alias) cycle
             call b%line(indent_of(1)//emit_decl_line(p%decls(i)))
         end do
         call b%line("")
@@ -296,6 +297,7 @@ contains
             call b%put("end if")
         case (FAD_SELECT_TYPE)
             call b%put("select type (")
+            if (allocated(s%target)) call b%put(trim(s%target)//" => ")
             call write_expr(b, p, s%value)
             call b%put(")")
         case (FAD_TYPE_IS)

@@ -88,6 +88,8 @@ module fortad_ir
         integer, allocatable :: allocation_args(:)
         integer :: allocation_source = 0
         integer :: allocation_mold = 0
+        logical :: allocation_target_polymorphic = .false.
+        logical :: allocation_target_unlimited_polymorphic = .false.
     end type fad_stmt_t
 
     type, public :: fad_decl_t
@@ -116,6 +118,8 @@ module fortad_ir
         !! spelling heuristic.
         logical :: is_polymorphic = .false.
         logical :: is_unlimited_polymorphic = .false.
+        logical :: is_select_alias = .false.
+        character(len=:), allocatable :: alias_target
         !! Verbatim dimension text, e.g. "n" or ":,:" - emitted unchanged.
         character(len=:), allocatable :: dims
     end type fad_decl_t
@@ -377,6 +381,8 @@ contains
         out%is_allocatable = source%is_allocatable
         out%is_polymorphic = source%is_polymorphic
         out%is_unlimited_polymorphic = source%is_unlimited_polymorphic
+        out%is_select_alias = source%is_select_alias
+        if (allocated(source%alias_target)) out%alias_target = source%alias_target
         out%is_result = source%is_result
     end subroutine copy_decl
 
@@ -450,6 +456,8 @@ contains
         out%is_allocatable = is_allocatable
         out%is_polymorphic = .false.
         out%is_unlimited_polymorphic = .false.
+        out%is_select_alias = .false.
+        if (allocated(out%alias_target)) deallocate (out%alias_target)
     end subroutine set_decl_fields
 
     integer function proc_decl_index(self, name) result(idx)
