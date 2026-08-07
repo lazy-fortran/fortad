@@ -1903,8 +1903,8 @@ contains
         logical, intent(in) :: active(:)
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
-        character(len=:), allocatable :: final_name
-        integer :: i, k, di, ignored, zero, n_tmp, seed_expr
+        character(len=:), allocatable :: final_name, shadow_name, target_name
+        integer :: i, k, di, ignored, zero, n_tmp, seed_expr, seed_copy
 
         call ssa_lookup(ssa, dependent, final_name)
         if (final_name /= dependent) then
@@ -1918,6 +1918,16 @@ contains
         zero = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
         do i = 1, n_rec
             if (.not. adjoint_is_live(primal, ssa, lhs_names(i), active)) cycle
+            ! An element write is a storage scatter, not an SSA scalar.  The
+            ! forward sweep deliberately keeps its target as `x(1)` (rather
+            ! than inventing an SSA name), so declaring `x(1)_b` here would
+            ! emit invalid Fortran.  Allocate one owning adjoint array and
+            ! let the reverse scatter use `x_b(1)` instead.
+            if (index(trim(lhs_names(i)), "(") > 0) then
+                call declare_array_adjoint(primal, adjoint, &
+                    target_base(trim(lhs_names(i))), suffix, zero)
+                cycle
+            end if
             call declare_adjoint(primal, adjoint, ssa, trim(lhs_names(i)), suffix)
             s%kind = FAD_ASSIGN
             s%target = trim(lhs_names(i))//suffix
@@ -2002,7 +2012,44 @@ contains
                     call declare_seed_shadow(primal, adjoint, dependent, suffix)
                     seed_expr = adjoint%add_expr(expr_var(shadow_element( &
                         trim(lhs_names(i)), suffix, dependent)))
-                    call accumulate(primal, adjoint, rhs_exprs(i), seed_expr, &
+                    ! The target's adjoint currently holds the seed for the
+                    ! *new* value.  Copy it before propagating the RHS: an
+                    ! expression such as `x(1) = x(1) + 2*a` otherwise emits
+                    ! `x_b(1) = x_b(1) + x_b(1)`, double-counting the same
+                    ! storage location instead of replacing its seed.
+                    target_name = trim(adjoint_element(trim(lhs_names(i)), suffix))
+                    if (index(trim(lhs_names(i)), "(") > 0 .and. &
+                        trim(shadow_element(trim(lhs_names(i)), suffix, dependent)) == &
+                        target_name) then
+                        shadow_name = array_seed_shadow_element( &
+                            trim(lhs_names(i)), suffix)
+                        call declare_array_seed_shadow(primal, adjoint, &
+                            fad_base_name(trim(lhs_names(i))), suffix)
+                        block
+                            type(fad_stmt_t) :: cs
+                            integer :: cignored
+                            cs%kind = FAD_ASSIGN
+                            cs%target = shadow_array_name( &
+                                fad_base_name(trim(lhs_names(i))), suffix)
+                            cs%value = adjoint%add_expr(expr_var( &
+                                fad_base_name(trim(lhs_names(i)))//trim(suffix)))
+                            cignored = adjoint%add_stmt(cs)
+                        end block
+                        seed_copy = adjoint%add_expr(expr_var(shadow_name))
+                        block
+                            type(fad_stmt_t) :: zs
+                            integer :: zignored
+                            zs%kind = FAD_ASSIGN
+                            zs%target = target_name
+                            zs%value = adjoint%add_expr( &
+                                expr_const("0.0"//adjoint%real_suffix))
+                            zignored = adjoint%add_stmt(zs)
+                        end block
+                    else
+                        call materialise(primal, adjoint, seed_expr, ssa, n_tmp, &
+                            seed_copy, force=.true.)
+                    end if
+                    call accumulate(primal, adjoint, rhs_exprs(i), seed_copy, &
                         ssa, suffix, active, n_tmp, status)
                     if (.not. status%ok) return
                     block
@@ -2383,6 +2430,46 @@ contains
         s%value = zero
         ignored = adjoint%add_stmt(s)
     end subroutine declare_array_adjoint
+
+    subroutine declare_array_seed_shadow(primal, adjoint, base, suffix)
+        !! Declare a copy used to preserve an element seed across a local
+        !! array store.  Keeping the copy as a whole array prevents the
+        !! optimiser from substituting `x_b(i)` back through the zero that
+        !! kills the destination before the old RHS is accumulated.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        character(len=*), intent(in) :: base, suffix
+        type(fad_decl_t) :: d
+        integer :: di, ignored
+
+        if (adjoint%decl_index(shadow_array_name(base, suffix)) > 0) return
+        di = primal%decl_index(base)
+        if (di == 0) return
+        d = primal%decls(di)
+        d%name = shadow_array_name(base, suffix)
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        d%is_optional = .false.
+        ignored = adjoint%add_decl(d)
+    end subroutine declare_array_seed_shadow
+
+    function shadow_array_name(base, suffix) result(name)
+        character(len=*), intent(in) :: base, suffix
+        character(len=:), allocatable :: name
+        name = trim(base)//trim(suffix)//"_in"
+    end function shadow_array_name
+
+    function array_seed_shadow_element(target, suffix) result(name)
+        character(len=*), intent(in) :: target, suffix
+        character(len=:), allocatable :: name
+        integer :: open
+        open = index(target, "(")
+        if (open > 0) then
+            name = trim(target(:open - 1))//trim(suffix)//"_in"//target(open:)
+        else
+            name = trim(target)//trim(suffix)//"_in"
+        end if
+    end function array_seed_shadow_element
 
     function adjoint_element(target, suffix) result(name)
         !! `c(i)` becomes `c_b(i)`: the suffix goes on the array name, not on
