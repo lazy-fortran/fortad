@@ -627,13 +627,23 @@ does not support a general build-time advantage.
       unambiguous procedure. Keep refusal diagnostics explicit when inference
       would be ambiguous. Every inferred command needs its own behavioral
       oracle and copyable example.
+- [ ] **P6.4c One-command defaults.** Make the source-first spelling the
+      documented path: `fortad jvp kernel.f90` and `fortad vjp kernel.f90`
+      infer names only when the procedure has one unambiguous active input and
+      scalar output. Infer the procedure, generated symbol, module wrapper,
+      and sibling output filename; print the decisions in `--verbose` mode.
+      Otherwise fail with a copyable command showing the one missing choice.
+      Keep `jvp NAMES FILE` and the flag interface as stable compatibility
+      forms. Add an independent oracle for inferred defaults and keep the
+      README to one quick-start table plus links to the advanced reference.
 - [ ] **P6.5 Automated source workflow.** Add a manifest-aware command that
       discovers procedures, runs the appropriate forward/reverse probes, and
       writes generated source, diagnostics, and a machine-readable result
       record. The command must stop at named unsupported constructs and never
-      silently choose a dependent or active argument. The current multi-flag
-      invocation remains a compatibility interface for scripts and advanced
-      rules.
+      silently choose a dependent or active argument. It should reuse the
+      P6.4c inference policy, emit a short summary by default, and reserve
+      full option dumps for `--verbose`. The current multi-flag invocation
+      remains a compatibility interface for scripts and advanced rules.
 
 ## End-to-end contract
 

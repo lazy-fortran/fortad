@@ -128,52 +128,29 @@ with independent results.
 ## Command line
 
 The command reads one Fortran source file and writes generated Fortran to
-standard output or `--output`. For the common path, put the product and
-independent names first:
+standard output. Start with one of these four forms:
 
 ```console
-$ fortad jvp x kernel.f90
-$ fortad vjp x --dep objective kernel.f90
-$ fortad hvp x --module kernel_hvp kernel.f90
-$ fortad check kernel.f90
+$ fortad jvp x kernel.f90                 # forward derivative
+$ fortad vjp x kernel.f90 --dep objective  # reverse derivative
+$ fortad hvp x kernel.f90                 # Hessian-vector product
+$ fortad check kernel.f90                 # parser/round-trip check
 ```
 
-Applicable advanced options such as `--proc`, `--module`, `--output`, and
-custom rules also work with this compact form. The original flag form remains
-available for scripts:
+Names are comma-separated. `--output PATH` writes a file. `--proc NAME` selects
+a procedure in a multi-procedure source. The full option and custom-rule
+reference is in [the CLI API section](docs/design/public-api.md#cli). The
+flag form remains available for scripts and advanced rules:
 
 ```text
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
-
---mode forward|reverse|hessian   derivative mode; forward is the default
---indep a,b                     independent variable names
---dep y                         dependent for reverse mode
---directions n_dir              direction-count argument for vector forward mode
---name procedure_name           generated procedure name
---module module_name            wrap the procedure in a module
---proc source_procedure         target inside a multi-procedure source
---no-primal                     omit outputs used only by the primal result
---roundtrip                     parse and re-emit without differentiation
---rule SPEC                     register scalar partial expressions
---call-rule SPEC                register tangent and adjoint statements
---output PATH                   write to PATH instead of standard output
---version                       print the version
---help                          print command help
 ```
 
-`check` parses and re-emits the default procedure without differentiating it.
-Use `--proc` to select another procedure and `--output` to retain the normalized
-Fortran. Otherwise it writes to standard output. A successful check establishes
-FortAD round-trip support for that procedure, not whole-file compiler
-conformance or derivative support.
-
-Use separate option values, as in `--mode reverse`. The
-[public API reference](docs/design/public-api.md#cli) gives the two rule formats
-and option scope. A compact product must be the first argument and its `NAMES`
-must follow immediately. Do not combine it with `--mode`, `--indep`, or
-`--roundtrip`.
+`check` parses and re-emits the selected procedure without differentiating it.
+A successful check establishes round-trip support for that procedure. It does
+not establish whole-file compiler conformance or derivative support.
 
 ## Fortran API
 
