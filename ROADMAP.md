@@ -102,7 +102,7 @@ The work after this gate is Phases 7 through 12. It extends FortAD from the
 current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
-The implementation snapshot is `8718ec0`. Its GNU behavioral gate is green
+The implementation snapshot is `fae0129`. Its GNU behavioral gate is green
 (408 build targets, 407 derivative targets, 35/35 tests); `fo lint` still has
 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
