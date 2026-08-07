@@ -404,14 +404,21 @@ contains
                     primal%stmts(i)%allocation_args(1))
                 owner = fad_base_name(owner_text)
                 if (index(trim(owner_text), "%") > 0) then
-                    if (primal%stmts(i)%allocation_target_polymorphic .and. &
-                        array_element_component(owner_text)) then
+                    if (primal%stmts(i)%allocation_target_polymorphic) then
                         status%ok = .false.
-                        status%message = "reverse mode: array-element polymorphic "// &
-                            "component allocation '"//trim(owner_text)// &
-                            "' cannot replay SOURCE= ownership per element; "// &
-                            "forward fixed-source differentiation is supported, "// &
-                            "but reverse needs a per-element value-copy replay tape"
+                        if (array_element_component(owner_text)) then
+                            status%message = "reverse mode: array-element polymorphic "// &
+                                "component allocation '"//trim(owner_text)// &
+                                "' cannot replay SOURCE= ownership per element; "// &
+                                "forward fixed-source differentiation is supported, "// &
+                                "but reverse needs a per-element value-copy replay tape"
+                        else
+                            status%message = "reverse mode: nested polymorphic component "// &
+                                "allocation '"//trim(owner_text)// &
+                                "' cannot replay SOURCE= ownership; forward fixed-source "// &
+                                "differentiation is supported, but reverse needs a "// &
+                                "component value-copy replay tape"
+                        end if
                         return
                     end if
                     status%ok = .false.
