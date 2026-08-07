@@ -751,7 +751,8 @@ problem-specific rule.
             locals in two procedures to verify scope-correct binding resolution.
             An active whole-receiver case verifies the named boundary. Local
             overrides on an abstract/deferred hierarchy are covered by P8.4a.
-            Active receiver cotangents and runtime dispatch remain open.
+            Active receiver cotangents and direct class dispatch remain open;
+            bounded `SELECT TYPE` dispatch is covered by P8.4b.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through
@@ -764,8 +765,17 @@ problem-specific rule.
             checks both levels with hand values, central finite differences,
             and the adjoint identity. Direct `class(base)` dispatch,
             inherited-only bindings, and unresolved deferred bindings remain
-            named refusals. Runtime type-tag preservation and a derivative
-            hierarchy remain open P8.4 work.
+            named refusals. Runtime type-tag preservation through an explicit
+            `SELECT TYPE` arm is covered by P8.4b; a general derivative
+            hierarchy remains open P8.4 work.
+      - [x] **P8.4b bounded runtime dispatch.** A simple `class(base_t)` dummy
+            may select concrete children inside `SELECT TYPE` arms and call
+            their deferred bindings. FortAD generates both JVP and VJP code
+            for the fixed dynamic type. The independent runtime oracle covers
+            linear, quadratic, cubic, and default arms with hand derivatives,
+            central differences, and the adjoint identity. The measured bench
+            case is
+            [`itpplasma_polymorphic_select_type_validation.txt`](https://github.com/lazy-fortran/fortad-bench/blob/main/results/itpplasma_polymorphic_select_type_validation.txt).
 - [ ] **P8.5 Polymorphic ownership.** Cover allocatable base-class components,
       factories, `allocate(source=child)`, nested field/coordinate objects,
       arrays of polymorphic holders, assignment, and destruction.
@@ -841,7 +851,8 @@ An unsupported result is recorded as such and never counted as a runtime win.
       measurements. Invalid, non-Fortran, and dependency-blocked entries stay
       in the ledger with a reproducible refusal. They do not count as wins.
 
-- [ ] **B1** abstract base with two runtime `select type` children, JVP and VJP
+- [x] **B1** abstract base with runtime `select type` children, JVP and VJP;
+      measured in the itpplasma polymorphism case linked under P8.4b
 - [ ] **B2** multi-level inheritance with several deferred bindings
 - [ ] **B3** polymorphic factory using `allocate(source=...)`
 - [ ] **B4** nested polymorphic field and coordinate components
