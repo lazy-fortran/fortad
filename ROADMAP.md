@@ -206,6 +206,10 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
+      The current FortFront `main` handoff is `c02068e5`, which includes the
+      ownership and dispatch metadata query contract from `e4d9e169`; its
+      focused `test_ownership_dispatch_metadata` oracle passes on the current
+      378-target GNU build.
 - [ ] FortFront `main` is green on Windows. The latest procedure-name
       observation is run
       [31144062538](https://github.com/lazy-fortran/fortfront/actions/runs/31144062538),
@@ -219,7 +223,7 @@ FortAD gate.
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds 408 targets, checks 407 derivative
-      targets, and runs 36 tests.
+      targets, and runs 45 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
       hazards. 108 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
@@ -237,7 +241,7 @@ lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
 The implementation snapshot is the current `main` head. Its GNU behavioral gate is green
-(408 build targets, 407 derivative targets, 36/36 tests); `fo lint` still has
+(408 build targets, 407 derivative targets, 45/45 tests); `fo lint` still has
 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
