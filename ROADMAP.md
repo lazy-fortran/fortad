@@ -1037,6 +1037,25 @@ element into a scalar, paying for both representations. Propagate element
 reads into their uses so the named scalars disappear, or retain direct reads
 when propagation is impossible. A width threshold would only hide the cause.
 
+#### Focused rerun (2026-08-07)
+
+On the Ryzen 9 5950X with flang 22.1.8 and `-O3`, the committed harness gave
+`fci_polygon_edge_area` a 0.336 ns/input tangent versus Enzyme's 0.272
+(1.24x), and the curved quadrilateral 1.450 versus 0.890 (1.63x). The run
+used the existing seven-trial best-of-seven harness, 20,000 batches, and the
+committed independent finite-difference and cross-engine checks.
+
+Two general transformations were tested in an isolated branch: removing the
+adjacent-read slice pack, and propagating every packed scalar extraction into
+its uses. Removing packing slowed the focused tangent by about 9% on the
+polygon and 4% on the curved quadrilateral. Propagation reduced generated
+source size (7,614 to 7,184 bytes for the curved case) but slowed its tangent
+by about 4%; the first unrestricted implementation also exposed a reverse
+optimizer crash on the full fortfem generation sweep. Both experiments were
+discarded. The existing pack remains the measured local optimum, and this
+defect stays open until a transformation improves the complete workload without
+weakening the reverse gate.
+
 ### Reverse performance
 
 - Taped recurrences are about 3.5% slower than Enzyme on
