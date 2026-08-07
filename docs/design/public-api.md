@@ -246,6 +246,7 @@ directional coefficient. `tay_derivative` multiplies coefficient `k` by `k!`.
 
 ```text
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
+fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
 ```
 
@@ -262,9 +263,17 @@ one spelling. The product names are deliberately distinct from the legacy mode
 values, so an existing positional input path named `forward`, `reverse`, or
 `hessian` keeps its old meaning.
 
+`fortad check FILE` is the compact spelling of the existing `--roundtrip`
+operation. It parses the file and re-emits its default procedure, or the one
+selected by `--proc`, and accepts `--output`. Derivative-only options are
+rejected. Success means the FortAD parser/normalizer round-trip completed for
+that procedure; it is not a claim that a Fortran compiler accepts the whole
+file or that FortAD can differentiate it.
+
 | Option | Scope | Meaning |
 | --- | --- | --- |
 | `jvp`, `vjp`, `hvp` | compact derivative form | product followed immediately by independent names |
+| `check` | compact round-trip form | validate and re-emit source without differentiation |
 | `-i`, `--indep a,b` | derivative modes | independent variables, required |
 | `-m`, `--mode MODE` | derivative modes | `forward`, `reverse`, or `hessian` |
 | `--dep name` | reverse | dependent when the default is ambiguous |

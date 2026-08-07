@@ -4,6 +4,7 @@ program fortad_cli
     !!     fortad jvp x,y kernel.f90
     !!     fortad jvp a,b --directions nd -o kernel_d.f90 kernel.f90
     !!     fortad vjp x --no-primal kernel.f90
+    !!     fortad check kernel.f90
     !!
     !! Reads Fortran, writes Fortran. Nothing else is needed to use the result:
     !! compile the generated file with the rest of your project.
@@ -219,7 +220,7 @@ contains
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
-        logical :: compact_syntax
+        logical :: check_syntax, compact_syntax
 
         input_path = ""
         output_path = ""
@@ -233,6 +234,7 @@ contains
         dep_name = ""
         from_name = ""
         stat = 0
+        check_syntax = .false.
         compact_syntax = .false.
 
         n = command_argument_count()
@@ -250,6 +252,10 @@ contains
                 case ("hvp")
                     compact_syntax = .true.
                     mode = "hessian"
+                case ("check")
+                    check_syntax = .true.
+                    roundtrip_only = .true.
+                    i = 2
                 end select
                 if (compact_syntax) then
                     i = 2
@@ -275,7 +281,7 @@ contains
             call get_command_argument(i, arg, length)
             select case (trim(arg(1:length)))
             case ("--indep", "-i")
-                if (compact_syntax) then
+                if (compact_syntax .or. check_syntax) then
                     stat = 1
                     return
                 end if
@@ -287,6 +293,10 @@ contains
                 call get_command_argument(i, arg, length)
                 indep_list = trim(arg(1:length))
             case ("--directions", "-d")
+                if (check_syntax) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -295,6 +305,10 @@ contains
                 call get_command_argument(i, arg, length)
                 directions = trim(arg(1:length))
             case ("--name")
+                if (check_syntax) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -311,7 +325,7 @@ contains
                 call get_command_argument(i, arg, length)
                 output_path = trim(arg(1:length))
             case ("-m", "--mode")
-                if (compact_syntax) then
+                if (compact_syntax .or. check_syntax) then
                     stat = 1
                     return
                 end if
@@ -330,6 +344,10 @@ contains
                     return
                 end select
             case ("--module")
+                if (check_syntax) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -341,6 +359,10 @@ contains
                 ! Which output to differentiate. Needed when the primal has
                 ! more than one `intent(out)` argument and fortad cannot tell
                 ! which one the caller means.
+                if (check_syntax) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -356,6 +378,10 @@ contains
                 ! Written NAME:n_args:tangent;tangent|adjoint;adjoint over
                 ! $k for the k-th actual, $kd for its tangent and $kb for its
                 ! adjoint. Enzyme spells the same thing as a custom rule.
+                if (check_syntax) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -388,6 +414,10 @@ contains
                 ! Enzyme needs the same thing, spelled as a custom rule in C.
                 ! Written NAME:dNAME/darg1;dNAME/darg2, over $1, $2, ... - for
                 ! example  --rule 'bessel_i0:bessel_i1($1)'
+                if (check_syntax) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -404,9 +434,13 @@ contains
             case ("--no-primal")
                 ! Emit the gradient alone. Everything the primal value kept
                 ! alive is then dead and is removed.
+                if (check_syntax) then
+                    stat = 1
+                    return
+                end if
                 with_primal = .false.
             case ("--roundtrip")
-                if (compact_syntax) then
+                if (compact_syntax .or. check_syntax) then
                     stat = 1
                     return
                 end if
@@ -439,9 +473,11 @@ contains
             " - source-transformation automatic differentiation for Fortran"
         write (*, '(a)') ""
         write (*, '(a)') "usage: fortad PRODUCT <names> [options] <file.f90>"
+        write (*, '(a)') "       fortad check [--proc NAME] [-o PATH] <file.f90>"
         write (*, '(a)') "       fortad --indep <names> [options] <file.f90>"
         write (*, '(a)') ""
         write (*, '(a)') "  PRODUCT               jvp, vjp, or hvp"
+        write (*, '(a)') "  check                 parse and re-emit without differentiating"
         write (*, '(a)') "  -i, --indep a,b       independent variables (required)"
         write (*, '(a)') "  -m, --mode MODE       forward (default), reverse, "// &
             "or hessian"

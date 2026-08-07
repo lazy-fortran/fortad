@@ -135,6 +135,7 @@ independent names first:
 $ fortad jvp x kernel.f90
 $ fortad vjp x --dep objective kernel.f90
 $ fortad hvp x --module kernel_hvp kernel.f90
+$ fortad check kernel.f90
 ```
 
 Applicable advanced options such as `--proc`, `--module`, `--output`, and
@@ -143,6 +144,7 @@ available for scripts:
 
 ```text
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
+fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
 
 --mode forward|reverse|hessian   derivative mode; forward is the default
@@ -160,6 +162,12 @@ fortad --indep NAMES [OPTIONS] FILE
 --version                       print the version
 --help                          print command help
 ```
+
+`check` parses and re-emits the default procedure without differentiating it.
+Use `--proc` to select another procedure and `--output` to retain the normalized
+Fortran; otherwise it writes to standard output. A successful check establishes
+FortAD round-trip support for that procedure, not whole-file compiler
+conformance or derivative support.
 
 Use separate option values, as in `--mode reverse`. The
 [public API reference](docs/design/public-api.md#cli) gives the two rule formats
