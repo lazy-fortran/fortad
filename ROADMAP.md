@@ -68,7 +68,8 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront `main` is pinned to `c0a32743`, the merge of the procedure-name
+FortFront source `main` is pinned to `c0a32743`, with documentation handoff
+`f482e048`, the merge of the procedure-name
 semantic-boundary fix after PR #3003. It carries lazy untyped function-result
 inference (#2980) and its independent GNU Fortran differential oracle. Its
 focused #2993, #2996, nested-binding, implicit-DIMENSION, and #2980 oracles
