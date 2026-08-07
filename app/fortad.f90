@@ -220,7 +220,7 @@ contains
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
-        logical :: check_syntax, compact_syntax
+        logical :: check_syntax, compact_syntax, source_first_syntax
 
         input_path = ""
         output_path = ""
@@ -236,6 +236,7 @@ contains
         stat = 0
         check_syntax = .false.
         compact_syntax = .false.
+        source_first_syntax = .false.
 
         n = command_argument_count()
         i = 1
@@ -272,8 +273,36 @@ contains
                         stat = 1
                         return
                     end if
-                    indep_list = trim(arg(1:length))
-                    i = 3
+                    if (existing_file(arg(1:length))) then
+                        ! The source-first spelling is deliberately selected
+                        ! only for an existing first path.  This keeps the
+                        ! legacy `PRODUCT NAMES ... FILE` form deterministic,
+                        ! while refusing the one ambiguous case of two paths.
+                        source_first_syntax = .true.
+                        input_path = trim(arg(1:length))
+                        if (i + 1 > n) then
+                            stat = 1
+                            return
+                        end if
+                        call get_command_argument(i + 1, arg, length)
+                        if (length == 0) then
+                            stat = 1
+                            return
+                        end if
+                        if (arg(1:1) == "-") then
+                            stat = 1
+                            return
+                        end if
+                        if (existing_file(arg(1:length))) then
+                            stat = 1
+                            return
+                        end if
+                        indep_list = trim(arg(1:length))
+                        i = 4
+                    else
+                        indep_list = trim(arg(1:length))
+                        i = 3
+                    end if
                 end if
             end if
         end if
@@ -457,6 +486,10 @@ contains
                         stat = 1
                         return
                     end if
+                    if (source_first_syntax) then
+                        stat = 1
+                        return
+                    end if
                     input_path = trim(arg(1:length))
                 end if
             end select
@@ -467,12 +500,20 @@ contains
         if (.not. roundtrip_only .and. len(indep_list) == 0) stat = 1
     end subroutine parse_arguments
 
+    logical function existing_file(path) result(found)
+        !! Return whether PATH names an existing input file.
+        character(len=*), intent(in) :: path
+
+        inquire (file=path, exist=found)
+    end function existing_file
+
     subroutine usage()
         !! Print usage.
         write (*, '(a)') "fortad "//fad_version()// &
             " - source-transformation automatic differentiation for Fortran"
         write (*, '(a)') ""
-        write (*, '(a)') "usage: fortad PRODUCT <names> [options] <file.f90>"
+        write (*, '(a)') "usage: fortad PRODUCT <file.f90> <names> [options]"
+        write (*, '(a)') "       fortad PRODUCT <names> [options] <file.f90>"
         write (*, '(a)') "       fortad check [--proc NAME] [-o PATH] <file.f90>"
         write (*, '(a)') "       fortad --indep <names> [options] <file.f90>"
         write (*, '(a)') ""

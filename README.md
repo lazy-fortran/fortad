@@ -131,18 +131,21 @@ The command reads one Fortran source file and writes generated Fortran to
 standard output. Start with one of these four forms:
 
 ```console
-$ fortad jvp x kernel.f90                 # forward derivative
-$ fortad vjp x kernel.f90 --dep objective  # reverse derivative
-$ fortad hvp x kernel.f90                 # Hessian-vector product
+$ fortad jvp kernel.f90 x                 # forward derivative
+$ fortad vjp kernel.f90 x --dep objective  # reverse derivative
+$ fortad hvp kernel.f90 x                 # Hessian-vector product
 $ fortad check kernel.f90                 # parser/round-trip check
 ```
 
 Names are comma-separated. `--output PATH` writes a file. `--proc NAME` selects
-a procedure in a multi-procedure source. The full option and custom-rule
-reference is in [the CLI API section](docs/design/public-api.md#cli). The
-flag form remains available for scripts and advanced rules:
+a procedure in a multi-procedure source. The source-first form keeps the file
+visible at the start of the command; it still requires explicit independent
+names. The full option and custom-rule reference is in [the CLI API
+section](docs/design/public-api.md#cli). The flag form and names-first compact
+form remain available for scripts and advanced rules:
 
 ```text
+fortad jvp|vjp|hvp FILE NAMES [OPTIONS]
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
