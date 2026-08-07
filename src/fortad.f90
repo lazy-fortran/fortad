@@ -36,6 +36,17 @@ module fortad
     use fortad_taylor, only: tay_const, tay_var, tay_add, tay_sub, tay_scale, &
         tay_mul, tay_div, tay_exp, tay_log, tay_sqrt, &
         tay_sin_cos, tay_pow_int, tay_derivative
+    ! Re-export the compiler-facing facts needed by bounded modern-Fortran
+    ! transformers.  These are FortFront queries; FortAD does not rescan the
+    ! source or infer duplicate semantic metadata.
+    use fortfront, only: compiler_frontend_options_t, &
+        compiler_frontend_result_t, compile_frontend_from_string, &
+        INPUT_MODE_STANDARD, get_node_type_at, declaration_query_t, &
+        query_declaration, array_bounds_query_t, query_array_bounds, &
+        storage_query_t, query_storage
+    use fortfront_compiler, only: control_statement_query_t, &
+        query_control_statement, CONTROL_SELECT_TYPE, CONTROL_TYPE_GUARD, &
+        CONTROL_SELECT_RANK, CONTROL_RANK_BLOCK
     implicit none
     private
 
@@ -50,6 +61,13 @@ module fortad
     public :: REV_ADVANCE, REV_TAKESHOT, REV_RESTORE, REV_TURN
     public :: tay_const, tay_var, tay_add, tay_sub, tay_scale, tay_mul, tay_div
     public :: tay_exp, tay_log, tay_sqrt, tay_sin_cos, tay_pow_int, tay_derivative
+    public :: compiler_frontend_options_t, compiler_frontend_result_t, &
+        compile_frontend_from_string, INPUT_MODE_STANDARD, get_node_type_at, &
+        declaration_query_t, query_declaration, array_bounds_query_t, &
+        query_array_bounds, storage_query_t, query_storage, &
+        control_statement_query_t, query_control_statement, &
+        CONTROL_SELECT_TYPE, CONTROL_TYPE_GUARD, CONTROL_SELECT_RANK, &
+        CONTROL_RANK_BLOCK
 
     character(len=*), parameter :: FORTAD_VERSION = "0.1.0"
 
