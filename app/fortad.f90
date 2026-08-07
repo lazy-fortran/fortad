@@ -1,9 +1,9 @@
 program fortad_cli
     !! Command-line driver.
     !!
-    !!     fortad --indep x,y kernel.f90
-    !!     fortad --indep a,b --directions nd -o kernel_d.f90 kernel.f90
-    !!     fortad --mode reverse --indep x --no-primal kernel.f90
+    !!     fortad jvp x,y kernel.f90
+    !!     fortad jvp a,b --directions nd -o kernel_d.f90 kernel.f90
+    !!     fortad vjp x --no-primal kernel.f90
     !!
     !! Reads Fortran, writes Fortran. Nothing else is needed to use the result:
     !! compile the generated file with the rest of your project.
@@ -219,6 +219,7 @@ contains
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
+        logical :: compact_syntax
 
         input_path = ""
         output_path = ""
@@ -232,13 +233,52 @@ contains
         dep_name = ""
         from_name = ""
         stat = 0
+        compact_syntax = .false.
 
         n = command_argument_count()
         i = 1
+        if (n > 0) then
+            call get_command_argument(1, arg, length)
+            if (length > 0) then
+                select case (trim(arg(1:length)))
+                case ("jvp")
+                    compact_syntax = .true.
+                    mode = "forward"
+                case ("vjp")
+                    compact_syntax = .true.
+                    mode = "reverse"
+                case ("hvp")
+                    compact_syntax = .true.
+                    mode = "hessian"
+                end select
+                if (compact_syntax) then
+                    i = 2
+                    if (i > n) then
+                        stat = 1
+                        return
+                    end if
+                    call get_command_argument(i, arg, length)
+                    if (length == 0) then
+                        stat = 1
+                        return
+                    end if
+                    if (arg(1:1) == "-") then
+                        stat = 1
+                        return
+                    end if
+                    indep_list = trim(arg(1:length))
+                    i = 3
+                end if
+            end if
+        end if
         do while (i <= n)
             call get_command_argument(i, arg, length)
             select case (trim(arg(1:length)))
             case ("--indep", "-i")
+                if (compact_syntax) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -271,6 +311,10 @@ contains
                 call get_command_argument(i, arg, length)
                 output_path = trim(arg(1:length))
             case ("-m", "--mode")
+                if (compact_syntax) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -362,6 +406,10 @@ contains
                 ! alive is then dead and is removed.
                 with_primal = .false.
             case ("--roundtrip")
+                if (compact_syntax) then
+                    stat = 1
+                    return
+                end if
                 roundtrip_only = .true.
             case ("--version")
                 write (*, '(a)') "fortad "//fad_version()
@@ -390,8 +438,10 @@ contains
         write (*, '(a)') "fortad "//fad_version()// &
             " - source-transformation automatic differentiation for Fortran"
         write (*, '(a)') ""
-        write (*, '(a)') "usage: fortad --indep <names> [options] <file.f90>"
+        write (*, '(a)') "usage: fortad PRODUCT <names> [options] <file.f90>"
+        write (*, '(a)') "       fortad --indep <names> [options] <file.f90>"
         write (*, '(a)') ""
+        write (*, '(a)') "  PRODUCT               jvp, vjp, or hvp"
         write (*, '(a)') "  -i, --indep a,b       independent variables (required)"
         write (*, '(a)') "  -m, --mode MODE       forward (default), reverse, "// &
             "or hessian"
