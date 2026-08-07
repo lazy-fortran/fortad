@@ -809,6 +809,14 @@ Each item is one executable case with an independent oracle and the six
 measurements in the end-to-end contract. Another AD engine is corroboration.
 An unsupported result is recorded as such and never counted as a runtime win.
 
+- [ ] **B0 Tapenade corpus closeout.** The companion
+      [`fortad-bench` corpus manifest](https://github.com/lazy-fortran/fortad-bench/blob/main/docs/corpora/tapenade.toml)
+      pins the upstream tree and inventories 2,014 candidate cases. Classify
+      every candidate, port runnable Fortran cases with an independent oracle,
+      and record transform, compile, runtime, memory, and generated-source
+      measurements. Invalid, non-Fortran, and dependency-blocked entries stay
+      in the ledger with a reproducible refusal; they do not count as wins.
+
 - [ ] **B1** abstract base with two runtime `select type` children, JVP and VJP
 - [ ] **B2** multi-level inheritance with several deferred bindings
 - [ ] **B3** polymorphic factory using `allocate(source=...)`
