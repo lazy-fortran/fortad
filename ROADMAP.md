@@ -271,8 +271,8 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `43087e7`. Its GNU behavioral
-gate is green (408 build targets, 407 derivative targets, 50/50 tests);
+The implementation snapshot is FortAD `main` at `d59ee23`. Its GNU behavioral
+gate is green (408 build targets, 407 derivative targets, 51/51 tests);
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
@@ -923,6 +923,14 @@ of selected child ends the fixed-path derivative contract.
         central differences, and the adjoint identity. Generic resolution,
         active optional reverse arguments, and operator-overloaded inputs
         remain open.
+      - [x] **P7.4c forwarded optional presence.** Commit `d59ee23` preserves
+        the runtime `PRESENT()` state when a caller's optional dummy is passed
+        through a reordered keyword call. The independent
+        [`test_optional_forwarding_oracle.f90`](test/test_optional_forwarding_oracle.f90)
+        checks JVP and VJP values against hand derivatives, central
+        differences, and the adjoint identity. Active optional arguments,
+        optional components or expressions, generic resolution, and
+        procedure-pointer interfaces remain explicit boundaries.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.
