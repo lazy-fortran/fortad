@@ -68,7 +68,7 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront `main` is `7f0adccc`. Its focused #2993, #2996, nested-binding,
+FortFront `main` is `a06d13d4` (the semantic fix is `dd4635fd`). Its focused #2993, #2996, nested-binding,
 and implicit-DIMENSION oracles are green locally. The current GNU gate is
 green as well: 1,545 static modules, 381 build targets, 378 derivative
 targets, 483/483 tests, and clean lint. The Windows lane remains open.
@@ -88,8 +88,8 @@ targets, 483/483 tests, and clean lint. The Windows lane remains open.
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures; the fixed-form and submodule acceptance oracles are green.
 - [ ] FortFront `main` is green on Windows. The six failures listed under
-      Repository state are the last-known Windows set; the run above is not
-      current-head evidence because it was cancelled.
+      Repository state are the last-known Windows set; the GNU gate above is
+      current-head evidence.
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
