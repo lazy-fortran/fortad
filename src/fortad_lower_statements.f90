@@ -7,8 +7,9 @@ module fortad_lower_statements
         pointer_assignment_node, &
         get_select_type_info, get_type_guard_info, component_access_query_t, &
         query_component_access, query_derived_type, query_type_binding, &
-        derived_type_query_t, type_binding_query_t, query_program_unit, &
-        program_unit_query_t
+        derived_type_query_t, type_binding_query_t, declaration_query_t, &
+        query_declaration, query_program_unit, program_unit_query_t, &
+        get_source_line
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, fad_base_name, copy_decl, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
@@ -83,11 +84,11 @@ contains
             end if
             if (allocated(n%var_names)) then
                 do k = 1, size(n%var_names)
-                    call fill_decl(n, trim(n%var_names(k)), arena, d)
+                    call fill_decl(n, idx, trim(n%var_names(k)), arena, d)
                     ignored = proc%add_decl(d)
                 end do
             else
-                call fill_decl(n, n%var_name, arena, d)
+                call fill_decl(n, idx, n%var_name, arena, d)
                 ignored = proc%add_decl(d)
             end if
 
@@ -343,12 +344,14 @@ contains
         decl%type_name = alias_type
     end subroutine set_select_type_alias
 
-    subroutine fill_decl(n, name, arena, d)
+    subroutine fill_decl(n, idx, name, arena, d)
         !! Translate a fortfront declaration node into a fortad declaration.
         type(declaration_node), intent(in) :: n
+        integer, intent(in) :: idx
         character(len=*), intent(in) :: name
         type(ast_arena_t), intent(in) :: arena
         type(fad_decl_t), intent(out) :: d
+        type(declaration_query_t) :: query
 
         d%name = name
         d%type_name = n%type_name
@@ -370,10 +373,75 @@ contains
                 d%intent = FAD_INTENT_INOUT
             end select
         end if
-        if (n%is_array .and. allocated(n%dimension_indices)) then
-            d%dims = dims_text(arena, n%dimension_indices)
+        query = query_declaration(arena, idx)
+        if (query%found .and. query%is_array .and. &
+            allocated(query%dimension_indices)) then
+            if (size(query%dimension_indices) == 0) then
+                d%dims = declaration_dims_from_source(arena, n%line, name)
+                return
+            end if
+            d%dims = dims_text(arena, query%dimension_indices)
+            if (trim(d%dims) == ":") then
+                d%dims = declaration_dims_from_source(arena, n%line, name)
+            end if
+        end if
+        if (d%is_array) then
+            if (.not. allocated(d%dims)) then
+                d%dims = declaration_dims_from_source(arena, n%line, name)
+            else if (len_trim(d%dims) == 0) then
+                d%dims = declaration_dims_from_source(arena, n%line, name)
+            end if
         end if
     end subroutine fill_decl
+
+    function declaration_dims_from_source(arena, line_number, name) result(dims)
+        !! Fallback for declaration bounds not attached to the parser node.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: line_number
+        character(len=*), intent(in) :: name
+        character(len=:), allocatable :: dims, line
+        logical :: found
+        integer :: i, j, open, depth, name_len
+
+        dims = ""
+        call get_source_line(arena, line_number, line, found)
+        if (.not. found) return
+        name_len = len_trim(name)
+        if (name_len == 0) return
+        do i = 1, len_trim(line) - name_len + 1
+            if (.not. same_name(line(i:i + name_len - 1), name)) cycle
+            if (i > 1) then
+                if (is_name_char(line(i - 1:i - 1))) cycle
+            end if
+            j = i + name_len
+            if (j <= len_trim(line)) then
+                if (is_name_char(line(j:j))) cycle
+            end if
+            do while (j <= len_trim(line) .and. line(j:j) == " ")
+                j = j + 1
+            end do
+            if (j > len_trim(line)) cycle
+            if (line(j:j) /= "(") cycle
+            open = j
+            depth = 1
+            do j = j + 1, len_trim(line)
+                if (line(j:j) == "(") depth = depth + 1
+                if (line(j:j) == ")") depth = depth - 1
+                if (depth == 0) then
+                    dims = line(open + 1:j - 1)
+                    return
+                end if
+            end do
+        end do
+    end function declaration_dims_from_source
+
+    logical function is_name_char(c) result(yes)
+        character, intent(in) :: c
+
+        yes = (c >= "a" .and. c <= "z") .or. &
+            (c >= "A" .and. c <= "Z") .or. &
+            (c >= "0" .and. c <= "9") .or. c == "_"
+    end function is_name_char
 
     subroutine inherit_module_uses(arena, procedure_index, proc)
         !! A module-level USE is visible to every contained procedure.
