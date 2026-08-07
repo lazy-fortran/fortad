@@ -5,6 +5,7 @@ program test_cli_check_oracle
     character(len=1024) :: executable_buffer, environment_buffer
     character(len=:), allocatable :: executable_path, directory, separator
     character(len=:), allocatable :: cli_path, input_path, invalid_path
+    character(len=:), allocatable :: module_path
     character(len=:), allocatable :: legacy_path, check_path, object_path
     character(len=:), allocatable :: command, legacy_source, check_source
     integer :: path_length, separator_pos, stat
@@ -19,6 +20,7 @@ program test_cli_check_oracle
 
     input_path = directory // separator // 'fortad-check-input.f90'
     invalid_path = directory // separator // 'fortad-check-invalid.f90'
+    module_path = directory // separator // 'fortad-check-module-only.f90'
     legacy_path = directory // separator // 'fortad-check-legacy.f90'
     check_path = directory // separator // 'fortad-check-output.f90'
     object_path = directory // separator // 'fortad-check-output.o'
@@ -50,6 +52,14 @@ program test_cli_check_oracle
     inquire (file=check_path, exist=exists)
     if (exists) call fail('failed check wrote normalized output')
 
+    call write_module_only_fixture(module_path)
+    command = quote(cli_path) // ' ' // quote(module_path) // &
+        ' --output ' // quote(check_path)
+    call execute_command_line(command, wait=.true., exitstat=stat)
+    if (stat == 0) call fail('source-first CLI accepted module-only source')
+    inquire (file=check_path, exist=exists)
+    if (exists) call fail('module-only source wrote normalized output')
+
     command = quote(cli_path) // ' check --indep x --output ' // &
         quote(check_path) // ' ' // quote(input_path)
     call execute_command_line(command, wait=.true., exitstat=stat)
@@ -59,6 +69,7 @@ program test_cli_check_oracle
 
     call delete_file(input_path)
     call delete_file(invalid_path)
+    call delete_file(module_path)
     call delete_file(legacy_path)
     print *, 'pass cli_check'
 
@@ -127,6 +138,18 @@ contains
         write (unit, '(a)') 'this is not Fortran'
         close (unit)
     end subroutine write_invalid_fixture
+
+    subroutine write_module_only_fixture(path)
+        character(len=*), intent(in) :: path
+        integer :: unit
+
+        open (newunit=unit, file=path, status='replace', action='write')
+        write (unit, '(a)') 'module module_only_fixture'
+        write (unit, '(a)') '    implicit none'
+        write (unit, '(a)') '    real :: state'
+        write (unit, '(a)') 'end module module_only_fixture'
+        close (unit)
+    end subroutine write_module_only_fixture
 
     subroutine read_text(path, text)
         character(len=*), intent(in) :: path
