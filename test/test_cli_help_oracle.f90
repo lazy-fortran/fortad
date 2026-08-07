@@ -72,6 +72,9 @@ program test_cli_help_oracle
     call require_text(help_text, 'fortad check [--proc NAME]')
     call require_text(help_text, 'jvp, vjp, or hvp')
     call require_text(help_text, '--verbose')
+    call require_text(help_text, '-context')
+    call require_text(help_text, '-fixinterface')
+    call require_text(help_text, '-standalonediff')
     print *, 'pass cli_help'
 
 contains
