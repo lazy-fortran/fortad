@@ -834,10 +834,15 @@ of selected child ends the fixed-path derivative contract.
         independent [`test_allocation_lifetime_oracle.f90`](test/test_allocation_lifetime_oracle.f90)
         checks the generated JVP against a central finite difference and
         verifies that active module-level allocatable state is refused.
-        Reverse mode deliberately refuses these operations until an
-        allocation-state replay tape exists; implicit whole-array
+        Reverse mode now has a bounded retention slice for one straight-line
+        `allocate`/matching final `deallocate` lifetime of a simple local or dummy
+        owner. It allocates a derivative owner, retains both descriptors and
+        payloads through the reverse sweep, and performs deferred cleanup only
+        after reverse reads. The independent oracle checks both a hand-derived
+        gradient and central finite differences. `move_alloc`, repeated or
+        path-dependent lifetimes, active `source=` value copies, implicit
         reallocation, allocatable components, and polymorphic ownership remain
-        open P7.2 work.
+        explicit refusals pending a storage-aware replay tape.
 - [ ] **P7.3 Aliasing and sections.** Track `pointer`, `target`, association,
       overlapping actual arguments, noncontiguous sections, and component
       aliases by storage identity. Test aliases that share a target and aliases

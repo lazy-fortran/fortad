@@ -15,20 +15,36 @@ array assignment that may trigger automatic reallocation, allocation status
 side channels (`stat=`/`errmsg=`), multiple allocation objects, polymorphic
 type-spec allocation, pointer/target aliasing, and allocatable components.
 
-Reverse mode currently reports:
+Reverse mode now has a bounded retention slice for one explicit lifetime of a
+simple local or allocatable dummy array. The generated VJP allocates a
+same-shaped derivative owner, retains the primal and derivative descriptors
+through the reverse sweep, and performs an explicit source `DEALLOCATE` only
+after all reverse reads. This is a replay boundary represented entirely by
+the existing IR lifetime events; it does not pretend to handle arbitrary
+allocation state.
+
+The supported reverse shape is one straight-line `ALLOCATE` (with passive
+shape metadata or `MOLD=`), ordinary active element updates and reads, and at
+most one matching final `DEALLOCATE`. An active `SOURCE=` value copy is
+refused until it has its own replay rule. The independent oracle checks the
+hand-derived and finite-difference gradient for this path.
+
+Reverse mode still reports a precise refusal for unsupported lifetime forms:
 
 ```text
-reverse mode: explicit allocation lifetime requires an allocation-state replay tape; use forward mode for this bounded ownership slice
+reverse mode: allocation lifetime move_alloc requires an ownership replay tape; this bounded slice retains one simple allocation owner
 ```
 
-That refusal is intentional: the reverse sweep must retain or replay the
-descriptor, shape, ownership transfer, and live values across deallocation;
-emitting a derivative that reads released storage would be unsound. The next
-P7.2 slice is an allocation-state tape and reverse ownership replay.
+`move_alloc`, repeated or path-dependent lifetimes, automatic reallocation,
+allocatable components, polymorphic ownership, pointer/target aliases, and
+active module-owned state remain refused. Those cases require storage
+identity, dynamic ownership, or a per-path allocation-state tape; emitting a
+derivative that reads released or aliased storage would be unsound.
 
 The executable independent oracle is
 [`test_allocation_lifetime_oracle.f90`](../../test/test_allocation_lifetime_oracle.f90).
 It compiles and runs a primal using local allocatable arrays, explicit
 allocation, `source=`/`mold=`, a `move_alloc` transfer, and deallocation; then
 compiles the generated JVP and checks it against a central finite difference.
-It also checks the named reverse-mode refusal and the global-state boundary.
+It checks the retained reverse VJP, the named `move_alloc` refusal, and the
+global-state boundary.

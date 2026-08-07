@@ -116,6 +116,13 @@ module fortad_reverse
     integer, parameter :: ORDER_CALL = 4
     integer, parameter :: ORDER_SELECT = 5
 
+    type :: allocation_record_t
+        !! One explicitly allocated, simple allocatable owner.
+        character(len=:), allocatable :: owner
+        logical :: active = .false.
+        logical :: deallocated = .false.
+    end type allocation_record_t
+
     type :: call_record_t
         !! An opaque call whose registered rule is applied in reverse.
         character(len=:), allocatable :: name
@@ -185,8 +192,10 @@ contains
         type(branch_record_t), allocatable :: branches(:)
         type(select_record_t), allocatable :: selections(:)
         type(call_record_t), allocatable :: calls(:)
+        type(allocation_record_t), allocatable :: allocations(:)
         integer, allocatable :: order_kind(:), order_index(:)
-        integer :: n_rec, n_loops, n_branches, n_selects, n_calls, n_order
+        integer :: n_rec, n_loops, n_branches, n_selects, n_calls
+        integer :: n_allocations, n_order
 
         status%ok = .true.
         suffix = "_b"
@@ -205,6 +214,8 @@ contains
         if (.not. status%ok) return
 
         call seed_activity(primal, spec, dependent, active, status)
+        if (.not. status%ok) return
+        call check_reverse_allocation_sources(primal, active, status)
         if (.not. status%ok) return
         if (complex_reverse_path(primal, dependent, active) .and. &
             .not. complex_real_projection_path(primal, dependent, active)) then
@@ -251,7 +262,8 @@ contains
             n_rec, loops, n_loops, branches, n_branches, &
             selections, n_selects, &
             calls, n_calls, &
-            order_kind, order_index, n_order, active, &
+            allocations, n_allocations, &
+            order_kind, order_index, n_order, active, suffix, &
             status)
         if (.not. status%ok) return
         call build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
@@ -259,6 +271,7 @@ contains
             n_rec, loops, n_loops, branches, n_branches, &
             selections, n_selects, &
             calls, n_calls, &
+            allocations, n_allocations, &
             order_kind, order_index, n_order, &
             spec, dependent, suffix, active, status)
     end subroutine differentiate_reverse
@@ -314,7 +327,11 @@ contains
         type(fad_proc_t), intent(in) :: primal
         type(reverse_status_t), intent(inout) :: status
         type(loop_shape_t) :: shape
-        integer :: i, depth
+        integer :: i, depth, allocation_depth, di, j
+        character(len=64) :: owner, owner_text
+        logical :: found
+
+        allocation_depth = 0
 
         depth = 0
         do i = 1, primal%n_stmts
@@ -334,14 +351,13 @@ contains
                 end if
             case (FAD_END_DO)
                 depth = max(0, depth - 1)
-            case (FAD_IF, FAD_ELSE, FAD_END_IF)
+            case (FAD_IF, FAD_SELECT_TYPE)
+                allocation_depth = allocation_depth + 1
+            case (FAD_END_IF, FAD_END_SELECT)
+                allocation_depth = max(0, allocation_depth - 1)
+            case (FAD_ELSE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT)
                 ! Branches are handled by re-evaluating the condition in the
                 ! reverse sweep; see emit_branch_forward.
-                continue
-            case (FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, &
-                    FAD_CLASS_DEFAULT, FAD_END_SELECT)
-                ! The selector is passive. Its dynamic type chooses which
-                ! smooth arm both the forward and reverse sweeps execute.
                 continue
             case (FAD_CALL_STMT)
                 if (.not. call_rule_has(primal%stmts(i)%target)) then
@@ -358,13 +374,113 @@ contains
                     return
                 end if
             case (FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC)
-                status%ok = .false.
-                status%message = "reverse mode: explicit allocation lifetime "// &
-                    "requires an allocation-state replay tape; use forward "// &
-                    "mode for this bounded ownership slice"
-                return
+                if (depth /= 0 .or. allocation_depth /= 0) then
+                    status%ok = .false.
+                    status%message = "reverse mode: allocation lifetime inside "// &
+                        "control flow requires a per-path replay tape"
+                    return
+                end if
+                if (primal%stmts(i)%kind == FAD_MOVE_ALLOC) then
+                    status%ok = .false.
+                    status%message = "reverse mode: allocation lifetime "// &
+                        "move_alloc requires an ownership replay tape; this "// &
+                        "bounded slice retains one "// &
+                        "simple allocation owner"
+                    return
+                end if
+                if (.not. allocated(primal%stmts(i)%allocation_args)) then
+                    status%ok = .false.
+                    status%message = "reverse mode: allocation statement has no "// &
+                        "simple owner"
+                    return
+                end if
+                if (size(primal%stmts(i)%allocation_args) < 1) then
+                    status%ok = .false.
+                    status%message = "reverse mode: allocation statement has no "// &
+                        "simple owner"
+                    return
+                end if
+                owner_text = emit_expr(primal, &
+                    primal%stmts(i)%allocation_args(1))
+                owner = fad_base_name(owner_text)
+                if (index(trim(owner_text), "%") > 0) then
+                    status%ok = .false.
+                    status%message = "reverse mode: allocation owner '"// &
+                        trim(owner)//"' must be a simple local or dummy "// &
+                        "allocatable array"
+                    return
+                end if
+                if (len_trim(owner) == 0) then
+                    status%ok = .false.
+                    status%message = "reverse mode: allocation owner must be a "// &
+                        "simple local or dummy allocatable array"
+                    return
+                end if
+                di = primal%decl_index(trim(owner))
+                if (di <= 0) then
+                    status%ok = .false.
+                    status%message = "reverse mode: allocation owner '"// &
+                        trim(owner)//"' is not an allocatable declaration"
+                    return
+                end if
+                if (.not. primal%decls(di)%is_allocatable) then
+                    status%ok = .false.
+                    status%message = "reverse mode: allocation owner '"// &
+                        trim(owner)//"' is not an allocatable declaration"
+                    return
+                end if
+                if (primal%stmts(i)%kind == FAD_ALLOCATE) then
+                    found = .false.
+                    do j = 1, i - 1
+                        if (.not. allocated(primal%stmts(j)%allocation_args)) cycle
+                        if (size(primal%stmts(j)%allocation_args) < 1) cycle
+                        if (primal%stmts(j)%kind /= FAD_ALLOCATE) cycle
+                        if (trim(fad_base_name(emit_expr(primal, &
+                            primal%stmts(j)%allocation_args(1)))) == &
+                            trim(owner)) found = .true.
+                    end do
+                    if (found) then
+                        status%ok = .false.
+                        status%message = "reverse mode: repeated allocation of '"// &
+                            trim(owner)//"' needs allocation-state replay"
+                        return
+                    end if
+                else
+                    do j = i + 1, primal%n_stmts
+                        if (primal%stmts(j)%kind == FAD_DIRECTIVE) cycle
+                        status%ok = .false.
+                        status%message = "reverse mode: explicit deallocate of '"// &
+                            trim(owner)//"' must terminate its straight-line "// &
+                            "lifetime in the bounded retention slice"
+                        return
+                    end do
+                    found = .false.
+                    do j = 1, i - 1
+                        if (.not. allocated(primal%stmts(j)%allocation_args)) cycle
+                        if (size(primal%stmts(j)%allocation_args) < 1) cycle
+                        if (trim(fad_base_name(emit_expr(primal, &
+                            primal%stmts(j)%allocation_args(1)))) /= &
+                            trim(owner)) cycle
+                        if (primal%stmts(j)%kind == FAD_ALLOCATE) then
+                            found = .true.
+                        else if (primal%stmts(j)%kind == FAD_DEALLOCATE) then
+                            status%ok = .false.
+                            status%message = "reverse mode: repeated deallocation "// &
+                                "of '"//trim(owner)//"' needs allocation-state "// &
+                                "replay"
+                            return
+                        end if
+                    end do
+                    if (.not. found) then
+                        status%ok = .false.
+                        status%message = "reverse mode: deallocation of '"// &
+                            trim(owner)//"' has no preceding explicit allocation"
+                        return
+                    end if
+                end if
             end select
         end do
+
     end subroutine check_supported
 
     subroutine seed_activity(primal, spec, dependent, active, status)
@@ -469,6 +585,29 @@ contains
         allocate (active(max(1, primal%n_decls)))
         active = varied .and. useful
     end subroutine seed_activity
+
+    subroutine check_reverse_allocation_sources(primal, active, status)
+        !! Allocation SOURCE= is a value copy.  The bounded retention slice
+        !! does not yet record that copy as a differentiable statement, so an
+        !! active source must stop before emission rather than lose its
+        !! contribution silently.
+        type(fad_proc_t), intent(in) :: primal
+        logical, intent(in) :: active(:)
+        type(reverse_status_t), intent(inout) :: status
+        integer :: i
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ALLOCATE) cycle
+            if (primal%stmts(i)%allocation_source <= 0) cycle
+            if (.not. reads_any(primal, primal%stmts(i)%allocation_source, &
+                active)) cycle
+            status%ok = .false.
+            status%message = "reverse mode: active ALLOCATE(SOURCE=) requires "// &
+                "a value-copy replay tape; this bounded slice only retains "// &
+                "allocation state"
+            return
+        end do
+    end subroutine check_reverse_allocation_sources
 
     logical function complex_reverse_path(primal, dependent, active) result(yes)
         !! Reverse adjoints are currently real-only. Refuse a complex path
@@ -812,7 +951,8 @@ contains
             n_rec, loops, n_loops, branches, n_branches, &
             selections, n_selects, &
             calls, n_calls, &
-            order_kind, order_index, n_order, active, &
+            allocations, n_allocations, &
+            order_kind, order_index, n_order, active, suffix, &
             status)
         !! Emit the primal, renaming straight-line assignments into static
         !! single assignment and emitting reduction loops verbatim.
@@ -838,6 +978,8 @@ contains
         integer, intent(out) :: n_selects
         type(call_record_t), allocatable, intent(out) :: calls(:)
         integer, intent(out) :: n_calls
+        type(allocation_record_t), allocatable, intent(out) :: allocations(:)
+        integer, intent(out) :: n_allocations
         !! Blocks in forward program order, so the reverse sweep can walk them
         !! backwards. Reversing all straight-line statements and only then the
         !! loops and branches is wrong whenever a construct sits between two
@@ -845,6 +987,7 @@ contains
         integer, allocatable, intent(out) :: order_kind(:), order_index(:)
         integer, intent(out) :: n_order
         logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
         character(len=:), allocatable :: actual
@@ -862,6 +1005,7 @@ contains
         allocate (branches(max(1, primal%n_stmts)))
         allocate (selections(max(1, primal%n_stmts)))
         allocate (calls(max(1, primal%n_stmts)))
+        allocate (allocations(max(1, primal%n_stmts)))
         allocate (order_kind(max(1, primal%n_stmts)))
         allocate (order_index(max(1, primal%n_stmts)))
         n_rec = 0
@@ -869,6 +1013,7 @@ contains
         n_branches = 0
         n_selects = 0
         n_calls = 0
+        n_allocations = 0
         n_order = 0
 
         i = 1
@@ -994,11 +1139,177 @@ contains
                 order_index(n_order) = n_calls
                 i = i + 1
 
+            case (FAD_ALLOCATE)
+                n_allocations = n_allocations + 1
+                call emit_allocation_forward(primal, adjoint, ssa, &
+                    primal%stmts(i), active, suffix, &
+                    allocations(n_allocations), status)
+                if (.not. status%ok) return
+                i = i + 1
+
+            case (FAD_DEALLOCATE)
+                ! Retain both descriptors and payloads until the reverse sweep
+                ! has consumed every expression that may read this owner.
+                ! `append_allocation_cleanup` performs the original explicit
+                ! deallocation after all adjoints have been propagated.
+                if (allocated(primal%stmts(i)%allocation_args)) then
+                    if (size(primal%stmts(i)%allocation_args) >= 1) then
+                        actual = fad_base_name(emit_expr(primal, &
+                            primal%stmts(i)%allocation_args(1)))
+                        do k = 1, n_allocations
+                            if (trim(allocations(k)%owner) == trim(actual)) then
+                                allocations(k)%deallocated = .true.
+                            end if
+                        end do
+                    end if
+                end if
+                i = i + 1
+
             case default
                 i = i + 1
             end select
         end do
     end subroutine build_forward_sweep
+
+    subroutine emit_allocation_forward(primal, adjoint, ssa, ps, active, &
+            suffix, record, status)
+        !! Retain one owner and create its allocatable adjoint alongside it.
+        !! The primal owner is intentionally not deallocated until the reverse
+        !! sweep has finished: this is the smallest replay representation that
+        !! keeps descriptor, shape, and payload available without a new tape
+        !! IR.  The adjoint owner is allocated with MOLD=owner and zeroed.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(in) :: ssa
+        type(fad_stmt_t), intent(in) :: ps
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        type(allocation_record_t), intent(out) :: record
+        type(reverse_status_t), intent(inout) :: status
+        type(fad_decl_t) :: d
+        type(fad_stmt_t) :: s
+        character(len=:), allocatable :: owner
+        integer :: di, i, ignored
+        logical :: indexed_owner
+
+        status%ok = .true.
+        owner = fad_base_name(emit_expr(primal, ps%allocation_args(1)))
+        record%owner = trim(owner)
+        di = primal%decl_index(trim(owner))
+        if (di <= 0) then
+            status%ok = .false.
+            status%message = "reverse mode: allocation owner '"//trim(owner)// &
+                "' is not declared"
+            return
+        end if
+
+        d = primal%decls(di)
+        if (adjoint%decl_index(trim(owner)) == 0) then
+            ignored = adjoint%add_decl(d)
+        end if
+        call reset_reverse_statement(s)
+        s%kind = FAD_ALLOCATE
+        indexed_owner = primal%exprs(ps%allocation_args(1))%kind == FAD_INDEX
+        if (indexed_owner) then
+            if (allocated(primal%exprs(ps%allocation_args(1))%args)) then
+                allocate (s%allocation_args(1 + size( &
+                    primal%exprs(ps%allocation_args(1))%args)))
+                s%allocation_args(1) = adjoint%add_expr(expr_var(trim(owner)))
+                do i = 1, size(primal%exprs(ps%allocation_args(1))%args)
+                    s%allocation_args(i + 1) = copy_renamed(primal, adjoint, &
+                        primal%exprs(ps%allocation_args(1))%args(i), ssa)
+                end do
+            else
+                allocate (s%allocation_args(1))
+                s%allocation_args(1) = adjoint%add_expr(expr_var(trim(owner)))
+            end if
+        else
+            allocate (s%allocation_args(size(ps%allocation_args)))
+            s%allocation_args(1) = adjoint%add_expr(expr_var(trim(owner)))
+            do i = 2, size(ps%allocation_args)
+                s%allocation_args(i) = copy_renamed(primal, adjoint, &
+                    ps%allocation_args(i), ssa)
+            end do
+        end if
+        if (ps%allocation_source > 0) s%allocation_source = &
+            copy_renamed(primal, adjoint, ps%allocation_source, ssa)
+        if (ps%allocation_mold > 0) s%allocation_mold = &
+            copy_renamed(primal, adjoint, ps%allocation_mold, ssa)
+        ignored = adjoint%add_stmt(s)
+
+        record%active = active(di)
+        if (.not. record%active) return
+
+        d%name = trim(owner)//trim(suffix)
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        d%is_optional = .false.
+        d%is_value = .false.
+        if (adjoint%decl_index(d%name) == 0) then
+            ignored = adjoint%add_decl(d)
+        end if
+
+        call reset_reverse_statement(s)
+        s%kind = FAD_ALLOCATE
+        allocate (s%allocation_args(1))
+        s%allocation_args(1) = adjoint%add_expr(expr_var(d%name))
+        s%allocation_mold = adjoint%add_expr(expr_var(trim(owner)))
+        ignored = adjoint%add_stmt(s)
+
+        call reset_reverse_statement(s)
+        s%kind = FAD_ASSIGN
+        s%target = d%name
+        s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
+        ignored = adjoint%add_stmt(s)
+    end subroutine emit_allocation_forward
+
+    subroutine append_allocation_cleanup(primal, adjoint, allocations, &
+            n_allocations, suffix)
+        !! Finish the original explicit lifetime after all reverse reads.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(allocation_record_t), intent(in) :: allocations(:)
+        integer, intent(in) :: n_allocations
+        character(len=*), intent(in) :: suffix
+        type(fad_stmt_t) :: s
+        integer :: i, di, ignored
+
+        do i = n_allocations, 1, -1
+            if (.not. allocations(i)%deallocated) cycle
+            di = primal%decl_index(trim(allocations(i)%owner))
+            if (di <= 0) cycle
+            if (allocations(i)%active .and. adjoint%decl_index( &
+                trim(allocations(i)%owner)//trim(suffix)) > 0) then
+                call reset_reverse_statement(s)
+                s%kind = FAD_DEALLOCATE
+                allocate (s%allocation_args(1))
+                s%allocation_args(1) = adjoint%add_expr(expr_var( &
+                    trim(allocations(i)%owner)//trim(suffix)))
+                ignored = adjoint%add_stmt(s)
+            end if
+            call reset_reverse_statement(s)
+            s%kind = FAD_DEALLOCATE
+            allocate (s%allocation_args(1))
+            s%allocation_args(1) = adjoint%add_expr(expr_var( &
+                trim(allocations(i)%owner)))
+            ignored = adjoint%add_stmt(s)
+        end do
+    end subroutine append_allocation_cleanup
+
+    subroutine reset_reverse_statement(s)
+        type(fad_stmt_t), intent(out) :: s
+
+        s%kind = 0
+        s%value = 0
+        s%lo = 0
+        s%hi = 0
+        s%step = 0
+        if (allocated(s%target)) deallocate (s%target)
+        if (allocated(s%call_args)) deallocate (s%call_args)
+        if (allocated(s%allocation_args)) deallocate (s%allocation_args)
+        s%allocation_source = 0
+        s%allocation_mold = 0
+    end subroutine reset_reverse_statement
 
     subroutine emit_select_forward(primal, adjoint, ssa, first, rec, after, &
             status)
@@ -1891,6 +2202,7 @@ contains
             n_rec, loops, n_loops, branches, n_branches, &
             selections, n_selects, &
             calls, n_calls, &
+            allocations, n_allocations, &
             order_kind, order_index, n_order, &
             spec, dependent, suffix, active, status)
         !! Walk backwards, accumulating adjoints.
@@ -1913,6 +2225,8 @@ contains
         integer, intent(in) :: n_selects
         type(call_record_t), intent(in) :: calls(:)
         integer, intent(in) :: n_calls
+        type(allocation_record_t), intent(in) :: allocations(:)
+        integer, intent(in) :: n_allocations
         integer, intent(in) :: order_kind(:), order_index(:), n_order
         type(reverse_spec_t), intent(in) :: spec
         character(len=*), intent(in) :: dependent, suffix
@@ -2113,6 +2427,9 @@ contains
             can_fuse(primal, loops(1), dependent)) then
             call fuse_loop(adjoint, loops(1), suffix)
         end if
+
+        call append_allocation_cleanup(primal, adjoint, allocations, &
+            n_allocations, suffix)
     end subroutine build_reverse_sweep
 
     subroutine zero_component_adjoints(primal, adjoint, active, suffix, zero)
