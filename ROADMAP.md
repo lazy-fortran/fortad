@@ -68,8 +68,10 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is pinned to `c0a32743`, with documentation handoff
-`0689f81c` (source handoff `d8c8769`), the current handoff after the typed
+FortFront source `main` is pinned to `7fb1332d`, with documentation handoff
+`0689f81c`; the latest source change re-exports the safe array-bound and
+range-expression queries through the public facade used by FortAD. This is
+the current handoff after the typed
 #2974 compound-declaration and #2975 owner-boundary regressions merged on top
 of the procedure-name semantic-boundary fix after PR #3003. It carries lazy
 untyped function-result inference (#2980) and its independent GNU Fortran
@@ -240,8 +242,8 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `c0a32743` (the merged procedure-name and #2980
-fixes), while fpm caches
+`fo` must consume FortFront `7fb1332d` (the merged procedure-name, #2980, and
+public array-query fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
 and `build/cache.toml` before reinstalling `fo`, or the old revision will be
 reused. Record the exact FortFront pin in every downstream gate so a warm
