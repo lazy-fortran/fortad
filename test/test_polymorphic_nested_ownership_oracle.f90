@@ -9,7 +9,7 @@ program test_polymorphic_nested_ownership_oracle
     type(fad_result_t) :: generated, refused
     integer :: unit, stat
 
-    source = nested_source("allocate(box%owner, source=child)")
+    source = nested_array_source()
     generated = fad_jvp(source, [character(len=1) :: "x"], from="evaluate", &
         name="evaluate_jvp")
     if (.not. generated%ok) then
@@ -17,14 +17,15 @@ program test_polymorphic_nested_ownership_oracle
         error stop 1
     end if
 
-    refused = fad_jvp(nested_source("allocate(box%owner, source=make_child(x))"), &
+    refused = fad_jvp( &
+        nested_source("allocate(box%field%payload, source=make_child(x))"), &
         [character(len=1) :: "x"], from="evaluate")
     call require_refusal(refused, "factory source")
 
     refused = fad_jvp(nested_source( &
-        "allocate(box%owner, source=child)"//nl// &
-        "        deallocate(box%owner)"//nl// &
-        "        allocate(box%owner, source=child)"), &
+        "allocate(box%field%payload, source=child)"//nl// &
+        "        deallocate(box%field%payload)"//nl// &
+        "        allocate(box%field%payload, source=child)"), &
         [character(len=1) :: "x"], from="evaluate")
     call require_refusal(refused, "repeated acquisition")
 
@@ -39,6 +40,22 @@ program test_polymorphic_nested_ownership_oracle
     refused = fad_vjp(source, [character(len=1) :: "x"], dependent="y", &
         from="evaluate")
     call require_refusal(refused, "reverse allocation replay")
+    if (index(refused%message, "array-element polymorphic component") == 0 .or. &
+        index(refused%message, "SOURCE= ownership") == 0) then
+        print *, "FAIL reverse array nested ownership refusal was not precise: ", &
+            refused%message
+        error stop 10
+    end if
+    refused = fad_vjp( &
+        nested_source("allocate(box%field%payload, source=child)"), &
+        [character(len=1) :: "x"], dependent="y", from="evaluate")
+    call require_refusal(refused, "reverse nested component replay")
+    if (index(refused%message, "nested polymorphic component") == 0 .or. &
+        index(refused%message, "SOURCE= ownership") == 0) then
+        print *, "FAIL reverse nested component refusal was not precise: ", &
+            refused%message
+        error stop 11
+    end if
 
     dir = "build/oracle/polymorphic_nested_ownership"
     call execute_command_line("mkdir -p "//dir, exitstat=stat)
@@ -105,8 +122,11 @@ contains
             "    type, extends(base_t) :: child_t"//nl// &
             "        real(8) :: scale"//nl// &
             "    end type child_t"//nl// &
+            "    type :: field_t"//nl// &
+            "        class(base_t), allocatable :: payload"//nl// &
+            "    end type field_t"//nl// &
             "    type :: holder_t"//nl// &
-            "        class(base_t), allocatable :: owner"//nl// &
+            "        type(field_t) :: field"//nl// &
             "    end type holder_t"//nl// &
             "contains"//nl// &
             "    pure function make_child(x) result(child)"//nl// &
@@ -121,21 +141,37 @@ contains
             "        type(holder_t) :: box"//nl// &
             "        child%scale = 2.0d0*x"//nl// &
             "        "//trim(allocation)//nl// &
-            "        select type (owner => box%owner)"//nl// &
+            "        select type (owner => box%field%payload)"//nl// &
             "        type is (child_t)"//nl// &
             "            y = owner%scale*x"//nl// &
             "        class default"//nl// &
             "            y = x"//nl// &
             "        end select"//nl// &
-            "        deallocate(box%owner)"//nl// &
+            "        deallocate(box%field%payload)"//nl// &
             "    end function evaluate"//nl// &
             "end module nested_ownership_case"//nl
     end function nested_source
 
+    function nested_array_source() result(text)
+        character(len=:), allocatable :: text
+
+        text = nested_source( &
+            "allocate(box%field%payload, source=child)")
+        text = replace_text(text, "        type(holder_t) :: box"//nl, &
+            "        type(holder_t) :: holders(2)"//nl)
+        text = replace_text(text, "box%field%payload", &
+            "holders(2)%field%payload")
+        text = replace_text(text, "box%field%payload", &
+            "holders(2)%field%payload")
+        text = replace_text(text, "box%field%payload", &
+            "holders(2)%field%payload")
+    end function nested_array_source
+
     function alias_source() result(text)
         character(len=:), allocatable :: text
 
-        text = nested_source("allocate(alias%owner, source=child)")
+        text = nested_source( &
+            "allocate(alias%field%payload, source=child)")
         text = replace_text(text, "        type(holder_t) :: box"//nl, &
             "        type(holder_t), target :: box"//nl// &
             "        type(holder_t), pointer :: alias"//nl// &
@@ -145,8 +181,10 @@ contains
     function move_source() result(text)
         character(len=:), allocatable :: text
 
-        text = nested_source("allocate(box%owner, source=child)"//nl// &
-            "        call move_alloc(box%owner, other%owner)")
+        text = nested_source( &
+            "allocate(box%field%payload, source=child)"//nl// &
+            "        call move_alloc(box%field%payload, "// &
+            "other%field%payload)")
         text = replace_text(text, "        type(holder_t) :: box"//nl, &
             "        type(holder_t) :: box, other"//nl)
     end function move_source
