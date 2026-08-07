@@ -191,7 +191,7 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is currently `0f08b7f1`. This handoff includes the
+FortFront source `main` is currently `93fb7dc1`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -958,6 +958,12 @@ of selected child ends the fixed-path derivative contract.
         The independent `test_call_argument_mapping` API oracle covers
         positional, reordered keyword, and omitted optional calls. Generic
         resolution and overloaded operators remain open in FortAD.
+      - [x] **P7.4e exact generic candidate facts.** FortFront `93fb7dc1`
+        exposes same-arena generic candidates with formal type category, kind,
+        rank, derived-type identity, optionality, exact-match flags, and a
+        unique selected procedure index. Ambiguous, conversion-required,
+        unknown, elemental-expansion, and procedure-pointer cases remain
+        explicit boundaries until FortAD consumes the contract.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.
