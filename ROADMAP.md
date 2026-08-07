@@ -82,17 +82,18 @@ has a successful Ubuntu job; Windows retains the documented nine-test
 portability baseline and introduced no #2974 signature. The downstream
 multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc `f7adff5`, which contains the typed ISO C
-pointer extraction `aab7ef9`, the rebased integer(8)/descriptor dispatch
-guard, the bare-DIMENSION #2848 fix, and its one-line host export needed for
-clean linking. Clean validation is `fo clean && fo build` 442/442; the focused
-DIMENSION/Lazy-array tests pass and the gfortran differential gauntlet is
-PASS=1/XFAIL=0/FAIL=0. No XFAIL or manifest changed in this link-export
-follow-up. Transfer extraction PR #698 and the bounded #643 rank-1 deep-copy
-PR #699 are the next ffc merge-train steps; neither is counted here until its
-cold build/link observation completes. This is recorded for cross-repository
-provenance; FortAD does not consume ffc as a build dependency, and no ffc
-aggregate PASS is claimed here.
+The compiler-path handoff is ffc docs `e7209f8` over code `a8f788c`, which
+contains the typed ISO C pointer and TRANSFER extractions, the rebased
+integer(8)/descriptor dispatch guard, the bare-DIMENSION #2848 fix, and its
+one-line host export needed for clean linking. Clean validation is
+`fo clean && fo build` 443/443 on the extraction heads; the focused
+DIMENSION/Lazy-array and TRANSFER oracles pass, with the gfortran differential
+gauntlet `PASS=1/XFAIL=0/FAIL=0` retained. No XFAIL or manifest changed in the
+link-export or extraction follow-ups. The bounded #643 rank-1 deep-copy PR
+#699 and integer extraction PR #700 are the next ffc merge-train steps and are
+not counted here until their cold build/link observations complete. This is
+recorded for cross-repository provenance; FortAD does not consume ffc as a
+build dependency, and no ffc aggregate PASS is claimed here.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
