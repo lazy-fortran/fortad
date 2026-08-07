@@ -607,14 +607,18 @@ does not support a general build-time advantage.
       [CLI evidence](https://github.com/lazy-fortran/fortad-bench/blob/4c444b5a7b2322783a1500cfc2f918786299932c/results/p54_public_api_validation.txt)
       contains direct `--help` and `--version` checks. It does not validate the
       example reverse invocation.
-- [ ] **P6.4 Guided CLI.** Make the common workflow a short positional command:
-      `fortad jvp kernel.f90 x,y`, `fortad vjp kernel.f90 x,y --dep f`, and
-      `fortad check kernel.f90`. Infer the target procedure, generated name,
-      module name, and output path when the source contains one unambiguous
-      procedure. Keep expert flags such as `--rule`, `--call-rule`, and
-      `--roundtrip` available under an explicit advanced section. Every guided
-      command must have a compiled behavioral oracle and an example that can
-      be copied without consulting the full option matrix.
+- [x] **P6.4a Compact CLI.** The common path is now positional:
+      `fortad jvp x,y kernel.f90`, `fortad vjp x kernel.f90 --dep f`,
+      `fortad hvp x kernel.f90`, and `fortad check kernel.f90`. A compiled
+      behavioral oracle compares compact output with the legacy interface,
+      checks generated modules, and verifies invalid option combinations. The
+      advanced flags remain available for rules and multi-procedure sources.
+- [ ] **P6.4b Guided inference.** Add a source-first spelling such as
+      `fortad jvp kernel.f90 x,y` and infer the target procedure, generated
+      name, module name, and output path when the source contains one
+      unambiguous procedure. Keep refusal diagnostics explicit when inference
+      would be ambiguous. Every inferred command needs its own behavioral
+      oracle and copyable example.
 - [ ] **P6.5 Automated source workflow.** Add a manifest-aware command that
       discovers procedures, runs the appropriate forward/reverse probes, and
       writes generated source, diagnostics, and a machine-readable result
