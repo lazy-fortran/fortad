@@ -69,12 +69,14 @@ failure. A refusal for a modern application construct is an open defect.
 The immediate execution split is deliberately narrow. FortFront must first
 make ownership, storage identity, type hierarchy, binding, call, and global
 state facts queryable. FortAD then consumes those facts to implement one
-independently tested semantic slice at a time. The next slices are nested
-polymorphic ownership and abstract/deferred dispatch; procedure interfaces,
-callbacks, and general reverse lifetime replay follow only after their facts
-and refusal contracts are available. This keeps upstream work about facts and
-FortAD work about differentiation, rather than adding product semantics to
-the parser.
+independently tested semantic slice at a time. The bounded nested-polymorphic
+ownership slice is now delivered: FortFront's `query_storage` resolves
+component ownership facts, and FortAD differentiates a fixed-path paired
+`SELECT TYPE` for the primal and tangent owners. Abstract/deferred dispatch,
+general factory and lifetime replay, procedure interfaces, and callbacks
+follow only after their facts and refusal contracts are available. This keeps
+upstream work about facts and FortAD work about differentiation, rather than
+adding product semantics to the parser.
 
 ## Repository responsibilities
 
@@ -113,10 +115,10 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 56 runnable pure-Fortran cases, 126 deliberate refusals, 28
-invalid-upstream closures, 1,296 queued candidates, and 508 non-Fortran or
-source-absent cases. The complete compiler-only triage covers all 1,296 queued
-candidates (2,013 accepted files, 1,420 compiler diagnostics, and 147 include
+candidate files: 58 runnable pure-Fortran cases, 126 deliberate refusals, 28
+invalid-upstream closures, 1,294 queued candidates, and 508 non-Fortran or
+source-absent cases. The complete compiler-only triage covers all 1,294 queued
+candidates (2,001 accepted files, 1,424 compiler diagnostics, and 147 include
 fragments). Compiler triage is classification evidence; source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
 committed.
@@ -169,7 +171,7 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is currently `69a55a80`. This handoff includes the
+FortFront source `main` is currently `90fdfcd5`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with the earlier procedure-name, #2980, public array-query, nested
@@ -219,7 +221,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-      The current FortFront `main` handoff is `69a55a80`, which includes the
+The current FortFront `main` handoff is `90fdfcd5`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts; its focused
       `test_ownership_dispatch_metadata` oracle passes on the current
@@ -237,7 +239,7 @@ FortAD gate.
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds 408 targets, checks 407 derivative
-      targets, and runs 46 tests.
+      targets, and runs 47 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
       hazards. 108 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
@@ -254,8 +256,8 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `5ba0610`. Its GNU behavioral
-gate is green (408 build targets, 407 derivative targets, 46/46 tests);
+The implementation snapshot is FortAD `main` at `70a0c86`. Its GNU behavioral
+gate is green (408 build targets, 407 derivative targets, 47/47 tests);
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
@@ -359,7 +361,7 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `69a55a80` (the ownership/storage and dispatch
+`fo` must consume FortFront `90fdfcd5` (the ownership/storage and dispatch
 metadata handoff plus the merged procedure-name, #2980, public array-query,
 nested-substring, and issue-1968 fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
