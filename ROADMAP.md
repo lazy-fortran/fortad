@@ -80,6 +80,9 @@ contract needed for arrays of polymorphic holders. This keeps upstream work
 about facts and FortAD work about differentiation, rather than adding product
 semantics to the parser. FortAD now consumes those facts for a bounded forward
 JVP of a fixed-size array of holders with one concrete `SOURCE=` acquisition;
+it also covers a nested `holder%field%payload` path under the same fixed-source
+boundary. The new upstream ownership-event query exposes the `SOURCE=` and
+`MOLD=` expression indices needed for the next lifetime-replay slice.
 reverse per-element ownership replay remains an explicit refusal. The public
 facade also exposes the existing FortFront declaration, storage, array-bound,
 `SELECT TYPE`, and `SELECT RANK` facts for low-level transformers. That facade
@@ -122,13 +125,16 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 60 runnable pure-Fortran cases, 126 deliberate refusals, 28
-invalid-upstream closures, 1,292 queued candidates, and 508 non-Fortran or
-source-absent cases. The complete compiler-only triage covers all 1,292 queued
-candidates (1,999 accepted files, 1,420 compiler diagnostics, and 147 include
+candidate files: 61 runnable pure-Fortran cases, 126 deliberate refusals, 28
+invalid-upstream closures, 1,291 queued candidates, and 508 non-Fortran or
+source-absent cases. The complete compiler-only triage covers all 1,291 queued
+candidates (1,996 accepted files, 1,420 compiler diagnostics, and 147 include
 fragments). Compiler triage is classification evidence; source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
-committed.
+committed. The latest promoted queue case is `nonRegressions/set05/v065`, a
+standards-clean `LIB::mppsum_real2(ptab,cst,str)` forward/reverse slice with
+fresh Tapenade generation, FortAD generation, and an independent
+hand/finite-difference/adjoint oracle.
 
 ## Hard execution rules
 
@@ -173,18 +179,19 @@ split it into smaller checkboxes before writing code.
 
 ---
 
-## Status on 2026-08-07
+## Status on 2026-08-08
 
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is currently `6974fb6c`. This handoff includes the
+FortFront source `main` is currently `840ef4a6`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
-along with the earlier procedure-name, #2980, public array-query, nested
+along with allocation-event `SOURCE=`/`MOLD=` expression facts and the earlier
+procedure-name, #2980, public array-query, nested
 substring, and issue-1968 assumed-shape fixes.
 The focused `test_ownership_dispatch_metadata` oracle passes on the current
-378-target GNU build. FortFront's broader GNU gate remains green at 1,545
+378-target GNU build. FortFront's broader GNU gate remains green at 1,556
 static modules, 381 build targets, 378 derivative targets, and 483/483 tests;
 the Windows and downstream multi-compiler gates remain open.
 
@@ -228,7 +235,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `6974fb6c`, which includes the
+The current FortFront `main` handoff is `840ef4a6`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths; its focused
@@ -264,7 +271,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `841b893`. Its GNU behavioral
+The implementation snapshot is FortAD `main` at `43087e7`. Its GNU behavioral
 gate is green (408 build targets, 407 derivative targets, 50/50 tests);
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
@@ -369,7 +376,7 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `6974fb6c` (the ownership/storage and dispatch
+`fo` must consume FortFront `840ef4a6` (the ownership/storage and dispatch
 metadata handoff plus the merged procedure-name, #2980, public array-query,
 nested-substring, and issue-1968 fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
@@ -864,6 +871,12 @@ of selected child ends the fixed-path derivative contract.
         path-dependent lifetimes, active `source=` value copies, implicit
         reallocation, allocatable components, and polymorphic ownership remain
         explicit refusals pending a storage-aware replay tape.
+      - [x] **P7.2b ownership-event facts.** FortFront `840ef4a6` exposes
+        `SOURCE=` and `MOLD=` expression indices on allocation events,
+        including nested and array-element paths. Its independent API
+        oracle checks owning allocatables and negative ordinary/pointer
+        components. FortAD has not yet claimed general lifetime replay;
+        this is the upstream contract for that next slice.
 - [ ] **P7.3 Aliasing and sections.** Track `pointer`, `target`, association,
       overlapping actual arguments, noncontiguous sections, and component
       aliases by storage identity. Test aliases that share a target and aliases
@@ -1058,6 +1071,14 @@ problem-specific rule.
             ownership replay is refused by name; factories, repeated or
             path-dependent acquisition, `move_alloc`, aliases, assignment,
             destruction replay, and active reverse lifetime remain open.
+      - [x] **P8.5c nested holder forward boundary.** Commit `43087e7`
+            extends the same concrete-source JVP boundary through
+            `holders(i)%field%payload`. The independent nested ownership
+            oracle checks the hand derivative and central finite difference,
+            and verifies distinct named reverse refusals for array-element and
+            nested component replay. General factories, repeated ownership,
+            assignment, destruction, aliases, and reverse lifetime tapes
+            remain open.
 - [ ] **P8.6 Procedure pointers and callbacks.** Treat callback identity as a
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed
