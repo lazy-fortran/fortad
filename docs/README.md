@@ -10,6 +10,7 @@ defaults.
 | Document | Contents |
 | --- | --- |
 | [Main README](../README.md) | build, current support, limits, CLI summary, and repository map |
+| [Product scope](design/product-scope.md) | modern Fortran target, abstraction model, and deliberate refusal boundaries |
 | [Rosenbrock example](../example/README.md) | generate, compile, and check a reverse-mode derivative |
 | [Derivative products](products.md) | first-order products, HVPs, UQ, sparse recovery, checkpointing, and Taylor mode |
 | [Public API](design/public-api.md) | exported Fortran calls and types, with defaults and CLI syntax |
