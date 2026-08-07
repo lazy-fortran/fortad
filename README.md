@@ -164,7 +164,7 @@ fortad --indep NAMES [OPTIONS] FILE
 Use separate option values, as in `--mode reverse`. The
 [public API reference](docs/design/public-api.md#cli) gives the two rule formats
 and option scope. A compact product must be the first argument and its `NAMES`
-must follow immediately; do not combine it with `--mode`, `--indep`, or
+must follow immediately. Do not combine it with `--mode`, `--indep`, or
 `--roundtrip`.
 
 ## Fortran API

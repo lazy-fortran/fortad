@@ -69,7 +69,7 @@ Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
 FortFront source `main` is pinned to `7fb1332d`, with documentation handoff
-`0689f81c`; the latest source change re-exports the safe array-bound and
+`0689f81c`. The latest source change re-exports the safe array-bound and
 range-expression queries through the public facade used by FortAD. This is
 the current handoff after the typed
 #2974 compound-declaration and #2975 owner-boundary regressions merged on top
