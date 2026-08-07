@@ -78,7 +78,12 @@ facts and refusal contracts are available. FortFront now also exposes storage
 facts through array-element and nested component paths, which is the upstream
 contract needed for arrays of polymorphic holders. This keeps upstream work
 about facts and FortAD work about differentiation, rather than adding product
-semantics to the parser.
+semantics to the parser. FortAD now consumes those facts for a bounded forward
+JVP of a fixed-size array of holders with one concrete `SOURCE=` acquisition;
+reverse per-element ownership replay remains an explicit refusal. The public
+facade also exposes the existing FortFront declaration, storage, array-bound,
+`SELECT TYPE`, and `SELECT RANK` facts for low-level transformers. That facade
+is a facts contract, not a claim of general assumed-rank differentiation.
 
 ## Repository responsibilities
 
@@ -117,10 +122,10 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 59 runnable pure-Fortran cases, 126 deliberate refusals, 28
-invalid-upstream closures, 1,293 queued candidates, and 508 non-Fortran or
-source-absent cases. The complete compiler-only triage covers all 1,293 queued
-candidates (1,999 accepted files, 1,424 compiler diagnostics, and 147 include
+candidate files: 60 runnable pure-Fortran cases, 126 deliberate refusals, 28
+invalid-upstream closures, 1,292 queued candidates, and 508 non-Fortran or
+source-absent cases. The complete compiler-only triage covers all 1,292 queued
+candidates (1,999 accepted files, 1,420 compiler diagnostics, and 147 include
 fragments). Compiler triage is classification evidence; source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
 committed.
@@ -242,7 +247,7 @@ The current FortFront `main` handoff is `6974fb6c`, which includes the
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds 408 targets, checks 407 derivative
-      targets, and runs 47 tests.
+      targets, and runs 50 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
       hazards. 108 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
@@ -259,8 +264,8 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `5a0e90e`. Its GNU behavioral
-gate is green (408 build targets, 407 derivative targets, 48/48 tests);
+The implementation snapshot is FortAD `main` at `841b893`. Its GNU behavioral
+gate is green (408 build targets, 407 derivative targets, 50/50 tests);
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
@@ -943,6 +948,11 @@ of selected child ends the fixed-path derivative contract.
       submodules, `do concurrent`, coarrays, parameterized derived types, and
       finalizers after the application blockers above. The 2026-08-06
       itpplasma census found no production dependency on the first three.
+      - [x] **P7.7a facts-only assumed-rank contract.** Commit `841b893`
+            re-exports the existing FortFront declaration, assumed-rank bound,
+            storage, and `SELECT RANK` arm facts through `fortad`, with an
+            independent negative ordinary-rank check. General assumed-rank
+            lowering and derivative emission remain open.
 
 ## Phase 8: Runtime polymorphism and callbacks
 
@@ -1038,6 +1048,16 @@ problem-specific rule.
             replay remain refused with the `class(T)`/`class(*)` form and
             source line in the diagnostic because the IR still lacks a paired
             general dynamic-type/ownership record.
+      - [x] **P8.5b fixed holder-array forward slice.** Commit `e1df7d7`
+            consumes FortFront `query_storage` facts for
+            `holders(i)%payload` and differentiates one concrete
+            `SOURCE=` acquisition in a fixed-size array of holders. The
+            independent
+            [`test_polymorphic_array_ownership_oracle.f90`](test/test_polymorphic_array_ownership_oracle.f90)
+            checks hand and central-difference JVP values. Reverse per-element
+            ownership replay is refused by name; factories, repeated or
+            path-dependent acquisition, `move_alloc`, aliases, assignment,
+            destruction replay, and active reverse lifetime remain open.
 - [ ] **P8.6 Procedure pointers and callbacks.** Treat callback identity as a
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed
