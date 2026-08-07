@@ -125,16 +125,19 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 61 runnable pure-Fortran cases, 126 deliberate refusals, 28
-invalid-upstream closures, 1,291 queued candidates, and 508 non-Fortran or
-source-absent cases. The complete compiler-only triage covers all 1,291 queued
-candidates (1,996 accepted files, 1,420 compiler diagnostics, and 147 include
+candidate files: 61 runnable pure-Fortran cases, 126 deliberate refusals, 29
+invalid-upstream closures, 1,290 queued candidates, and 508 non-Fortran or
+source-absent cases. The complete compiler-only triage covers all 1,290 queued
+candidates (1,996 accepted files, 1,418 compiler diagnostics, and 147 include
 fragments). Compiler triage is classification evidence; source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
-committed. The latest promoted queue case is `nonRegressions/set05/v065`, a
+committed. The latest runnable promotion is `nonRegressions/set05/v065`, a
 standards-clean `LIB::mppsum_real2(ptab,cst,str)` forward/reverse slice with
 fresh Tapenade generation, FortAD generation, and an independent
-hand/finite-difference/adjoint oracle.
+hand/finite-difference/adjoint oracle. The following queue row,
+`nonRegressions/set05/v066`, is now a measured invalid-upstream closure: its
+generic overloads differ only by array extent and its calls have unmatched
+shapes, so no numerical derivative claim is made.
 
 ## Hard execution rules
 
