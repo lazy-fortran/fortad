@@ -11,6 +11,7 @@ module fortad_lower_statements
         query_component_access, query_derived_type, query_type_binding, &
         derived_type_query_t, type_binding_query_t, declaration_query_t, &
         query_declaration, query_program_unit, program_unit_query_t, &
+        binding_hierarchy_query_t, query_type_binding_hierarchy, &
         generic_call_query_t, query_generic_call, resolved_type_query_t, &
         query_resolved_type, &
         get_source_line
@@ -1549,9 +1550,10 @@ contains
         !! The bounded contract is deliberately narrow: the receiver is a
         !! statically declared `type(t)` object, the binding uses either the
         !! default implicit PASS or NOPASS, and the implementation is a local
-        !! function. A local override on an abstract/deferred parent is also
-        !! accepted. Runtime dispatch, inherited-only bindings, named PASS,
-        !! generic, deferred, and ambiguous bindings remain explicit refusals.
+        !! function. A local override on an abstract/deferred parent and a
+        !! statically resolved inherited binding are also accepted. Runtime
+        !! dispatch, named PASS, generic, deferred, and ambiguous bindings
+        !! remain explicit refusals.
         type(ast_arena_t), intent(in) :: arena
         type(call_or_subscript_node), intent(in) :: node
         type(fad_proc_t), intent(inout) :: proc
@@ -1559,14 +1561,14 @@ contains
         type(component_access_query_t) :: access
         type(derived_type_query_t) :: dtype
         type(derived_type_query_t) :: candidate_dtype
-        type(type_binding_query_t) :: binding
+        type(binding_hierarchy_query_t) :: hierarchy
         type(program_unit_query_t) :: unit
         character(len=:), allocatable :: object_type, type_name, method, impl
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
-        integer :: receiver, i, j, binding_index
+        integer :: receiver, i, j
         integer :: type_matches, function_matches
-        logical :: found_type, found_binding, found_function
+        logical :: found_type, found_function
 
         out = 0
         access = query_component_access(arena, node%base_expr_index)
@@ -1631,50 +1633,43 @@ contains
                 "the concrete type name is ambiguous in this source")
             return
         end if
-        found_binding = .false.
-        binding_index = 0
-        if (allocated(dtype%binding_indices)) then
-            do i = 1, size(dtype%binding_indices)
-                binding = query_type_binding(arena, dtype%binding_indices(i))
-                if (.not. binding%found) cycle
-                if (.not. same_name(binding%binding_name, method)) cycle
-                found_binding = .true.
-                binding_index = dtype%binding_indices(i)
-                exit
-            end do
-        end if
-        if (.not. found_binding) then
-            if (allocated(dtype%extends_parent)) then
-                if (len_trim(dtype%extends_parent) > 0) then
-                    call refuse_type_bound(status, method, &
-                        "inherited bindings are unsupported")
-                    return
-                end if
-            end if
-            call refuse_type_bound(status, method, "no local type-bound binding")
+        hierarchy = query_type_binding_hierarchy(arena, dtype%node_index, method)
+        if (.not. hierarchy%found) then
+            call refuse_type_bound(status, method, "no type-bound binding")
             return
         end if
-        binding = query_type_binding(arena, binding_index)
-        if (binding%is_generic) then
+        if (hierarchy%is_ambiguous) then
+            call refuse_type_bound(status, method, "ambiguous type-bound binding")
+            return
+        end if
+        if (hierarchy%is_generic) then
             call refuse_type_bound(status, method, "generic bindings are unsupported")
             return
         end if
-        if (binding%is_deferred) then
+        if (hierarchy%is_deferred) then
             call refuse_type_bound(status, method, "deferred bindings are unsupported")
             return
         end if
-        if (binding%pass_arg) then
-            if (allocated(binding%pass_name)) then
-                if (len_trim(binding%pass_name) > 0) then
+        if (hierarchy%pass_arg) then
+            if (allocated(hierarchy%pass_name)) then
+                if (len_trim(hierarchy%pass_name) > 0) then
                     call refuse_type_bound(status, method, &
                         "named PASS bindings are unsupported")
                     return
                 end if
             end if
         end if
-        impl = trim(binding%binding_name)
-        if (allocated(binding%implementation)) then
-            if (len_trim(binding%implementation) > 0) impl = trim(binding%implementation)
+        impl = trim(hierarchy%implementation)
+        if (len_trim(impl) == 0) then
+            ! FortFront retains the effective binding name for implicit
+            ! `procedure :: name` bindings even when no explicit alias is
+            ! available in the implementation field.
+            impl = trim(hierarchy%binding_name)
+        end if
+        if (len_trim(impl) == 0) then
+            call refuse_type_bound(status, method, &
+                "the binding implementation is unresolved")
+            return
         end if
         found_function = .false.
         function_matches = 0
@@ -1698,7 +1693,7 @@ contains
                 "the binding implementation name is ambiguous in this source")
             return
         end if
-        if (binding%pass_arg) then
+        if (hierarchy%pass_arg) then
             receiver = lower_expr(arena, access%base_node_index, proc, status)
             if (.not. status%ok) return
             allocate (args(size(node%arg_indices) + 1))

@@ -1,7 +1,8 @@
 # Abstract and deferred bindings
 
-FortAD supports a statically declared concrete child with at most one
-intermediate inheritance level. The child may override a deferred binding.
+FortAD supports a statically declared concrete type with local or inherited
+bindings resolved through its `EXTENDS` parent chain. A concrete child may
+also override a deferred binding.
 It also supports a bounded runtime dispatch when the caller makes each
 concrete child explicit in a `select type` arm:
 
@@ -28,9 +29,11 @@ pure function evaluate(model, x) result(y)
 end function evaluate
 ```
 
-The lowerer resolves `leaf_t%value` to the local `leaf_value` override, then
-inlines that body before generating both JVP and VJP code. A `type(mid_t)`
-receiver follows the corresponding `mid_value` path. Inside a `select type`
+The lowerer resolves `leaf_t%value` to the local `leaf_value` override, and
+resolves a child with no local binding to the effective implementation found
+in its parent chain. It then inlines that body before generating both JVP and
+VJP code. A `type(mid_t)` receiver follows the corresponding `mid_value` path.
+Inside a `select type`
 arm, its associate name temporarily receives the arm's concrete static type,
 so a deferred call such as `model%value(x)` follows the matching child in
 both JVP and VJP generation. The selector is passive. Receiver components are
@@ -39,9 +42,11 @@ not differentiated in this case.
 The compiled oracle
 [`test_abstract_hierarchy_oracle.f90`](../../test/test_abstract_hierarchy_oracle.f90)
 checks both levels with hand values, central finite differences, and the
-JVP/VJP adjoint identity. It also checks named refusals for a direct
-`class(base_t)` dispatch, an inherited-only binding, and an unresolved
-deferred binding. The runtime oracle
+JVP/VJP adjoint identity. The type-bound oracle
+[`test_type_bound_oracle.f90`](../../test/test_type_bound_oracle.f90) adds
+hand, finite-difference, and adjoint checks for a statically resolved
+inherited binding. The abstract oracle also checks named refusals for a direct
+`class(base_t)` dispatch and an unresolved deferred binding. The runtime oracle
 [`test_runtime_select_type_oracle.f90`](../../test/test_runtime_select_type_oracle.f90)
 checks an abstract base with deferred `value`, linear/quadratic/cubic child
 bindings, a class-default arm, hand derivatives, finite differences, and the
