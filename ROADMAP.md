@@ -103,10 +103,10 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 51 runnable pure-Fortran cases, 125 deliberate refusals, 28
-invalid-upstream closures, 1,302 queued candidates, and 508 non-Fortran or
-source-absent cases. The complete compiler-only triage covers all 1,302 queued
-candidates (2,024 accepted files, 1,422 compiler diagnostics, and 147 include
+candidate files: 54 runnable pure-Fortran cases, 126 deliberate refusals, 28
+invalid-upstream closures, 1,298 queued candidates, and 508 non-Fortran or
+source-absent cases. The complete compiler-only triage covers all 1,298 queued
+candidates (2,016 accepted files, 1,421 compiler diagnostics, and 147 include
 fragments). Compiler triage is classification evidence; source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
 committed.
