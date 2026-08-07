@@ -1,7 +1,7 @@
 program fortad_cli
     !! Command-line driver.
     !!
-    !!     fortad jvp x,y kernel.f90
+    !!     fortad jvp kernel.f90
     !!     fortad jvp a,b --directions nd -o kernel_d.f90 kernel.f90
     !!     fortad vjp x --no-primal kernel.f90
     !!     fortad check kernel.f90
@@ -11,6 +11,8 @@ program fortad_cli
     use fortad, only: fad_add_rule
     use fortad, only: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, &
         fad_result_t, fad_version
+    use fortad_ir, only: fad_proc_t, FAD_INTENT_OUT
+    use fortad_lower, only: lower_source, lower_status_t
     use fortfront, only: is_fixed_form_file, normalize_fixed_form_source_text
     implicit none
 
@@ -18,14 +20,15 @@ program fortad_cli
     character(len=:), allocatable :: from_name
     character(len=:), allocatable :: directions, proc_name, source, mode
     character(len=:), allocatable :: module_name
+    character(len=:), allocatable :: inference_message
     character(len=32), allocatable :: independents(:)
     type(fad_result_t) :: res
-    logical :: roundtrip_only, with_primal
+    logical :: roundtrip_only, with_primal, verbose
     integer :: unit, stat
 
     call parse_arguments(input_path, output_path, indep_list, directions, &
         proc_name, mode, module_name, roundtrip_only, &
-        with_primal, dep_name, from_name, stat)
+        with_primal, dep_name, from_name, verbose, stat)
     if (stat /= 0) then
         call usage()
         error stop 2
@@ -38,6 +41,15 @@ program fortad_cli
     end if
     if (is_fixed_form_file(input_path)) then
         call normalize_fixed_form_source_text(source)
+    end if
+
+    if (len_trim(indep_list) == 0 .and. .not. roundtrip_only) then
+        call infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
+            output_path, module_name, indep_list, inference_message, verbose, stat)
+        if (stat /= 0) then
+            write (error_unit_or_output(), '(a)') "fortad: "//inference_message
+            error stop 2
+        end if
     end if
 
     if (roundtrip_only) then
@@ -208,7 +220,7 @@ contains
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
             proc_name, mode, module_name, roundtrip_only, &
-            with_primal, dep_name, from_name, stat)
+            with_primal, dep_name, from_name, verbose, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
         character(len=:), allocatable, intent(out) :: indep_list, directions
@@ -217,6 +229,7 @@ contains
         logical, intent(out) :: roundtrip_only, with_primal
         character(len=:), allocatable, intent(out) :: dep_name
         character(len=:), allocatable, intent(out) :: from_name
+        logical, intent(out) :: verbose
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
@@ -233,6 +246,7 @@ contains
         with_primal = .true.
         dep_name = ""
         from_name = ""
+        verbose = .false.
         stat = 0
         check_syntax = .false.
         compact_syntax = .false.
@@ -280,25 +294,28 @@ contains
                         ! while refusing the one ambiguous case of two paths.
                         source_first_syntax = .true.
                         input_path = trim(arg(1:length))
-                        if (i + 1 > n) then
-                            stat = 1
-                            return
+                        if (i + 1 <= n) then
+                            call get_command_argument(i + 1, arg, length)
+                            if (length == 0) then
+                                stat = 1
+                                return
+                            end if
+                            if (arg(1:1) /= "-") then
+                                if (existing_file(arg(1:length))) then
+                                    stat = 1
+                                    return
+                                end if
+                                indep_list = trim(arg(1:length))
+                                i = 4
+                            else
+                                ! Omitted names are inferred after the source
+                                ! has been read.  Options may follow the path.
+                                i = 3
+                            end if
+                        else
+                            ! `fortad jvp source.f90` is the compact default.
+                            i = 3
                         end if
-                        call get_command_argument(i + 1, arg, length)
-                        if (length == 0) then
-                            stat = 1
-                            return
-                        end if
-                        if (arg(1:1) == "-") then
-                            stat = 1
-                            return
-                        end if
-                        if (existing_file(arg(1:length))) then
-                            stat = 1
-                            return
-                        end if
-                        indep_list = trim(arg(1:length))
-                        i = 4
                     else
                         indep_list = trim(arg(1:length))
                         i = 3
@@ -468,6 +485,8 @@ contains
                     return
                 end if
                 with_primal = .false.
+            case ("--verbose")
+                verbose = .true.
             case ("--roundtrip")
                 if (compact_syntax .or. check_syntax) then
                     stat = 1
@@ -497,8 +516,171 @@ contains
         end do
 
         if (len(input_path) == 0) stat = 1
-        if (.not. roundtrip_only .and. len(indep_list) == 0) stat = 1
+        if (.not. roundtrip_only .and. len(indep_list) == 0 .and. &
+            .not. (compact_syntax .and. source_first_syntax)) stat = 1
     end subroutine parse_arguments
+
+    subroutine infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
+            output_path, module_name, indep_list, message, verbose, stat)
+        !! Infer the common CLI arguments from the selected primal.
+        !!
+        !! The library already lowers a source before differentiation, so the
+        !! CLI uses that same IR instead of maintaining a second Fortran
+        !! signature parser.  Explicit names and `--proc` remain available for
+        !! multi-output or deliberately non-default transformations.
+        character(len=*), intent(in) :: source
+        character(len=*), intent(in) :: input_path, mode
+        character(len=:), allocatable, intent(inout) :: from_name, proc_name
+        character(len=:), allocatable, intent(inout) :: output_path, module_name
+        character(len=:), allocatable, intent(out) :: indep_list, message
+        logical, intent(in) :: verbose
+        integer, intent(out) :: stat
+        type(fad_proc_t) :: primal
+        type(lower_status_t) :: lower_status
+        character(len=:), allocatable :: product, generated_name
+
+        stat = 0
+        indep_list = ""
+        message = ""
+        if (len_trim(from_name) > 0) then
+            call lower_source(source, primal, lower_status, trim(from_name))
+        else
+            call lower_source(source, primal, lower_status)
+        end if
+        if (.not. lower_status%ok) then
+            stat = 1
+            message = "cannot infer command arguments: "//trim(lower_status%message)
+            return
+        end if
+
+        ! Make the selected default visible to the later transformation call.
+        ! This is equivalent to lower_source's first-procedure default.
+        if (len_trim(from_name) == 0) from_name = primal%name
+        call infer_independent_names(primal, indep_list, stat)
+        if (stat /= 0) then
+            message = "could not infer independent variables for "//trim(primal%name)// &
+                "; use the explicit NAMES argument or --indep NAMES"
+            return
+        end if
+
+        select case (trim(mode))
+        case ("reverse")
+            product = "vjp"
+        case ("hessian")
+            product = "hvp"
+        case default
+            product = "jvp"
+        end select
+        generated_name = trim(primal%name)//"_"//trim(product)
+        if (len_trim(proc_name) == 0) proc_name = generated_name
+        if (len_trim(module_name) == 0) then
+            module_name = module_name_from_path(input_path, product)
+        end if
+        if (len_trim(output_path) == 0) then
+            output_path = output_path_from_path(input_path, product)
+        end if
+        if (verbose) then
+            write (error_unit_or_output(), '(a)') &
+                "fortad: inferred procedure = "//trim(primal%name)
+            write (error_unit_or_output(), '(a)') &
+                "fortad: inferred independent variables = "//trim(indep_list)
+            write (error_unit_or_output(), '(a)') &
+                "fortad: generated procedure = "//trim(proc_name)
+            write (error_unit_or_output(), '(a)') &
+                "fortad: output module = "//trim(module_name)
+            write (error_unit_or_output(), '(a)') &
+                "fortad: output file = "//trim(output_path)
+        end if
+    end subroutine infer_cli_defaults
+
+    subroutine infer_independent_names(primal, indep_list, stat)
+        !! Select dummy arguments that can carry an incoming derivative.
+        !!
+        !! An absent INTENT is treated as INOUT, which is the useful default
+        !! for legacy Fortran. Explicit INTENT(OUT) dummies are outputs, not
+        !! independent variables.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=:), allocatable, intent(out) :: indep_list
+        integer, intent(out) :: stat
+        integer :: i, decl_index
+        character(len=:), allocatable :: name
+
+        indep_list = ""
+        stat = 0
+        if (.not. allocated(primal%params)) then
+            stat = 1
+            return
+        end if
+        do i = 1, size(primal%params)
+            name = dummy_name(primal%params(i))
+            if (len_trim(name) == 0) cycle
+            decl_index = primal%decl_index(name)
+            if (decl_index == 0) cycle
+            if (primal%decls(decl_index)%is_result) cycle
+            if (primal%decls(decl_index)%intent == FAD_INTENT_OUT) cycle
+            if (len_trim(indep_list) == 0) then
+                indep_list = trim(name)
+            else
+                indep_list = trim(indep_list)//","//trim(name)
+            end if
+        end do
+        if (len_trim(indep_list) == 0) stat = 1
+    end subroutine infer_independent_names
+
+    function dummy_name(parameter) result(name)
+        !! Return the object name from a procedure dummy specification.
+        character(len=*), intent(in) :: parameter
+        character(len=:), allocatable :: name
+        integer :: cut
+
+        name = adjustl(trim(parameter))
+        cut = index(name, "(")
+        if (cut > 1) name = trim(name(:cut - 1))
+        cut = index(name, "=")
+        if (cut > 1) name = trim(name(:cut - 1))
+    end function dummy_name
+
+    function output_path_from_path(input_path, product) result(path)
+        !! Put an inferred derivative beside its input source.
+        character(len=*), intent(in) :: input_path, product
+        character(len=:), allocatable :: path
+        integer :: dot, separator
+
+        separator = max(scan(input_path, "/", back=.true.), &
+            scan(input_path, achar(92), back=.true.))
+        dot = scan(input_path, ".", back=.true.)
+        if (dot <= separator) dot = len_trim(input_path) + 1
+        path = trim(input_path(:dot - 1))//"_"//trim(product)//".f90"
+    end function output_path_from_path
+
+    function module_name_from_path(input_path, product) result(name)
+        !! Make a valid, predictable wrapper name from the input basename.
+        character(len=*), intent(in) :: input_path, product
+        character(len=:), allocatable :: name, stem
+        integer :: dot, separator, i
+        character :: c
+
+        separator = max(scan(input_path, "/", back=.true.), &
+            scan(input_path, achar(92), back=.true.))
+        dot = scan(input_path, ".", back=.true.)
+        if (dot <= separator) dot = len_trim(input_path) + 1
+        if (dot - 1 > separator) then
+            stem = input_path(separator + 1:dot - 1)
+        else
+            stem = "fortad"
+        end if
+        do i = 1, len_trim(stem)
+            c = stem(i:i)
+            if (.not. ((c >= "a" .and. c <= "z") .or. &
+                (c >= "A" .and. c <= "Z") .or. &
+                (c >= "0" .and. c <= "9") .or. c == "_")) then
+                stem(i:i) = "_"
+            end if
+        end do
+        if (len_trim(stem) == 0) stem = "fortad"
+        if (stem(1:1) >= "0" .and. stem(1:1) <= "9") stem = "fortad_"//stem
+        name = trim(stem)//"_"//trim(product)//"_mod"
+    end function module_name_from_path
 
     logical function existing_file(path) result(found)
         !! Return whether PATH names an existing input file.
@@ -512,14 +694,14 @@ contains
         write (*, '(a)') "fortad "//fad_version()// &
             " - source-transformation automatic differentiation for Fortran"
         write (*, '(a)') ""
-        write (*, '(a)') "usage: fortad PRODUCT <file.f90> <names> [options]"
+        write (*, '(a)') "usage: fortad PRODUCT <file.f90> [names] [options]"
         write (*, '(a)') "       fortad PRODUCT <names> [options] <file.f90>"
         write (*, '(a)') "       fortad check [--proc NAME] [-o PATH] <file.f90>"
         write (*, '(a)') "       fortad --indep <names> [options] <file.f90>"
         write (*, '(a)') ""
         write (*, '(a)') "  PRODUCT               jvp, vjp, or hvp"
         write (*, '(a)') "  check                 parse and re-emit without differentiating"
-        write (*, '(a)') "  -i, --indep a,b       independent variables (required)"
+        write (*, '(a)') "  -i, --indep a,b       independent variables (legacy form)"
         write (*, '(a)') "  -m, --mode MODE       forward (default), reverse, "// &
             "or hessian"
         write (*, '(a)') "      --module NAME     wrap the result in a module, "// &
@@ -533,6 +715,7 @@ contains
             "differentiate, when there is more than one"
         write (*, '(a)') "      --no-primal       return the derivative only, "// &
             "not the primal value"
+        write (*, '(a)') "      --verbose         print inferred defaults"
         write (*, '(a)') "      --roundtrip       parse and re-emit, do not "// &
             "differentiate"
         write (*, '(a)') "      --rule SPEC       register scalar partials"
