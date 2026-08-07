@@ -46,6 +46,9 @@ module fortad_inline
         !! An optional dummy the call site did not supply. `present` of it is
         !! false, which is known here and nowhere later.
         logical :: absent = .false.
+        !! A supplied actual can itself be an optional dummy of the caller.
+        !! Its PRESENT state must survive inlining rather than being folded.
+        logical :: runtime_present = .false.
     end type binding_t
 
 contains
@@ -372,15 +375,21 @@ contains
                         exit
                     end if
                 end do
-                if (formal == 0 .or. formal_actual(formal) /= 0) then
+                if (formal == 0) then
+                    status%ok = .false.
+                    status%message = "call to "//trim(callee%name)// &
+                        " has an unknown or duplicate keyword actual"
+                    return
+                end if
+                if (formal_actual(formal) /= 0) then
                     status%ok = .false.
                     status%message = "call to "//trim(callee%name)// &
                         " has an unknown or duplicate keyword actual"
                     return
                 end if
             else
-                do while (next_formal <= n_formal .and. &
-                        formal_actual(next_formal) /= 0)
+                do while (next_formal <= n_formal)
+                    if (formal_actual(next_formal) == 0) exit
                     next_formal = next_formal + 1
                 end do
                 formal = next_formal
@@ -400,10 +409,20 @@ contains
             binds(n_binds)%name = trim(callee%params(i))
             binds(n_binds)%absent = formal_actual(i) == 0
             if (formal_actual(i) > 0) then
+                if (actuals(formal_actual(i)) <= 0) then
+                    status%ok = .false.
+                    status%message = "call to "//trim(callee%name)// &
+                        " has an invalid actual argument"
+                    return
+                end if
+                if (actuals(formal_actual(i)) > target%n_exprs) then
+                    status%ok = .false.
+                    status%message = "call to "//trim(callee%name)// &
+                        " has an invalid actual argument"
+                    return
+                end if
                 if (require_plain) then
-                    if (actuals(formal_actual(i)) <= 0 .or. &
-                        actuals(formal_actual(i)) > target%n_exprs .or. &
-                        target%exprs(actuals(formal_actual(i)))%kind /= FAD_VAR) then
+                    if (target%exprs(actuals(formal_actual(i)))%kind /= FAD_VAR) then
                         status%ok = .false.
                         status%message = "inlining "//trim(callee%name)// &
                             " needs plain variables as arguments, because it may "// &
@@ -417,6 +436,8 @@ contains
                     binds(n_binds)%expr = actuals(formal_actual(i))
                     binds(n_binds)%renamed = ""
                 end if
+                binds(n_binds)%runtime_present = optional_actual(target, &
+                    actuals(formal_actual(i)))
             else
                 if (.not. dummy_optional(callee, callee%params(i))) then
                     status%ok = .false.
@@ -455,6 +476,24 @@ contains
         i = callee%decl_index(name)
         if (i > 0) yes = callee%decls(i)%is_optional
     end function dummy_optional
+
+    logical function optional_actual(target, actual) result(yes)
+        !! Whether an actual expression is a caller optional dummy.
+        type(fad_proc_t), intent(in) :: target
+        integer, intent(in) :: actual
+        integer :: i
+
+        yes = .false.
+        if (actual <= 0 .or. actual > target%n_exprs) return
+        if (target%exprs(actual)%kind /= FAD_VAR) return
+        do i = 1, target%n_decls
+            if (.not. allocated(target%decls(i)%name)) cycle
+            if (.not. same_name(target%decls(i)%name, &
+                target%exprs(actual)%text)) cycle
+            yes = target%decls(i)%is_optional
+            return
+        end do
+    end function optional_actual
 
     logical function bound(binds, n_binds, name) result(yes)
         type(binding_t), intent(in) :: binds(:)
@@ -605,6 +644,7 @@ contains
         if (callee%exprs(arg)%kind /= FAD_VAR) return
         do k = 1, n_binds
             if (same_name(binds(k)%name, callee%exprs(arg)%text)) then
+                if (binds(k)%runtime_present) return
                 known = .true.
                 is_present = .not. binds(k)%absent
                 return
