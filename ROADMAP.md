@@ -69,9 +69,9 @@ Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
 FortFront source `main` is pinned to `c0a32743`, with documentation handoff
-`9c528d6`, the current handoff after the typed #2974 compound-declaration
-regression merged on top of the procedure-name semantic-boundary fix after PR
-#3003. It carries lazy untyped function-result
+`d8c8769`, the current handoff after the typed #2974 compound-declaration and
+#2975 owner-boundary regressions merged on top of the procedure-name
+semantic-boundary fix after PR #3003. It carries lazy untyped function-result
 inference (#2980) and its independent GNU Fortran differential oracle. Its
 focused #2993, #2996, nested-binding, implicit-DIMENSION, and #2980 oracles
 are green on the GNU lane. The current GNU gate is green as well: 1,545 static
