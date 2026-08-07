@@ -245,14 +245,26 @@ directional coefficient. `tay_derivative` multiplies coefficient `k` by `k!`.
 ## CLI
 
 ```text
+fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad --indep NAMES [OPTIONS] FILE
 ```
 
+The first form is the normal interactive path: `fortad vjp x --dep y
+kernel.f90`. It removes the repetitive `--mode` and `--indep` flags while
+retaining `--proc`, output naming, custom rules, and every other applicable
+advanced option. The original flag form remains stable for existing scripts.
+
 Values must be separate arguments. `--mode reverse` is accepted, while
-`--mode=reverse` is not.
+`--mode=reverse` is not. The compact product must be the first argument and
+its independent-name list must follow immediately. Mixing compact syntax with
+`--mode`, `--indep`, or `--roundtrip` is rejected instead of silently choosing
+one spelling. The product names are deliberately distinct from the legacy mode
+values, so an existing positional input path named `forward`, `reverse`, or
+`hessian` keeps its old meaning.
 
 | Option | Scope | Meaning |
 | --- | --- | --- |
+| `jvp`, `vjp`, `hvp` | compact derivative form | product followed immediately by independent names |
 | `-i`, `--indep a,b` | derivative modes | independent variables, required |
 | `-m`, `--mode MODE` | derivative modes | `forward`, `reverse`, or `hessian` |
 | `--dep name` | reverse | dependent when the default is ambiguous |
