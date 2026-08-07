@@ -154,6 +154,12 @@ written as `fortad kernel.f90 --mode reverse`. The explicit `jvp`, `vjp`, and
 `hvp` forms remain strict compact spellings: their product name already fixes
 the mode.
 
+For Tapenade-style scripts, `--head` (also `-head`) combines the procedure
+and active arguments: `fortad vjp -head 'kernel(x)' source.f90`. Commas are
+accepted too. The procedure name is equivalent to `--proc`; the names inside
+the parentheses are equivalent to `--indep`, while omitted names still use
+FortAD's inference.
+
 With source-first compact syntax, omitted names are inferred from the selected
 procedure's dummy arguments: explicit `intent(out)` dummies are outputs and
 the other dummies are treated as differentiable inputs. The first procedure is
@@ -172,6 +178,7 @@ fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad all FILE [NAMES]
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
+fortad [PRODUCT] --head 'NAME(arg1 arg2)' [OPTIONS] FILE
 ```
 
 `fortad all FILE` is the short path when a workflow needs both forward and

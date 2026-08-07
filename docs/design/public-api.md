@@ -251,6 +251,7 @@ fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad all FILE [NAMES]
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
+fortad [PRODUCT] --head 'NAME(arg1 arg2)' [OPTIONS] FILE
 ```
 
 The shortest source-first form is `fortad kernel.f90`, which emits a JVP. The
@@ -275,6 +276,15 @@ source does not provide enough information, the command fails and the
 explicit forms remain available. The names-first compact form,
 `fortad vjp x --dep y kernel.f90`, and the original flag form remain stable for
 existing scripts.
+
+Tapenade-style head specifications are accepted as a shorter migration path:
+`--head 'NAME(arg1 arg2)'` (or `-head`) is shorthand for selecting `NAME` with
+the listed active arguments. Comma separators are accepted as well. A head
+without parentheses, such as `--head NAME`, selects the procedure and leaves
+independent-variable inference enabled. The inferred procedure name, wrapper
+module, and sibling output path are filled in exactly as for source-first
+syntax; later explicit `--proc`, `--name`, `--module`, or `--output` options
+still override the corresponding defaults.
 
 Source-first parsing is selected when the first positional argument is an
 existing file, including the bare `fortad FILE` form. Supplying two positional
@@ -318,6 +328,7 @@ rejected because one path or name would be ambiguous for two products.
 | `--name name` | derivative modes | generated procedure name |
 | `--module name` | derivative modes | generated wrapper module |
 | `--proc name` | all transformations | target in multi-procedure input |
+| `--head spec` / `-head spec` | all transformations | Tapenade-style `NAME(arg1 arg2)` procedure and active-argument shorthand |
 | `--no-primal` | forward and reverse | omit results needed only for the primal value |
 | `--verbose` | inferred source-first form | print selected procedure, names, module, and output path |
 | `--roundtrip` | standalone mode | parse and emit without requiring `--indep` |
