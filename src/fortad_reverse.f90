@@ -29,6 +29,7 @@ module fortad_reverse
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
         FAD_DIRECTIVE, FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, &
         FAD_CLASS_DEFAULT, FAD_END_SELECT, &
+        FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC, &
         FAD_INTENT_OUT, &
         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
@@ -356,6 +357,12 @@ contains
                         "loops are not supported"
                     return
                 end if
+            case (FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC)
+                status%ok = .false.
+                status%message = "reverse mode: explicit allocation lifetime "// &
+                    "requires an allocation-state replay tape; use forward "// &
+                    "mode for this bounded ownership slice"
+                return
             end select
         end do
     end subroutine check_supported

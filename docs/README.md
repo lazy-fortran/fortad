@@ -19,7 +19,7 @@ defaults.
 | [Derived components](design/derived-components.md) | bounded scalar, nested, inherited, and array component derivatives |
 | [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch overrides across an abstract/deferred hierarchy |
 | [Complex values](design/complex-values.md) | real-coordinate JVP contract and bounded real-objective VJP |
-| [Allocation lifetime](design/allocation-lifetime.md) | executable refusal boundary for allocatable storage |
+| [Allocation lifetime](design/allocation-lifetime.md) | bounded forward ownership slice and reverse replay boundary |
 | [Aliasing and sections](design/aliasing.md) | explicit pointer, target, and noncontiguous-section refusal boundary |
 
 The worked gradient, Jacobian, and linear-UQ constructions in the product guide
@@ -41,7 +41,7 @@ independent oracle.
 | [Fixed points](design/fixed-point-rules.md) | Christianson two-phase rule boundary | [`test_fixed_point_rule_oracle.f90`](../test/test_fixed_point_rule_oracle.f90) |
 | [Library rules](design/library-rules.md) | FFT, quadrature, interpolation, and `erf` callbacks | [`test_library_rules_oracle.f90`](../test/test_library_rules_oracle.f90) |
 | [Complex values](design/complex-values.md) | complex intrinsic JVPs, bounded projection VJP, and explicit reverse refusal | [`test_complex_intrinsic_oracle.f90`](../test/test_complex_intrinsic_oracle.f90), [`test_complex_reverse_oracle.f90`](../test/test_complex_reverse_oracle.f90) |
-| [Allocation lifetime](design/allocation-lifetime.md) | allocatable storage and lifetime refusal boundary | [`test_allocation_lifetime_oracle.f90`](../test/test_allocation_lifetime_oracle.f90) |
+| [Allocation lifetime](design/allocation-lifetime.md) | local/dummy allocatable JVP ownership slice and named reverse refusal | [`test_allocation_lifetime_oracle.f90`](../test/test_allocation_lifetime_oracle.f90) |
 | [Abstract hierarchy](design/abstract-hierarchy.md) | fixed concrete overrides plus bounded `select type` dispatch through deferred bindings | [`test_abstract_hierarchy_oracle.f90`](../test/test_abstract_hierarchy_oracle.f90), [`test_runtime_select_type_oracle.f90`](../test/test_runtime_select_type_oracle.f90) |
 | [GPU emission](design/gpu.md) | restricted OpenMP target and OpenACC loop shape | external `fortad-bench` device record |
 | [Procedure interfaces](design/procedure-interfaces.md) | elemental JVP/VJP preservation and array calls | [`test_elemental_interface_oracle.f90`](../test/test_elemental_interface_oracle.f90) |
