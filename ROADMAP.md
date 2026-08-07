@@ -126,9 +126,9 @@ FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
 candidate files: 61 runnable pure-Fortran cases, 126 deliberate refusals, 29
-invalid-upstream closures, 1,290 queued candidates, and 508 non-Fortran or
-source-absent cases. The complete compiler-only triage covers all 1,290 queued
-candidates (1,996 accepted files, 1,418 compiler diagnostics, and 147 include
+invalid-upstream closures, 1,289 queued candidates, and 508 non-Fortran or
+source-absent cases. The complete compiler-only triage covers all 1,289 queued
+candidates (1,996 accepted files, 1,415 compiler diagnostics, and 147 include
 fragments). Compiler triage is classification evidence; source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
 committed. The latest runnable promotion is `nonRegressions/set05/v065`, a
@@ -137,7 +137,11 @@ fresh Tapenade generation, FortAD generation, and an independent
 hand/finite-difference/adjoint oracle. The following queue row,
 `nonRegressions/set05/v066`, is now a measured invalid-upstream closure: its
 generic overloads differ only by array extent and its calls have unmatched
-shapes, so no numerical derivative claim is made.
+shapes, so no numerical derivative claim is made. The next queue row,
+`nonRegressions/set05/v067`, is a measured modern-Fortran refusal: exact and
+stored references use nonstandard `REAL*8`, which strict F2018 rejects, while
+legacy compilation is retained only as a control; FortAD also refuses the
+unresolved generic call without derivative output.
 
 ## Hard execution rules
 
@@ -278,8 +282,8 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `d59ee23`. Its GNU behavioral
-gate is green (408 build targets, 407 derivative targets, 51/51 tests);
+The implementation snapshot is FortAD `main` at `db0f3af`. Its GNU behavioral
+gate is green (408 build targets, 407 derivative targets, 52/52 tests);
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
@@ -898,6 +902,15 @@ of selected child ends the fixed-path derivative contract.
         [`test_element_target_oracle.f90`](test/test_element_target_oracle.f90)
         checks them against central differences. Shared-target, disjoint,
         overlapping, and component-alias differentiation remain open.
+      - [x] **P7.3c contiguous rank-one sections.** Commit `db0f3af` accepts
+        one rank-one, non-strided section when FortFront proves an explicit,
+        allocatable, or `CONTIGUOUS` base, preserving the section range as
+        passive storage selection. The independent
+        [`test_contiguous_section_oracle.f90`](test/test_contiguous_section_oracle.f90)
+        checks generated JVP/VJP values against hand derivatives, central
+        differences, and the adjoint identity. Assumed-shape noncontiguous,
+        strided, vector-subscript, component, and computed-base sections
+        remain named refusals.
 - [x] **P7.3b global-state refusal.** Commit `cc3b722` consumes FortFront's
       active-global reference contract and refuses reachable mutable module,
       `SAVE`, and `COMMON` state before lowering, naming the state, kind, and
@@ -930,7 +943,7 @@ of selected child ends the fixed-path derivative contract.
         central differences, and the adjoint identity. Generic resolution,
         active optional reverse arguments, and operator-overloaded inputs
         remain open.
-      - [x] **P7.4c forwarded optional presence.** Commit `d59ee23` preserves
+      - [x] **P7.4c forwarded optional presence.** Commit `253f59d` preserves
         the runtime `PRESENT()` state when a caller's optional dummy is passed
         through a reordered keyword call. The independent
         [`test_optional_forwarding_oracle.f90`](test/test_optional_forwarding_oracle.f90)
