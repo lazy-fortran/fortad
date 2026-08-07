@@ -184,7 +184,8 @@ The implemented modes are scalar and vector forward, reverse, gradient-only
 reverse through `--no-primal`, forward-over-reverse HVP, sparse-compressed,
 and higher-order Taylor. Batched reverse is P7.0, not a current CLI feature.
 
-The CLI surface is `--mode`, `--indep`, `--dep`, `--name`, `--output`,
+The CLI surface is `fortad FILE` for the zero-flag JVP path, plus
+`--mode`, `--indep`, `--dep`, `--name`, `--output`,
 `--directions`, `--no-primal`, `--module`, `--proc`, `--roundtrip`, `--rule`,
 `--call-rule`, `--verbose`, `--version`, and `--help`. Source-first compact
 commands can infer the active dummies, first procedure, generated symbol,
@@ -633,8 +634,9 @@ does not support a general build-time advantage.
       `--proc` selects a different target without changing the source-first
       shape. Explicit names remain available whenever source metadata is not
       sufficient.
-- [x] **P6.4c One-command defaults.** `fortad jvp kernel.f90` and its VJP/HVP
-      siblings infer active dummies from FortAD's lowered procedure metadata,
+- [x] **P6.4c One-command defaults.** `fortad kernel.f90` is the zero-flag JVP
+      path; `fortad jvp kernel.f90` and its VJP/HVP siblings infer active
+      dummies from FortAD's lowered procedure metadata,
       select the first procedure unless `--proc` is given, and choose the
       generated symbol, wrapper module, and sibling output file. `--verbose`
       prints those decisions. The compiled CLI oracle runs the generated JVP

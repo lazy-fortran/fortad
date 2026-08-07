@@ -10,6 +10,7 @@ program test_cli_compact_oracle
     character(len=:), allocatable :: source_first_source
     character(len=:), allocatable :: automatic_path, automatic_driver_path
     character(len=:), allocatable :: automatic_executable
+    character(len=:), allocatable :: bare_path, bare_driver_path
     character(len=7), parameter :: modes(3) = [character(len=7) :: &
         'forward', 'reverse', 'hessian']
     character(len=3), parameter :: products(3) = [character(len=3) :: &
@@ -74,6 +75,7 @@ program test_cli_compact_oracle
     call require_conflict('jvp x --roundtrip', 'roundtrip')
     call require_ambiguous_source_first()
     call require_automatic_jvp()
+    call require_bare_source_jvp()
 
     call delete_file(input_path)
     print *, 'pass cli_compact'
@@ -242,6 +244,53 @@ contains
         call delete_file(automatic_executable)
         call delete_if_present('fortad_compact_input_jvp_mod.mod')
     end subroutine require_automatic_jvp
+
+    subroutine require_bare_source_jvp()
+        !! The shortest invocation must infer the first procedure and inputs.
+        integer :: driver_unit, compiler_length
+        character(len=:), allocatable :: compiler
+
+        bare_path = directory // separator // 'fortad-compact-input_jvp.f90'
+        bare_driver_path = directory // separator // 'fortad-bare-driver.f90'
+        automatic_executable = directory // separator // 'fortad-bare-run'
+        command = quote(cli_path) // ' ' // quote(input_path)
+        call execute_command_line(command, wait=.true., exitstat=stat)
+        if (stat /= 0) call fail('bare source command failed')
+
+        open (newunit=driver_unit, file=bare_driver_path, &
+            status='replace', action='write')
+        write (driver_unit, '(a)') 'program bare_driver'
+        write (driver_unit, '(a)') &
+            '    use fortad_compact_input_jvp_mod, only: square_jvp'
+        write (driver_unit, '(a)') '    real :: x, x_d, y, y_d'
+        write (driver_unit, '(a)') '    x = 4.0; x_d = 1.0'
+        write (driver_unit, '(a)') '    call square_jvp(x, x_d, y, y_d)'
+        write (driver_unit, '(a)') &
+            '    if (abs(y - 16.0) > 1.0e-5 .or. abs(y_d - 8.0) > 1.0e-5) error stop 1'
+        write (driver_unit, '(a)') 'end program bare_driver'
+        close (driver_unit)
+
+        call get_environment_variable('FC', environment_buffer, &
+            length=compiler_length)
+        if (compiler_length > 0) then
+            compiler = environment_buffer(:compiler_length)
+        else
+            compiler = 'gfortran'
+        end if
+        command = compiler // ' -o ' // quote(automatic_executable) // ' ' // &
+            quote(input_path) // ' ' // quote(bare_path) // ' ' // &
+            quote(bare_driver_path)
+        call execute_command_line(command, wait=.true., exitstat=stat)
+        if (stat /= 0) call fail('bare source JVP did not compile')
+        call execute_command_line(quote(automatic_executable), wait=.true., &
+            exitstat=stat)
+        if (stat /= 0) call fail('bare source JVP failed its hand-derived oracle')
+
+        call delete_file(bare_path)
+        call delete_file(bare_driver_path)
+        call delete_file(automatic_executable)
+        call delete_if_present('fortad_compact_input_jvp_mod.mod')
+    end subroutine require_bare_source_jvp
 
     subroutine delete_file(path)
         character(len=*), intent(in) :: path
