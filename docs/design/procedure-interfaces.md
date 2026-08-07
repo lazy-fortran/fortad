@@ -15,9 +15,12 @@ dummy while supplying later outputs.  See
 [`test_optional_oracle.f90`](../../test/test_optional_oracle.f90) for a
 compiled JVP/VJP check against finite differences.
 
-Generic resolution, optional active tangents, and procedure-pointer callbacks
-remain explicit roadmap items. An unsupported call is refused rather than
-treated as constant.
+Active optional forward arguments are supported: the generated tangent dummy
+is also `optional`, and the source and tangent actuals may be supplied or
+omitted together. Active optional reverse arguments remain a named refusal
+until reverse storage and call-shape handling are implemented. Generic
+resolution and procedure-pointer callbacks remain explicit roadmap items. An
+unsupported call is refused rather than treated as constant.
 
 ## Elemental procedures
 
