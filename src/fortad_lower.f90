@@ -9,6 +9,8 @@ module fortad_lower
         compiler_frontend_options_t, compiler_frontend_result_t, &
         ast_arena_t, program_unit_query_t, query_program_unit, &
         query_declaration, declaration_query_t, INPUT_MODE_STANDARD
+    use frontend_compiler_queries, only: global_reference_query_t, &
+        query_active_global_references
     use fortad_ir, only: fad_proc_t
     use fortad_inline, only: inline_calls, inline_status_t, references
     use fortad_lower_body, only: lower_function, lower_subroutine, &
@@ -103,9 +105,11 @@ contains
         type(compiler_frontend_options_t) :: opts
         type(compiler_frontend_result_t) :: res
         type(program_unit_query_t) :: unit
+        type(declaration_query_t) :: global_decl
         logical :: has_callee
         character(len=4096) :: source_header, source_param_text, source_item
         character(len=:), allocatable :: allocation_construct
+        type(global_reference_query_t), allocatable :: global_refs(:)
         integer :: i, chosen, source_pos, source_next, source_line
         integer :: source_open, source_close, source_first, source_last
         integer :: source_comma, source_depth, source_n_params
@@ -260,6 +264,15 @@ contains
         end if
         if (.not. status%ok) return
 
+        global_refs = query_active_global_references(res%arena, chosen)
+        do i = 1, size(global_refs)
+            global_decl = query_declaration(res%arena, &
+                global_refs(i)%declaration_node_index)
+            if (global_decl%is_parameter) cycle
+            call refuse_global_state(res%arena, global_refs(i), status)
+            return
+        end do
+
         if (res%arena%entries(chosen)%parent_index > 0) then
             call inherit_module_uses(res%arena, chosen, proc)
         end if
@@ -289,6 +302,30 @@ contains
         status%ok = .true.
         status%message = ""
     end subroutine lower_source
+
+    subroutine refuse_global_state(arena, reference, status)
+        !! Active mutable global state has no explicit ownership contract.
+        !! Refuse it before lowering rather than treating it as an implicit
+        !! constant or silently producing a derivative of the wrong function.
+        use fortfront, only: ast_arena_t
+        type(ast_arena_t), intent(in) :: arena
+        type(global_reference_query_t), intent(in) :: reference
+        type(lower_status_t), intent(out) :: status
+        integer :: line
+        character(len=:), allocatable :: kind
+
+        line = arena%get_node_line(reference%reference_node_index)
+        kind = "module"
+        if (reference%is_common_state) then
+            kind = "COMMON"
+        else if (reference%is_save_state) then
+            kind = "SAVE"
+        end if
+        status%ok = .false.
+        status%message = "unsupported active global state '"//trim(reference%name)// &
+            "' ("//trim(kind)//") at line "//line_text(line)// &
+            "; global mutable state requires an explicit derivative rule"
+    end subroutine refuse_global_state
 
     function line_text(line) result(text)
         !! Integer to trimmed decimal text for source-boundary diagnostics.
