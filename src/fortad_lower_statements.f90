@@ -303,7 +303,7 @@ contains
         integer, allocatable :: guards(:), body(:)
         character(len=:), allocatable :: guard_kind
         type(fad_stmt_t) :: s
-        integer :: selector, default_index, type_index, i, ignored
+        integer :: selector, selector_expr, default_index, type_index, i, ignored
         integer :: selector_decl
         character(len=:), allocatable :: selector_name
         type(fad_decl_t) :: saved_selector
@@ -319,8 +319,27 @@ contains
         end if
 
         s%kind = FAD_SELECT_TYPE
-        s%value = lower_expr(arena, selector, proc, status)
+        if (allocated(s%target)) deallocate (s%target)
+        call select_type_selector_info(arena, selector, selector_expr, &
+            selector_name)
+        s%value = lower_expr(arena, selector_expr, proc, status)
         if (.not. status%ok) return
+        if (allocated(selector_name)) then
+            selector_decl = proc%decl_index(selector_name)
+            if (selector_decl == 0) then
+                block
+                    use fortad_emit, only: emit_expr
+                    type(fad_decl_t) :: alias_decl
+                    alias_decl%name = selector_name
+                    alias_decl%type_name = "class(*)"
+                    alias_decl%is_select_alias = .true.
+                    alias_decl%alias_target = emit_expr(proc, s%value)
+                    ignored = proc%add_decl(alias_decl)
+                    selector_decl = proc%decl_index(selector_name)
+                end block
+            end if
+        end if
+        if (allocated(selector_name)) s%target = selector_name
         ignored = proc%add_stmt(s)
 
         ! A SELECT TYPE associate name has a concrete static type inside its
@@ -328,8 +347,6 @@ contains
         ! type-bound call such as ``model%value(x)`` can bind to the child's
         ! implementation without changing the generated derivative interface
         ! (the selector remains CLASS(base_t) at the procedure boundary).
-        call select_type_selector_name(arena, selector, selector_name)
-        selector_decl = 0
         saved_selector_decl = .false.
         if (allocated(selector_name)) then
             selector_decl = proc%decl_index(selector_name)
@@ -405,19 +422,31 @@ contains
         ignored = proc%add_stmt(s)
     end subroutine lower_select_type
 
-    subroutine select_type_selector_name(arena, selector, name)
+    subroutine select_type_selector_info(arena, selector, expression, name)
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: selector
+        integer, intent(out) :: expression
         character(len=:), allocatable, intent(out) :: name
 
+        expression = selector
         if (selector <= 0 .or. selector > arena%size) return
         if (.not. arena%has_node_at(selector)) return
         select type (node => arena%entries(selector)%node)
             type is (identifier_node)
             name = trim(node%name)
+            type is (pointer_assignment_node)
+            expression = node%target_index
+            if (node%pointer_index > 0 .and. &
+                arena%has_node_at(node%pointer_index)) then
+                select type (alias => arena%entries(node%pointer_index)%node)
+                    type is (identifier_node)
+                    name = trim(alias%name)
+                class default
+                end select
+            end if
         class default
         end select
-    end subroutine select_type_selector_name
+    end subroutine select_type_selector_info
 
     subroutine set_select_type_alias(decl, type_name)
         type(fad_decl_t), intent(inout) :: decl
@@ -525,8 +554,19 @@ contains
         s%allocation_args(1) = lower_expr(arena, node%var_indices(1), proc, status)
         if (.not. status%ok) return
         if (.not. allocation_object_declared(proc, s%allocation_args(1))) then
-            call refuse_allocation(node%line, "non-allocatable target", status)
-            return
+            block
+                type(storage_query_t) :: component_storage
+                component_storage = query_storage(arena, node%var_indices(1))
+                if (.not. component_storage%found .or. &
+                    .not. component_storage%is_allocatable .or. &
+                    .not. component_storage%is_polymorphic) then
+                    call refuse_allocation(node%line, "non-allocatable target", status)
+                    return
+                end if
+                s%allocation_target_polymorphic = .true.
+                s%allocation_target_unlimited_polymorphic = &
+                    component_storage%is_unlimited_polymorphic
+            end block
         end if
         if (allocated(node%shape_indices)) then
             if (size(node%shape_indices) > 0) then
@@ -578,8 +618,16 @@ contains
         s%allocation_args(1) = lower_expr(arena, node%var_indices(1), proc, status)
         if (.not. status%ok) return
         if (.not. allocation_object_declared(proc, s%allocation_args(1))) then
-            call refuse_allocation(node%line, "non-allocatable target", status)
-            return
+            block
+                type(storage_query_t) :: component_storage
+                component_storage = query_storage(arena, node%var_indices(1))
+                if (.not. component_storage%found .or. &
+                    .not. component_storage%is_allocatable .or. &
+                    .not. component_storage%is_polymorphic) then
+                    call refuse_allocation(node%line, "non-allocatable target", status)
+                    return
+                end if
+            end block
         end if
     end subroutine lower_deallocate_statement
 

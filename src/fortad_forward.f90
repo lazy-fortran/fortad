@@ -130,6 +130,7 @@ contains
         ! procedure, active or not: an inactive local still holds a primal
         ! value the active statements read.
         do i = 1, primal%n_decls
+            if (primal%decls(i)%is_select_alias) cycle
             if (is_dummy(primal, primal%decls(i)%name)) cycle
             if (primal%decls(i)%is_result) cycle
             decl_name = trim(primal%decls(i)%name)
@@ -279,6 +280,7 @@ contains
         character(len=:), allocatable :: type_label
 
         do i = 1, primal%n_decls
+            if (primal%decls(i)%is_select_alias) cycle
             if (.not. active(i)) cycle
             if (.not. primal%decls(i)%is_allocatable) cycle
             if (.not. primal%decls(i)%is_polymorphic) cycle
@@ -294,7 +296,56 @@ contains
                 "type(t) owner or await the dynamic ownership boundary"
             return
         end do
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ALLOCATE) cycle
+            if (.not. primal%stmts(i)%allocation_target_polymorphic) cycle
+            if (primal%stmts(i)%allocation_source <= 0) cycle
+            if (.not. expr_reads_active(primal, primal%stmts(i)%allocation_source, active)) cycle
+            if (has_fixed_source_component(primal, i, active)) cycle
+            type_label = "class(T)"
+            if (primal%stmts(i)%allocation_target_unlimited_polymorphic) then
+                type_label = "class(*)"
+            end if
+            status%ok = .false.
+            status%message = "forward mode: active polymorphic allocatable component ownership "// &
+                "("//trim(type_label)//") at line "//itoa(primal%stmts(i)%line)// &
+                ": current IR cannot synchronize a component dynamic type with the primal ownership descriptor"
+            return
+        end do
     end subroutine refuse_active_polymorphic_ownership
+
+    logical function has_fixed_source_component(primal, stmt_index, active) result(supported)
+        !! One component acquisition from a declared concrete SOURCE object.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: stmt_index
+        logical, intent(in) :: active(:)
+        integer :: i, holder_di, source_di
+        character(len=:), allocatable :: target_text
+
+        supported = .false.
+        if (stmt_index <= 0 .or. stmt_index > primal%n_stmts) return
+        if (.not. allocated(primal%stmts(stmt_index)%allocation_args)) return
+        target_text = emit_expr(primal, primal%stmts(stmt_index)%allocation_args(1))
+        if (index(target_text, "%") == 0) return
+        holder_di = primal%decl_index(fad_base_name(target_text))
+        if (holder_di <= 0) return
+        if (primal%decls(holder_di)%is_polymorphic) return
+        if (primal%stmts(stmt_index)%allocation_source <= 0) return
+        if (primal%stmts(stmt_index)%allocation_mold > 0) return
+        source_di = fixed_source_decl(primal, &
+            primal%stmts(stmt_index)%allocation_source)
+        if (source_di <= 0) return
+        if (.not. expr_reads_active(primal, &
+            primal%stmts(stmt_index)%allocation_source, active)) return
+        do i = 1, primal%n_stmts
+            if (i == stmt_index) cycle
+            if (primal%stmts(i)%kind /= FAD_ALLOCATE) cycle
+            if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
+            if (emit_expr(primal, primal%stmts(i)%allocation_args(1)) == &
+                target_text) return
+        end do
+        supported = .true.
+    end function has_fixed_source_component
 
     logical function has_fixed_source_owner(primal, owner_di, active) result(supported)
         !! The bounded active case is an allocatable polymorphic local whose
@@ -469,7 +520,7 @@ contains
         if (idx <= 0 .or. idx > p%n_exprs) return
         select case (p%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
-            di = p%decl_index(p%exprs(idx)%text)
+            di = p%decl_index(fad_base_name(p%exprs(idx)%text))
         end select
     end function arg_decl_index
 
@@ -520,7 +571,7 @@ contains
             select case (e%kind)
             case (FAD_VAR, FAD_INDEX)
                 di = p%decl_index(fad_base_name(e%text))
-                if (di > 0) yes = active(di)
+                if (di > 0) yes = decl_active(p, di, active)
                 if (yes) return
             end select
             do i = 1, size(e%args)
@@ -730,7 +781,14 @@ contains
         logical, intent(in) :: vector
         type(forward_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
-        integer :: i, dexpr, ignored, di
+        integer :: i, dexpr, ignored, di, paired_selector
+        logical :: paired_select, inner_select_open
+        character(len=:), allocatable :: paired_alias
+
+        paired_select = .false.
+        inner_select_open = .false.
+        paired_selector = 0
+        paired_alias = ""
 
         do i = 1, primal%n_stmts
             associate (ps => primal%stmts(i))
@@ -738,7 +796,7 @@ contains
                 case (FAD_ASSIGN)
                     di = primal%decl_index(target_base(ps%target))
                     if (di > 0) then
-                        if (active(di)) then
+                        if (decl_active(primal, di, active)) then
                             dexpr = tangent_of(primal, tangent, ps%value, active, &
                                 suffix, vector, status)
                             if (.not. status%ok) return
@@ -777,9 +835,43 @@ contains
                     if (ps%step /= 0) s%step = copy_expr(primal, tangent, ps%step)
                     ignored = tangent%add_stmt(s)
 
-                case (FAD_END_DO, FAD_END_IF, FAD_ELSE, FAD_TYPE_IS, &
-                        FAD_CLASS_IS, FAD_CLASS_DEFAULT, FAD_END_SELECT)
+                case (FAD_END_DO, FAD_END_IF, FAD_ELSE)
                     s%kind = ps%kind
+                    s%value = 0
+                    if (allocated(ps%target)) s%target = ps%target
+                    ignored = tangent%add_stmt(s)
+
+                case (FAD_TYPE_IS, FAD_CLASS_IS)
+                    if (inner_select_open) then
+                        s%kind = FAD_END_SELECT
+                        s%value = 0
+                        ignored = tangent%add_stmt(s)
+                        inner_select_open = .false.
+                    end if
+                    s%kind = ps%kind
+                    s%value = 0
+                    if (allocated(ps%target)) s%target = ps%target
+                    ignored = tangent%add_stmt(s)
+                    if (paired_select) then
+                        s%kind = FAD_SELECT_TYPE
+                        s%value = paired_selector
+                        s%target = tangent_name(paired_alias, suffix, vector)
+                        ignored = tangent%add_stmt(s)
+                        s%kind = ps%kind
+                        s%value = 0
+                        if (allocated(ps%target)) s%target = ps%target
+                        ignored = tangent%add_stmt(s)
+                        inner_select_open = .true.
+                    end if
+
+                case (FAD_CLASS_DEFAULT)
+                    if (inner_select_open) then
+                        s%kind = FAD_END_SELECT
+                        s%value = 0
+                        ignored = tangent%add_stmt(s)
+                        inner_select_open = .false.
+                    end if
+                    s%kind = FAD_CLASS_DEFAULT
                     s%value = 0
                     if (allocated(ps%target)) s%target = ps%target
                     ignored = tangent%add_stmt(s)
@@ -792,8 +884,18 @@ contains
                 case (FAD_SELECT_TYPE)
                     s%kind = FAD_SELECT_TYPE
                     s%value = copy_expr(primal, tangent, ps%value)
+                    if (allocated(ps%target)) s%target = ps%target
+                    paired_select = .false.
+                    inner_select_open = .false.
+                    paired_selector = paired_tangent_selector(primal, tangent, &
+                        ps%value, active, suffix, vector)
+                    if (paired_selector > 0 .and. allocated(ps%target)) then
+                        paired_select = .true.
+                        paired_alias = ps%target
+                    end if
                     di = arg_decl_index(primal, ps%value)
-                    if (di > 0 .and. active(di) .and. &
+                    if (.not. paired_select .and. di > 0 .and. &
+                        decl_active(primal, di, active) .and. &
                         len_trim(fixed_source_type(primal, di)) == 0) then
                         s%value = tangent_of(primal, tangent, ps%value, active, &
                             suffix, vector, status)
@@ -821,6 +923,20 @@ contains
                         suffix, vector, status)
                     if (.not. status%ok) return
 
+                case (FAD_END_SELECT)
+                    if (inner_select_open) then
+                        s%kind = FAD_END_SELECT
+                        s%value = 0
+                        ignored = tangent%add_stmt(s)
+                        inner_select_open = .false.
+                    end if
+                    s%kind = FAD_END_SELECT
+                    s%value = 0
+                    ignored = tangent%add_stmt(s)
+                    paired_select = .false.
+                    paired_selector = 0
+                    paired_alias = ""
+
                 case default
                     status%ok = .false.
                     status%message = "forward mode: unsupported statement kind"
@@ -829,6 +945,41 @@ contains
             end associate
         end do
     end subroutine build_body
+
+    integer function paired_tangent_selector(primal, tangent, idx, active, suffix, vector) &
+            result(out)
+        !! Copy a component selector onto the active holder shadow.  A paired
+        !! SELECT TYPE then gives the primal and tangent aliases the same
+        !! concrete child type without pretending that a polymorphic descriptor
+        !! itself has an arithmetic tangent.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: tangent
+        integer, intent(in) :: idx
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: vector
+        character(len=:), allocatable :: text, base, shadow
+        type(fad_expr_t) :: e
+        integer :: i
+
+        out = 0
+        text = emit_expr(primal, idx)
+        if (index(text, "%") <= 0) return
+        base = fad_base_name(text)
+        shadow = tangent_name(base, suffix, vector)
+        if (.not. decl_active(primal, primal%decl_index(base), active)) return
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        e%kind = primal%exprs(idx)%kind
+        e%text = shadow//text(len_trim(base) + 1:)
+        e%rank = primal%exprs(idx)%rank
+        if (allocated(primal%exprs(idx)%args)) then
+            allocate(e%args(size(primal%exprs(idx)%args)))
+            do i = 1, size(e%args)
+                e%args(i) = copy_expr(primal, tangent, primal%exprs(idx)%args(i))
+            end do
+        end if
+        out = tangent%add_expr(e)
+    end function paired_tangent_selector
 
     subroutine emit_allocate_tangent(primal, tangent, ps, active, suffix, &
             vector, status)
@@ -852,7 +1003,7 @@ contains
         target_text = emit_expr(primal, ps%allocation_args(1))
         di = primal%decl_index(fad_base_name(target_text))
         target_active = .false.
-        if (di > 0) target_active = active(di)
+        if (di > 0) target_active = decl_active(primal, di, active)
 
         s%kind = FAD_ALLOCATE
         allocate (s%allocation_args(size(ps%allocation_args)))
@@ -909,7 +1060,7 @@ contains
         target = emit_expr(primal, ps%allocation_args(1))
         di = primal%decl_index(fad_base_name(target))
         if (di > 0) then
-            if (active(di)) then
+            if (decl_active(primal, di, active)) then
                 call reset_statement(s)
                 s%kind = FAD_DEALLOCATE
                 allocate (s%allocation_args(1))
@@ -1002,6 +1153,8 @@ contains
         if (allocated(s%allocation_args)) deallocate (s%allocation_args)
         s%allocation_source = 0
         s%allocation_mold = 0
+        s%allocation_target_polymorphic = .false.
+        s%allocation_target_unlimited_polymorphic = .false.
         if (allocated(s%target)) deallocate (s%target)
         s%value = 0
     end subroutine reset_statement
@@ -1105,7 +1258,7 @@ contains
             case (FAD_VAR)
                 di = primal%decl_index(fad_base_name(pe%text))
                 if (di > 0) then
-                    if (active(di)) then
+                    if (decl_active(primal, di, active)) then
                         if (vector) then
                             allocate (args(1))
                             args(1) = tangent%add_expr(expr_const(":"))
@@ -1123,7 +1276,7 @@ contains
             case (FAD_INDEX)
                 di = primal%decl_index(fad_base_name(pe%text))
                 if (di > 0) then
-                    if (active(di)) then
+                    if (decl_active(primal, di, active)) then
                         if (vector) then
                             allocate (args(size(pe%args) + 1))
                             args(1) = tangent%add_expr(expr_const(":"))
@@ -1233,5 +1386,20 @@ contains
         character(len=:), allocatable :: name
         name = fad_suffix_name(target, suffix, vector)
     end function tangent_name
+
+    logical function decl_active(p, di, active) result(yes)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: di
+        logical, intent(in) :: active(:)
+        integer :: base_di
+
+        yes = .false.
+        if (di <= 0 .or. di > p%n_decls) return
+        if (di <= size(active)) yes = active(di)
+        if (yes .or. .not. p%decls(di)%is_select_alias) return
+        if (.not. allocated(p%decls(di)%alias_target)) return
+        base_di = p%decl_index(fad_base_name(p%decls(di)%alias_target))
+        if (base_di > 0 .and. base_di <= size(active)) yes = active(base_di)
+    end function decl_active
 
 end module fortad_forward
