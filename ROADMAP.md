@@ -82,15 +82,18 @@ has a successful Ubuntu job, including the #2975 owner-boundary regression;
 Windows retains the documented nine-test portability baseline. The downstream
 multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc docs `968ae4a` over code `cc91e32`, which
-contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy, and
-typed integer-lowering extractions, the rebased integer(8)/descriptor dispatch
-guard, the bare-DIMENSION #2848 fix, and the GCC14-safe host exports needed for
-clean linking. Clean validation is `fo clean && fo build` 444/444 on the
-current head; the focused DIMENSION/Lazy-array, TRANSFER, deep-copy, and
-integer oracles pass with independent gfortran differentials. PR #699 merged
-as `b0b7775` and PR #700 as `cc91e32`; their aggregate CI retained known
-formatter/full-suite and corpus failures. This is recorded for
+The compiler-path handoff is ffc docs `ec87e25` over code `caf3203`, which
+contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
+typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, and GOTO extractions,
+the rebased integer(8)/descriptor dispatch guard, the bare-DIMENSION #2848
+fix, and the GCC14-safe host exports needed for clean linking. Clean
+validation is `fo clean && fo build` 446/446 on the current head; focused
+structured-control, DIMENSION/Lazy-array, TRANSFER, deep-copy, and integer
+oracles pass with independent gfortran differentials. PR #699 merged as
+`b0b7775`, PR #700 as `cc91e32`, and the structured-control wave as
+`0663b2d`/`e36fbe3`/`92dac2e` with repair `48d68e4` and include deletion
+`caf3203`; their aggregate CI retained known formatter/full-suite and corpus
+failures. This is recorded for
 cross-repository provenance; FortAD does not consume ffc as a build
 dependency, and no ffc aggregate PASS is claimed here.
 
