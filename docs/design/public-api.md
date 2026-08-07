@@ -371,8 +371,8 @@ rejected because one path or name would be ambiguous for two products.
 | `-h`, `--help` | standalone | print built-in help and exit |
 
 Shell-quote rule specifications because `$`, semicolons, and `|` have shell
-meanings. The CLI accepts at most one input path. If several paths are supplied,
-the last one wins.
+meanings. The CLI accepts at most one input path. Supplying two existing paths
+is rejected as ambiguous rather than silently choosing one.
 
 ## Product-name mapping
 
