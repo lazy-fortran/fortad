@@ -79,14 +79,16 @@ the current integration gate is still open:
       query used by FortAD commit `155bf0e`. FortFront `main` now also contains
       `5b60c777`, which copies explicit `CALL` nodes through defined assignment
       and checks that their allocatable name and argument list survive arena
-      growth under GNU and nvfortran.
+      growth under GNU and nvfortran. It also preserves procedure-body
+      `DIMENSION` statements and resolves dummies inherited by separate module
+      procedures; the fixed-form and submodule acceptance oracles are green.
 - [ ] FortFront `main` is green on Windows. The six failures and their current
       diagnosis are recorded under Repository state.
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo check` builds 408 targets, checks 407 derivative
-      targets, and runs 35 tests.
+      targets, and runs 36 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
       hazards. 108 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
@@ -103,7 +105,7 @@ current arithmetic subset to the program semantics used by the pinned
 itpplasma applications.
 
 The implementation snapshot is `fae0129`. Its GNU behavioral gate is green
-(408 build targets, 407 derivative targets, 35/35 tests); `fo lint` still has
+(408 build targets, 407 derivative targets, 36/36 tests); `fo lint` still has
 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
