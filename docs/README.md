@@ -41,7 +41,7 @@ independent oracle.
 | [Library rules](design/library-rules.md) | FFT, quadrature, interpolation, and `erf` callbacks | [`test_library_rules_oracle.f90`](../test/test_library_rules_oracle.f90) |
 | [Complex values](design/complex-values.md) | complex intrinsic JVPs, bounded projection VJP, and explicit reverse refusal | [`test_complex_intrinsic_oracle.f90`](../test/test_complex_intrinsic_oracle.f90), [`test_complex_reverse_oracle.f90`](../test/test_complex_reverse_oracle.f90) |
 | [Allocation lifetime](design/allocation-lifetime.md) | allocatable storage and lifetime refusal boundary | [`test_allocation_lifetime_oracle.f90`](../test/test_allocation_lifetime_oracle.f90) |
-| [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch concrete overrides and named runtime/deferred refusals | [`test_abstract_hierarchy_oracle.f90`](../test/test_abstract_hierarchy_oracle.f90) |
+| [Abstract hierarchy](design/abstract-hierarchy.md) | fixed concrete overrides plus bounded `select type` dispatch through deferred bindings | [`test_abstract_hierarchy_oracle.f90`](../test/test_abstract_hierarchy_oracle.f90), [`test_runtime_select_type_oracle.f90`](../test/test_runtime_select_type_oracle.f90) |
 | [GPU emission](design/gpu.md) | restricted OpenMP target and OpenACC loop shape | external `fortad-bench` device record |
 | [Procedure interfaces](design/procedure-interfaces.md) | elemental JVP/VJP preservation and array calls | [`test_elemental_interface_oracle.f90`](../test/test_elemental_interface_oracle.f90) |
 | [Source forms](design/source-forms.md) | fixed-form file normalization and legacy procedure purity | [`test_tapenade_fixed_form_oracle.f90`](../test/test_tapenade_fixed_form_oracle.f90) |
