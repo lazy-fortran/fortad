@@ -805,6 +805,15 @@ of selected child ends the fixed-path derivative contract.
         scalar, inherited, nested, and array component paths in JVP/VJP shadows.
         The independent object itself is refused. Allocation, alias, character,
         logical, and procedure-component activity remain open.
+        The `origin/feat/p7-derived-components` line was reviewed through
+        `d8bccfc` against FortAD `232a001`. Its implementation is an older
+        form of this same bounded slice; applying its tree wholesale would
+        overwrite the newer allocatable ownership and global-state refusal
+        paths. The current implementation and
+        [`test_derived_component_oracle.f90`](test/test_derived_component_oracle.f90)
+        are retained and revalidated on the integration worktree. This does
+        not expand support to polymorphic ownership, allocatable components,
+        procedure components, or arbitrary component aliasing.
 - [ ] **P7.2 Allocation lifetime.** Cover allocatable components,
       `allocate`, `deallocate`, `source=`, `mold=`, automatic reallocation,
       deep assignment, and `move_alloc`. Reverse mode must reproduce the
