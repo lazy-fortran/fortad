@@ -36,13 +36,13 @@ program fortad_cli
         source_first_inference, stat)
     if (stat /= 0) then
         call usage()
-        error stop 2
+        stop 2, quiet=.true.
     end if
 
     call read_file(input_path, source, stat)
     if (stat /= 0) then
         write (error_unit_or_output(), '(a)') "fortad: cannot read "//input_path
-        error stop 2
+        stop 2, quiet=.true.
     end if
     if (is_fixed_form_file(input_path)) then
         call normalize_fixed_form_source_text(source)
@@ -53,7 +53,7 @@ program fortad_cli
             dep_name, from_name, with_primal, verbose, stat, inference_message)
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
-            error stop 1
+            stop 1, quiet=.true.
         end if
         stop
     end if
@@ -65,7 +65,7 @@ program fortad_cli
             output_path, module_name, indep_list, inference_message, verbose, stat)
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
-            error stop 2
+            stop 2, quiet=.true.
         end if
         if (len_trim(explicit_indep) > 0) indep_list = explicit_indep
     end if
@@ -88,7 +88,7 @@ program fortad_cli
 
     if (.not. res%ok) then
         write (error_unit_or_output(), '(a)') "fortad: "//res%message
-        error stop 1
+        stop 1, quiet=.true.
     end if
 
     if (len(output_path) > 0) then
