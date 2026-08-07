@@ -6,7 +6,7 @@ tape library or compiler plug-in dependency. The compiler matrix currently
 checks gfortran, ifx, flang-new, nvfortran, and LFortran.
 
 ```console
-$ fo exec fortad --mode reverse --indep x --module rosenbrock_ad \
+$ fo exec fortad vjp x --module rosenbrock_ad \
     --output build/rosenbrock_ad.f90 example/rosenbrock.f90
 ```
 
@@ -128,9 +128,21 @@ with independent results.
 ## Command line
 
 The command reads one Fortran source file and writes generated Fortran to
-standard output or `--output`:
+standard output or `--output`. For the common path, put the product and
+independent names first:
+
+```console
+$ fortad jvp x kernel.f90
+$ fortad vjp x --dep objective kernel.f90
+$ fortad hvp x --module kernel_hvp kernel.f90
+```
+
+Applicable advanced options such as `--proc`, `--module`, `--output`, and
+custom rules also work with this compact form. The original flag form remains
+available for scripts:
 
 ```text
+fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad --indep NAMES [OPTIONS] FILE
 
 --mode forward|reverse|hessian   derivative mode; forward is the default
@@ -151,7 +163,9 @@ fortad --indep NAMES [OPTIONS] FILE
 
 Use separate option values, as in `--mode reverse`. The
 [public API reference](docs/design/public-api.md#cli) gives the two rule formats
-and option scope.
+and option scope. A compact product must be the first argument and its `NAMES`
+must follow immediately; do not combine it with `--mode`, `--indep`, or
+`--roundtrip`.
 
 ## Fortran API
 
