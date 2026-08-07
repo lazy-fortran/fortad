@@ -65,7 +65,7 @@ split it into smaller checkboxes before writing code.
 
 ## Status on 2026-08-07
 
-Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
+Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
 FortFront source `main` is pinned to `7fb1332d`, with documentation handoff
@@ -188,8 +188,9 @@ The CLI surface is `--mode`, `--indep`, `--dep`, `--name`, `--output`,
 `--directions`, `--no-primal`, `--module`, `--proc`, `--roundtrip`, `--rule`,
 `--call-rule`, `--verbose`, `--version`, and `--help`. Source-first compact
 commands can infer the active dummies, first procedure, generated symbol,
-wrapper module, and sibling output file; names-first and flag forms remain
-stable compatibility interfaces.
+wrapper module, and sibling output file. `fortad all FILE` additionally writes
+the inferred JVP and VJP siblings in one command; names-first and flag forms
+remain stable compatibility interfaces.
 
 - `--proc NAME` lowers one target and follows its call graph. Lowering the
   whole file crashes `collect_params` on a benchmark driver.
@@ -639,6 +640,11 @@ does not support a general build-time advantage.
       prints those decisions. The compiled CLI oracle runs the generated JVP
       against the hand derivative `d(x*x)/dx = 2*x`. Names-first and flag
       forms remain stable compatibility interfaces.
+- [x] **P6.4d Paired first-order products.** `fortad all kernel.f90` reuses the
+      P6.4c inference policy to emit both checked JVP and VJP sibling modules,
+      with an independent compiled square oracle covering both products. The
+      command rejects ambiguous single-output overrides such as `--output`,
+      `--name`, and `--module`; use the individual product commands for those.
 - [ ] **P6.5 Automated source workflow.** Add a manifest-aware command that
       discovers procedures, runs the appropriate forward/reverse probes, and
       writes generated source, diagnostics, and a machine-readable result
