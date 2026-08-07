@@ -84,7 +84,7 @@ has a successful Ubuntu job, including the #2975 owner-boundary regression.
 Windows retains the documented nine-test portability baseline. The downstream
 multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc docs `f13906b` over code `fc3ea15`, which
+The compiler-path handoff is ffc docs `66295c7` over code `fc3ea15`, which
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, GOTO, FORALL, WHERE,
 and SELECT extractions,
