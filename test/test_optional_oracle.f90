@@ -3,8 +3,10 @@ program test_optional_oracle
     !!
     !! `present(y)` is a source-level interface contract, not an arithmetic
     !! operation.  The generated JVP and VJP must preserve it when `y` is
-    !! supplied and when it is omitted.  The driver checks both paths against
-    !! central differences and the closed-form derivative.
+    !! supplied and when it is omitted.  An active optional is checked too:
+    !! both its primal and tangent actual may be omitted together.  The
+    !! driver checks both paths against central differences and the closed-form
+    !! derivative; reverse active-optionals remain an explicit refusal.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -41,14 +43,7 @@ program test_optional_oracle
     end if
     if (failures > 0) error stop 1
 
-    active_jvp = fad_jvp( &
-        "function active_optional(x, y) result(z)"//nl// &
-        "    real(8), intent(in) :: x"//nl// &
-        "    real(8), intent(in), optional :: y"//nl// &
-        "    real(8) :: z"//nl// &
-        "    z = x"//nl// &
-        "    if (present(y)) z = z + y*y"//nl// &
-        "end function active_optional"//nl, ["y"], name="active_optional_jvp")
+    active_jvp = fad_jvp(source, ["y"], name="f_y_jvp")
     active_vjp = fad_vjp( &
         "function active_optional(x, y) result(z)"//nl// &
         "    real(8), intent(in) :: x"//nl// &
@@ -57,12 +52,11 @@ program test_optional_oracle
         "    z = x"//nl// &
         "    if (present(y)) z = z + y*y"//nl// &
         "end function active_optional"//nl, ["y"], name="active_optional_vjp")
-    if (active_jvp%ok .or. active_vjp%ok) then
-        print *, "FAIL optional: active optional derivative was accepted"
+    if (.not. active_jvp%ok .or. active_vjp%ok) then
+        print *, "FAIL optional: active optional JVP/VJP boundary changed"
         error stop 1
     end if
-    if (index(active_jvp%message, "active optional") == 0 .or. &
-        index(active_vjp%message, "active optional") == 0) then
+    if (index(active_vjp%message, "active optional") == 0) then
         print *, "FAIL optional: active optional refusal was not named"
         error stop 1
     end if
@@ -82,6 +76,7 @@ program test_optional_oracle
     write (unit, '(a)') "    implicit none"
     write (unit, '(a)') "contains"
     write (unit, '(a)') jvp%code
+    write (unit, '(a)') active_jvp%code
     write (unit, '(a)') vjp%code
     write (unit, '(a)') "end module derivative_mod"
     close (unit)
@@ -89,7 +84,7 @@ program test_optional_oracle
     driver = &
         "program driver"//nl// &
         "    use primal_mod, only: f"//nl// &
-        "    use derivative_mod, only: f_jvp, f_vjp"//nl// &
+        "    use derivative_mod, only: f_jvp, f_y_jvp, f_vjp"//nl// &
         "    implicit none"//nl// &
         "    real(8) :: x, y, z, zd, xb, h, fp, fm"//nl// &
         "    x = 2.0d0"//nl// &
@@ -99,8 +94,14 @@ program test_optional_oracle
         "    if (abs(z - 10.0d0) > 1.0d-13 .or. abs(zd - 5.0d0) > 1.0d-13) error stop 1"//nl// &
         "    fp = f(x+h, y); fm = f(x-h, y)"//nl// &
         "    if (abs(zd - (fp-fm)/(2.0d0*h)) > 1.0d-7) error stop 2"//nl// &
+        "    call f_y_jvp(x=x, y=y, y_d=1.0d0, z=z, z_d=zd)"//nl// &
+        "    if (abs(z - 10.0d0) > 1.0d-13 .or. abs(zd - 2.0d0) > 1.0d-13) error stop 7"//nl// &
+        "    fp = f(x, y+h); fm = f(x, y-h)"//nl// &
+        "    if (abs(zd - (fp-fm)/(2.0d0*h)) > 1.0d-7) error stop 8"//nl// &
         "    call f_vjp(x=x, y=y, z=z, z_b=1.0d0, x_b=xb)"//nl// &
         "    if (abs(z - 10.0d0) > 1.0d-13 .or. abs(xb - 5.0d0) > 1.0d-13) error stop 3"//nl// &
+        "    call f_y_jvp(x=x, z=z, z_d=zd)"//nl// &
+        "    if (abs(z - 2.0d0) > 1.0d-13 .or. abs(zd) > 1.0d-13) error stop 9"//nl// &
         "    call f_jvp(x=x, x_d=1.0d0, z=z, z_d=zd)"//nl// &
         "    if (abs(z - 2.0d0) > 1.0d-13 .or. abs(zd - 1.0d0) > 1.0d-13) error stop 4"//nl// &
         "    fp = f(x+h); fm = f(x-h)"//nl// &
