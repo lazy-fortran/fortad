@@ -102,6 +102,15 @@ can then implement allocation and polymorphism against facts rather than
 source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
+The current corpus snapshot is also explicit. `fortad-bench` has 2,014
+candidate files: 51 runnable pure-Fortran cases, 125 deliberate refusals, 28
+invalid-upstream closures, 1,302 queued candidates, and 508 non-Fortran or
+source-absent cases. The complete compiler-only triage covers all 1,302 queued
+candidates (2,024 accepted files, 1,422 compiler diagnostics, and 147 include
+fragments). Compiler triage is classification evidence; source-probe passes
+are not promoted to runnable status until an independent derivative oracle is
+committed.
+
 ## Hard execution rules
 
 Work through this file one checkbox at a time.
@@ -150,21 +159,13 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is pinned to `7fb1332d`, with documentation handoff
-`0689f81c`. The latest source change re-exports the safe array-bound and
-range-expression queries through the public facade used by FortAD. This is
-the current handoff after the typed
-#2974 compound-declaration and #2975 owner-boundary regressions merged on top
-of the procedure-name semantic-boundary fix after PR #3003. It carries lazy
-untyped function-result inference (#2980) and its independent GNU Fortran
-differential oracle. Its focused #2993, #2996, nested-binding,
-implicit-DIMENSION, and #2980 oracles are green on the GNU lane. The current
-GNU gate is green as well: 1,545 static modules, 381 build targets, 378
-derivative targets, 483/483 tests, and clean lint. The latest regression
-observation [31147308041](https://github.com/lazy-fortran/fortfront/actions/runs/31147308041)
-has a successful Ubuntu job, including the #2975 owner-boundary regression.
-Windows retains the documented nine-test portability baseline. The downstream
-multi-compiler gate is therefore still open.
+FortFront source `main` is pinned to `c02068e5`. This handoff includes the
+ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
+along with the earlier procedure-name, #2980, and public array-query fixes.
+The focused `test_ownership_dispatch_metadata` oracle passes on the current
+378-target GNU build. FortFront's broader GNU gate remains green at 1,545
+static modules, 381 build targets, 378 derivative targets, and 483/483 tests;
+the Windows and downstream multi-compiler gates remain open.
 
 The compiler-path handoff is ffc docs `f7664d5` over code `338fea4`, which
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
@@ -345,8 +346,9 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `7fb1332d` (the merged procedure-name, #2980, and
-public array-query fixes), while fpm caches
+`fo` must consume FortFront `c02068e5` (the ownership/storage and dispatch
+metadata handoff plus the merged procedure-name, #2980, and public array-query
+fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
 and `build/cache.toml` before reinstalling `fo`, or the old revision will be
 reused. Record the exact FortFront pin in every downstream gate so a warm
@@ -954,15 +956,14 @@ problem-specific rule.
             overrides on an abstract/deferred hierarchy are covered by P8.4a.
             Active receiver cotangents and direct class dispatch remain open.
             bounded `SELECT TYPE` dispatch is covered by P8.4b.
-            **Review checkpoint (2026-08-07):** `origin/feat/p8-concrete-type-bound`
-            through `2429f21` was compared with FortAD `main` at `232a001`.
-            Its bounded PASS/NOPASS lowering, procedure-scope receiver lookup,
-            ambiguity refusals, and independent JVP/VJP refusal checks are
-            already present in the rebased mainline (`a55c5e2`, `f3160c0`,
-            `4330567`, `6691355`, and `958088e`). The oracle is byte-identical.
-            No source transplant was needed; the review preserves the active
-            receiver, inherited, generic, deferred, and dynamic-dispatch
-            refusal boundaries.
+            **Review checkpoint (2026-08-07):** the candidate implementation
+            was compared with FortAD `main` at `232a001`. Its bounded
+            PASS/NOPASS lowering, procedure-scope receiver lookup, ambiguity
+            refusals, and independent JVP/VJP refusal checks were already
+            present in the mainline. Commit `769d5c7` records the review; no
+            source transplant was needed. The active receiver, inherited,
+            generic, deferred, and dynamic-dispatch refusal boundaries remain
+            deliberate and open.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through
