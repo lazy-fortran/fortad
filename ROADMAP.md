@@ -66,6 +66,42 @@ The first five priorities are product work. A Tapenade refusal that falls
 inside the deliberate boundary is a useful negative test, not a roadmap
 failure. A refusal for a modern application construct is an open defect.
 
+## Repository responsibilities
+
+FortAD owns differentiation semantics. Its IR and lowering passes must carry
+storage identity, allocation ownership and lifetime, dynamic type, binding
+targets, call summaries, activity, reverse replay requirements, and named
+refusals. Its emitters must produce compilable tangent and adjoint Fortran for
+the supported model. Derivative rules for numerical libraries, communication,
+callbacks, and accelerator operations belong in FortAD or in its registered
+application rule layer.
+
+FortFront owns parsing and semantic facts. The upstream query contract must
+expose complete type hierarchies, deferred and inherited bindings, generic and
+PASS resolution, allocatable and pointer attributes, component paths, array
+bounds and section properties, actual-to-formal mappings, procedure-pointer
+targets, and reads or writes of global state. FortFront reports those facts.
+It does not implement differentiation or reverse replay. Active `COMMON`,
+mutable module or `SAVE` state can therefore be detected upstream and refused
+by FortAD without adding global-state semantics to the product.
+
+Fortgen owns shared source-generation mechanics such as buffering, line
+layout, and provenance. It needs no AD-specific semantic model. It changes
+only when multiple generators need a common emission convention.
+
+The compiler matrix is a validation lane, not an AD dependency. gfortran, ifx,
+flang, nvfortran, and LFortran must compile the generated code within their
+supported language subsets. `ffc` and the application repositories provide
+source and external numerical interfaces. They do not absorb FortAD's IR or
+differentiate global state on its behalf. Their active interfaces enter FortAD
+through explicit rules and application-shaped oracles.
+
+The first upstream contract needed for the product work is the FortFront
+metadata for ownership, storage identity, calls, and abstract dispatch. FortAD
+can then implement allocation and polymorphism against facts rather than
+source-text heuristics. Each cross-repository change carries a focused
+FortFront query test, a FortAD transformation oracle, and an application case.
+
 ## Hard execution rules
 
 Work through this file one checkbox at a time.
