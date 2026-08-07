@@ -1510,6 +1510,12 @@ contains
             d%is_result = .false.
             d%is_optional = .false.
             ignored = adjoint%add_decl(d)
+        else
+            ! Fixed-form Tapenade regressions commonly rely on implicit
+            ! integer typing for a loop index.  Generated procedures use
+            ! implicit none, so synthesize the missing local declaration.
+            ignored = adjoint%add_decl_fields(rec%var, "integer", &
+                FAD_INTENT_NONE, .false., .false., .false., .false., "")
         end if
 
         ! Each accumulator gets one local for the whole loop, seeded from its
@@ -1672,6 +1678,9 @@ contains
                     d%is_result = .false.
                     d%is_optional = .false.
                     ignored = adjoint%add_decl(d)
+                else
+                    ignored = adjoint%add_decl_fields(h%target, "integer", &
+                        FAD_INTENT_NONE, .false., .false., .false., .false., "")
                 end if
             end associate
         end do
