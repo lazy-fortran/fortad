@@ -79,10 +79,13 @@ lint. The latest procedure-name observation
 has a successful Ubuntu job while Windows remains in progress with the known
 portability set; the downstream multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc `7dc6059`, which contains the typed ISO C
-pointer extraction `aab7ef9` and the rebased integer(8)/descriptor dispatch
-guard. This is recorded for cross-repository provenance; FortAD does not
-consume ffc as a build dependency, and no ffc aggregate PASS is claimed here.
+The compiler-path handoff is ffc `8a43a3c`, which contains the typed ISO C
+pointer extraction `aab7ef9`, the rebased integer(8)/descriptor dispatch
+guard, and the bare-DIMENSION #2848 fix. Its independent gfortran-backed
+`issue_2848_dimension_statement` gauntlet is PASS=1/XFAIL=0/XPASS=0/FAIL=0;
+only that now-green XFAIL row was removed. This is recorded for
+cross-repository provenance; FortAD does not consume ffc as a build
+dependency, and no ffc aggregate PASS is claimed here.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
