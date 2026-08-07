@@ -80,7 +80,7 @@ implicit-DIMENSION, and #2980 oracles are green on the GNU lane. The current
 GNU gate is green as well: 1,545 static modules, 381 build targets, 378
 derivative targets, 483/483 tests, and clean lint. The latest regression
 observation [31147308041](https://github.com/lazy-fortran/fortfront/actions/runs/31147308041)
-has a successful Ubuntu job, including the #2975 owner-boundary regression;
+has a successful Ubuntu job, including the #2975 owner-boundary regression.
 Windows retains the documented nine-test portability baseline. The downstream
 multi-compiler gate is therefore still open.
 
@@ -89,14 +89,14 @@ contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, and GOTO extractions,
 the rebased integer(8)/descriptor dispatch guard, the bare-DIMENSION #2848
 fix, and the GCC14-safe host exports needed for clean linking. Clean
-validation is `fo clean && fo build` 447/447 on the current head; focused
+validation is `fo clean && fo build` 447/447 on the current head. Focused
 structured-control, DIMENSION/Lazy-array, TRANSFER, deep-copy, and integer
 oracles pass with independent gfortran differentials. PR #699 merged as
 `b0b7775`, PR #700 as `cc91e32`, and the structured-control wave as
 `0663b2d`/`e36fbe3`/`92dac2e` with repair `48d68e4` and include deletion
-`caf3203`; their aggregate CI retained known formatter/full-suite and corpus
+`caf3203`. Their aggregate CI retained known formatter/full-suite and corpus
 failures. This is recorded for
-cross-repository provenance; FortAD does not consume ffc as a build
+cross-repository provenance. FortAD does not consume ffc as a build
 dependency, and no ffc aggregate PASS is claimed here.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
@@ -112,7 +112,7 @@ dependency, and no ffc aggregate PASS is claimed here.
       and checks that their allocatable name and argument list survive arena
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
-      procedures; the fixed-form and submodule acceptance oracles are green.
+      procedures. The fixed-form and submodule acceptance oracles are green.
 - [ ] FortFront `main` is green on Windows. The latest procedure-name
       observation is run
       [31144062538](https://github.com/lazy-fortran/fortfront/actions/runs/31144062538),
@@ -121,7 +121,7 @@ dependency, and no ffc aggregate PASS is claimed here.
       [31138641474](https://github.com/lazy-fortran/fortfront/actions/runs/31138641474),
       whose Ubuntu job passed but whose Windows job failed the ten concrete
       executables recorded under Repository state. Rerun the same shard on
-      `c0a32743`; do not mask any of those failures with XFAILs.
+      `c0a32743`. Do not mask any of those failures with XFAILs.
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
@@ -237,7 +237,7 @@ failure signature is ten concrete executables from run 31138641474:
 `test_reject_placement_01_diagnostics.exe`,
 `test_reject_value_scope_01_diagnostics.exe`, `test_all_examples_slow.exe`,
 and `test_elemental_validation.exe`. These are a rerun gate against
-`c0a32743`, not an authorization to weaken expected failures; the older
+`c0a32743`, not an authorization to weaken expected failures. The older
 six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
@@ -792,7 +792,7 @@ problem-specific rule.
             locals in two procedures to verify scope-correct binding resolution.
             An active whole-receiver case verifies the named boundary. Local
             overrides on an abstract/deferred hierarchy are covered by P8.4a.
-            Active receiver cotangents and direct class dispatch remain open;
+            Active receiver cotangents and direct class dispatch remain open.
             bounded `SELECT TYPE` dispatch is covered by P8.4b.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
@@ -807,7 +807,7 @@ problem-specific rule.
             and the adjoint identity. Direct `class(base)` dispatch,
             inherited-only bindings, and unresolved deferred bindings remain
             named refusals. Runtime type-tag preservation through an explicit
-            `SELECT TYPE` arm is covered by P8.4b; a general derivative
+            `SELECT TYPE` arm is covered by P8.4b. A general derivative
             hierarchy remains open P8.4 work.
       - [x] **P8.4b bounded runtime dispatch.** A simple `class(base_t)` dummy
             may select concrete children inside `SELECT TYPE` arms and call
@@ -1073,7 +1073,7 @@ adjacent-read slice pack, and propagating every packed scalar extraction into
 its uses. Removing packing slowed the focused tangent by about 9% on the
 polygon and 4% on the curved quadrilateral. Propagation reduced generated
 source size (7,614 to 7,184 bytes for the curved case) but slowed its tangent
-by about 4%; the first unrestricted implementation also exposed a reverse
+by about 4%. The first unrestricted implementation also exposed a reverse
 optimizer crash on the full fortfem generation sweep. Both experiments were
 discarded. The existing pack remains the measured local optimum, and this
 defect stays open until a transformation improves the complete workload without
@@ -1163,7 +1163,7 @@ The 2026-08-07 remote toolchain check verified NVHPC 23.9 and 26.5 under
 `faepkub4:/var/tmp/ert` (85 GiB free). A driver-matched NVHPC 23.9 OpenACC
 smoke passed on the `acluster` Tesla T4 (CUDA 12.2). The `scluster` Slurm
 smoke (job 1033639) was cancelled while pending resources, without an
-allocation. These are compiler/device-availability records only; they do not
+allocation. These are compiler/device-availability records only. They do not
 close the FortAD optimized tangent or full multi-compiler gate.
 
 An earlier nvfortran 26.5 FortAD run compiled and linked all 406 targets. Its
