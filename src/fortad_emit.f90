@@ -281,6 +281,11 @@ contains
                 integer :: k
                 do k = 1, size(s%call_args)
                     if (k > 1) call b%put(", ")
+                    if (allocated(s%call_arg_names)) then
+                        if (len_trim(s%call_arg_names(k)) > 0) then
+                            call b%put(trim(s%call_arg_names(k))//"=")
+                        end if
+                    end if
                     call write_expr(b, p, s%call_args(k))
                 end do
             end block
@@ -679,6 +684,13 @@ contains
             call b%put("(")
             do i = 1, size(p%exprs(idx)%args)
                 if (i > 1) call b%put(", ")
+                if (k == FAD_CALL) then
+                    if (allocated(p%exprs(idx)%call_arg_names)) then
+                        if (len_trim(p%exprs(idx)%call_arg_names(i)) > 0) then
+                            call b%put(trim(p%exprs(idx)%call_arg_names(i))//"=")
+                        end if
+                    end if
+                end if
                 call write_expr(b, p, p%exprs(idx)%args(i))
             end do
             call b%put(")")
