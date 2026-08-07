@@ -404,6 +404,16 @@ contains
                     primal%stmts(i)%allocation_args(1))
                 owner = fad_base_name(owner_text)
                 if (index(trim(owner_text), "%") > 0) then
+                    if (primal%stmts(i)%allocation_target_polymorphic .and. &
+                        array_element_component(owner_text)) then
+                        status%ok = .false.
+                        status%message = "reverse mode: array-element polymorphic "// &
+                            "component allocation '"//trim(owner_text)// &
+                            "' cannot replay SOURCE= ownership per element; "// &
+                            "forward fixed-source differentiation is supported, "// &
+                            "but reverse needs a per-element value-copy replay tape"
+                        return
+                    end if
                     status%ok = .false.
                     status%message = "reverse mode: allocation owner '"// &
                         trim(owner)//"' must be a simple local or dummy "// &
@@ -482,6 +492,15 @@ contains
         end do
 
     end subroutine check_supported
+
+    logical function array_element_component(text) result(found)
+        character(len=*), intent(in) :: text
+        integer :: open, percent
+
+        open = index(trim(text), "(")
+        percent = index(trim(text), "%")
+        found = open > 0 .and. percent > open
+    end function array_element_component
 
     subroutine seed_activity(primal, spec, dependent, active, status)
         !! Activity is varied **and** useful: reachable forward from an
