@@ -550,6 +550,16 @@ contains
                     ignored = tangent%add_stmt(s)
 
                 case (FAD_DO)
+                    ! Legacy Tapenade-style sources often rely on implicit
+                    ! typing for the loop index (`i`, `j`, ...).  The primal
+                    ! may therefore have no declaration to copy, but the
+                    ! generated procedure has implicit none and must still
+                    ! declare the index as an integer.
+                    if (tangent%decl_index(ps%target) == 0) then
+                        ignored = tangent%add_decl_fields(ps%target, "integer", &
+                            FAD_INTENT_NONE, .false., .false., .false., &
+                            .false., "")
+                    end if
                     s%kind = FAD_DO
                     s%target = ps%target
                     s%lo = copy_expr(primal, tangent, ps%lo)

@@ -767,8 +767,11 @@ of selected child ends the fixed-path derivative contract.
             [`test_tapenade_fixed_form_oracle.f90`](test/test_tapenade_fixed_form_oracle.f90)
             transforms a Tapenade-style `DOUBLE PRECISION` kernel, checks the
             hand JVP and a central finite difference, and exercises the real
-            CLI. Library source strings, CPP, include expansion, mixed forms,
-            semicolon parity, and broad legacy syntax remain open.
+            CLI. The separate
+            [`test_implicit_loop_index_oracle.f90`](test/test_implicit_loop_index_oracle.f90)
+            covers generated JVP/VJP declarations for implicit I-N loop
+            indices. Library source strings, CPP, include expansion, mixed
+            forms, semicolon parity, and broad legacy syntax remain open.
 - [ ] **P7.7 Language-completeness lane.** Add assumed-rank and `select rank`,
       submodules, `do concurrent`, coarrays, parameterized derived types, and
       finalizers after the application blockers above. The 2026-08-06
