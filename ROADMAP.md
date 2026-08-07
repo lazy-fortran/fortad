@@ -863,10 +863,12 @@ of selected child ends the fixed-path derivative contract.
       `present` branches, generic resolution by type, kind, and rank, elemental
       calls, and user-defined operators. FortAD remains a source transformer.
       Commit `0209b3a` now preserves optional dummies and `present` branches in
-      generated JVP/VJP interfaces. Keyword mapping across inlined siblings,
-      generic resolution, and operator-overloaded inputs remain open. Commit
-      `08201bf` rejects active optional tangents/adjoints explicitly and keeps
-      optional metadata off generated locals and SSA shadows.
+      generated JVP/VJP interfaces. Commit `2cae720` extends this to active
+      optional forward arguments: their tangent dummies retain `OPTIONAL` and
+      supplied/omitted `present` paths are checked by an independent
+      finite-difference oracle. Active optional reverse arguments remain a
+      named refusal. Keyword mapping across inlined siblings, generic
+      resolution, and operator-overloaded inputs remain open.
       - [x] **P7.4a elemental procedure preservation.** The selected same-file
         procedure's standalone `ELEMENTAL` prefix is carried into generated
         JVP and VJP headers. The independent
