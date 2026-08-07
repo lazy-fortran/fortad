@@ -286,6 +286,27 @@ module, and sibling output path are filled in exactly as for source-first
 syntax; later explicit `--proc`, `--name`, `--module`, or `--output` options
 still override the corresponding defaults.
 
+The principal Tapenade flags are accepted without a translation wrapper:
+
+```console
+fortad -p -O out -o kernel source.f
+fortad -d -root kernel -O out -o kernel source.f
+fortad -b -root kernel -O out -o kernel source.f
+fortad -d -root kernel -multi -O out -o kernel source.f
+```
+
+Here `-p`, `-d`, and `-b` select parser, forward, and reverse mode;
+`-root NAME` selects the procedure; `-O DIR` selects the output directory; and
+`-o STEM` selects the output basename. FortAD writes the corresponding
+`STEM_p.f90`, `STEM_d.f90`, or `STEM_b.f90` file. In the direct legacy path,
+absent `INTENT` metadata is supplemented by simple write-before-read analysis
+so a single output dummy can be inferred. Use `--head` or `--dep` when a
+routine has multiple or ambiguous outputs. `-multi` maps to FortAD's forward
+direction-count dummy `nd`; multidirectional reverse mode is a named
+unsupported boundary rather than a silent scalar fallback. `-ext FILE` is
+accepted for command-line migration but its Tapenade summary file is not
+imported; use `--rule` or `--call-rule` for FortAD derivative rules.
+
 Source-first parsing is selected when the first positional argument is an
 existing file, including the bare `fortad FILE` form. Supplying two positional
 paths is rejected as ambiguous instead of choosing one silently. The legacy
@@ -324,7 +345,7 @@ rejected because one path or name would be ambiguous for two products.
 | `-i`, `--indep a,b` | legacy and bare source-first forms | explicit independent variables; source-first form can infer them |
 | `-m`, `--mode MODE` | legacy and bare source-first forms | `forward`, `reverse`, or `hessian` |
 | `--dep name` | reverse | dependent when the default is ambiguous |
-| `-d`, `--directions name` | forward | generated direction-count dummy and vector mode |
+| `--directions name` | forward | generated direction-count dummy and vector mode |
 | `--name name` | derivative modes | generated procedure name |
 | `--module name` | derivative modes | generated wrapper module |
 | `--proc name` | all transformations | target in multi-procedure input |
@@ -335,6 +356,12 @@ rejected because one path or name would be ambiguous for two products.
 | `--rule spec` | current process | scalar rule in `NAME:partial;partial` form |
 | `--call-rule spec` | current process | statement rule in `NAME:n_args:tangent;...|adjoint;...` form |
 | `-o`, `--output path` | all transformations | output file instead of standard output |
+| `-p`, `-d`, `-b` | Tapenade compatibility | parser, forward, and reverse mode selectors |
+| `-root name` | Tapenade compatibility | selected procedure name |
+| `-O dir` | Tapenade compatibility | output directory for generated sibling files |
+| `-o stem` | Tapenade compatibility | output basename; FortAD appends the mode suffix and `.f90` |
+| `-multi` | Tapenade compatibility | forward vector mode, equivalent to `--directions nd` |
+| `-ext file` | Tapenade compatibility | accepted but not imported; use `--rule` or `--call-rule` |
 | `--version` | standalone | print the version and exit |
 | `-h`, `--help` | standalone | print built-in help and exit |
 

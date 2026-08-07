@@ -160,17 +160,28 @@ accepted too. The procedure name is equivalent to `--proc`; the names inside
 the parentheses are equivalent to `--indep`, while omitted names still use
 FortAD's inference.
 
-The common Tapenade command shapes map directly to compact FortAD commands:
+The common Tapenade command shapes are also accepted directly.  `-O` must name
+an existing output directory; `-o` is the Tapenade output stem, so FortAD adds
+`_p`, `_d`, or `_b` and `.f90`.
 
-| Tapenade shape | FortAD equivalent |
+| Tapenade command | FortAD command |
 | --- | --- |
-| `-p source.f90` | `fortad check source.f90` |
-| `-d -root kernel source.f90` | `fortad jvp --head 'kernel(x)' source.f90` |
-| `-b -root kernel source.f90` | `fortad vjp --head 'kernel(x)' source.f90` |
+| `fortad -p -O out -o kernel source.f` | accepted directly; writes `out/kernel_p.f90` |
+| `fortad -d -root kernel -O out -o kernel source.f` | accepted directly; writes `out/kernel_d.f90` |
+| `fortad -b -root kernel -O out -o kernel source.f` | accepted directly; writes `out/kernel_b.f90` |
+| `fortad -d -root kernel -multi -O out -o kernel source.f` | accepted directly; forward vector directions use `nd` |
 | `-head 'kernel(x)'` | `--head 'kernel(x)'` or `-head 'kernel(x)'` |
 
 For the usual single-procedure file, `fortad source.f90` is shorter still: it
 infers the active dummies, procedure name, wrapper module, and output path.
+Tapenade-style legacy subroutines without `INTENT` are handled by the direct
+`-d`/`-b` aliases when FortAD can identify one dummy written before it is read;
+ambiguous procedures still need `--head` or `--dep`.
+
+`-ext FILE` is accepted as a migration aid, but it does not import Tapenade's
+external intrinsic-summary format. Register the needed operation with
+`--rule` or `--call-rule` instead. Tapenade's multidirectional reverse mode is
+not silently emulated: `-multi` currently has forward-mode semantics only.
 
 With source-first compact syntax, omitted names are inferred from the selected
 procedure's dummy arguments: explicit `intent(out)` dummies are outputs and

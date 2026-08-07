@@ -647,6 +647,15 @@ does not support a general build-time advantage.
       with an independent compiled square oracle covering both products. The
       command rejects ambiguous single-output overrides such as `--output`,
       `--name`, and `--module`; use the individual product commands for those.
+- [x] **P6.4e Tapenade CLI migration.** The production CLI accepts Tapenade's
+      parser/forward/reverse selectors, `-root`, `-O`, `-o`, and forward
+      `-multi` directly. Legacy subroutines without `INTENT` use bounded
+      write-before-read inference for a unique output; ambiguous outputs remain
+      explicit refusals. `-ext` is accepted as a migration spelling but does
+      not pretend to consume Tapenade's external-summary format. The compiled
+      [`test_cli_tapenade_compat_oracle.f90`](test/test_cli_tapenade_compat_oracle.f90)
+      checks generated-file naming, independent compilation, central finite
+      differences, and the reverse adjoint value.
 - [ ] **P6.5 Automated source workflow.** Add a manifest-aware command that
       discovers procedures, runs the appropriate forward/reverse probes, and
       writes generated source, diagnostics, and a machine-readable result
