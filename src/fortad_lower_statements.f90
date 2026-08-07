@@ -11,6 +11,8 @@ module fortad_lower_statements
         query_component_access, query_derived_type, query_type_binding, &
         derived_type_query_t, type_binding_query_t, declaration_query_t, &
         query_declaration, query_program_unit, program_unit_query_t, &
+        generic_call_query_t, query_generic_call, resolved_type_query_t, &
+        query_resolved_type, &
         get_source_line
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, fad_base_name, copy_decl, &
@@ -231,7 +233,8 @@ contains
                 end if
             else
                 s%kind = FAD_CALL_STMT
-                s%target = n%name
+                call resolve_generic_call(arena, idx, n%name, s%target, status)
+                if (.not. status%ok) return
             end if
             ignored = proc%add_stmt(s)
 
@@ -968,6 +971,7 @@ contains
         character(len=64), allocatable :: arg_names(:)
         type(fad_expr_t) :: e
         integer :: i
+        character(len=:), allocatable :: call_name
 
         out = 0
         if (idx <= 0 .or. idx > arena%size) then
@@ -1002,6 +1006,12 @@ contains
             type is (literal_node)
             out = proc%add_expr(expr_const(n%value))
             type is (binary_op_node)
+            if (is_defined_operator(n%operator)) then
+                status%ok = .false.
+                status%message = "unsupported operator '"//trim(n%operator)// &
+                    "' in an active expression"
+                return
+            end if
             block
                 integer :: l, r
                 l = lower_expr(arena, n%left_index, proc, status)
@@ -1013,6 +1023,8 @@ contains
             type is (call_or_subscript_node)
             call lower_call_arguments(arena, n%arg_indices, proc, args, &
                 arg_names, status)
+            if (.not. status%ok) return
+            call resolve_generic_call(arena, idx, n%name, call_name, status)
             if (.not. status%ok) return
             if (n%base_expr_index == 0) then
                 if (is_array_name(proc, n%name)) then
@@ -1051,7 +1063,7 @@ contains
                 e%args = args
                 out = proc%add_expr(e)
             else
-                out = proc%add_expr(expr_call(n%name, args, arg_names))
+                out = proc%add_expr(expr_call(call_name, args, arg_names))
             end if
         class default
             status%ok = .false.
@@ -1128,6 +1140,127 @@ contains
         end if
         out = lower_expr(arena, value_idx, proc, status)
     end function lower_actual
+
+    subroutine resolve_generic_call(arena, idx, fallback, name, status)
+        !! Replace one same-arena generic call by its unique exact procedure.
+        !! All other generic resolutions are named refusal boundaries.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: fallback
+        character(len=:), allocatable, intent(out) :: name
+        type(lower_status_t), intent(inout) :: status
+        type(generic_call_query_t) :: query
+        integer :: i
+        logical :: unknown_types
+
+        name = trim(fallback)
+        query = query_generic_call(arena, idx)
+        if (.not. query%found) return
+        if (.not. query%is_generic) return
+
+        if (query%selected_procedure_node_index > 0) then
+            if (.not. query%is_ambiguous) then
+                do i = 1, size(query%candidates)
+                    if (query%candidates(i)%procedure_node_index /= &
+                        query%selected_procedure_node_index) cycle
+                    if (allocated(query%candidates(i)%procedure_name)) then
+                        name = trim(query%candidates(i)%procedure_name)
+                        return
+                    end if
+                end do
+            end if
+        end if
+
+        if (query%is_ambiguous) then
+            status%message = "ambiguous generic call '"//trim(query%generic_name)// &
+                "': no derivative output"
+        else
+            unknown_types = .false.
+            do i = 1, size(query%candidates)
+                if (query%candidates(i)%has_unknown_types) then
+                    unknown_types = .true.
+                    exit
+                end if
+            end do
+            if (unknown_types) then
+                status%message = "unknown-type generic call '"// &
+                    trim(query%generic_name)//"': no derivative output"
+            else if (generic_call_has_array_actual(arena, idx)) then
+                status%message = "elemental-expansion generic call '"// &
+                    trim(query%generic_name)//"' is unsupported: no derivative output"
+            else
+                status%message = "conversion-required generic call '"// &
+                    trim(query%generic_name)//"' has no exact candidate: no derivative output"
+            end if
+        end if
+        status%ok = .false.
+    end subroutine resolve_generic_call
+
+    logical function generic_call_has_array_actual(arena, idx) result(found)
+        !! Detect a rank-expanded actual for a generic with no exact match.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(resolved_type_query_t) :: resolved
+        integer, allocatable :: actuals(:)
+        integer :: i, value_idx
+
+        found = .false.
+        allocate (actuals(0))
+        if (.not. arena%has_node_at(idx)) return
+        select type (node => arena%entries(idx)%node)
+            type is (subroutine_call_node)
+            if (allocated(node%arg_indices)) actuals = node%arg_indices
+            type is (call_or_subscript_node)
+            if (allocated(node%arg_indices)) actuals = node%arg_indices
+        class default
+            return
+        end select
+        do i = 1, size(actuals)
+            value_idx = actuals(i)
+            if (value_idx > 0 .and. value_idx <= arena%size) then
+                if (arena%has_node_at(value_idx)) then
+                    select type (actual => arena%entries(value_idx)%node)
+                        type is (assignment_node)
+                        if (actual%value_index > 0) value_idx = actual%value_index
+                    end select
+                end if
+            end if
+            resolved = query_resolved_type(arena, value_idx)
+            if (resolved%found) then
+                if (resolved%rank > 0) then
+                    found = .true.
+                    return
+                end if
+            end if
+        end do
+    end function generic_call_has_array_actual
+
+    logical function is_defined_operator(operator) result(found)
+        character(len=*), intent(in) :: operator
+        character(len=:), allocatable :: text
+
+        text = trim(operator)
+        found = .false.
+        if (len(text) < 3) return
+        if (text(1:1) /= "." .or. text(len(text):len(text)) /= ".") return
+        select case (lower_ascii(text))
+        case (".and.", ".or.", ".eqv.", ".neqv.", ".eq.", ".ne.", &
+                ".lt.", ".le.", ".gt.", ".ge.")
+            return
+        end select
+        found = .true.
+    end function is_defined_operator
+
+    function lower_ascii(text) result(out)
+        character(len=*), intent(in) :: text
+        character(len=len(text)) :: out
+        integer :: i
+
+        out = text
+        do i = 1, len(text)
+            out(i:i) = lower_char(out(i:i))
+        end do
+    end function lower_ascii
 
     logical function is_section_node(arena, idx) result(found)
         !! Whether an AST node denotes an array section rather than an element.
