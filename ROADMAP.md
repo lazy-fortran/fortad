@@ -999,6 +999,18 @@ problem-specific rule.
 - [ ] **P8.5 Polymorphic ownership.** Cover allocatable base-class components,
       factories, `allocate(source=child)`, nested field/coordinate objects,
       arrays of polymorphic holders, assignment, and destruction.
+      - [x] **P8.5a forward semantic boundary.** A passive allocatable
+            `class(base_t)` or `class(*)` dummy may retain one fixed dynamic
+            child through `select type` while an independent scalar is
+            differentiated; the compiled
+            [`test_polymorphic_ownership_oracle.f90`](test/test_polymorphic_ownership_oracle.f90)
+            checks hand and finite-difference values. An active component of
+            a polymorphic allocatable is refused after activity analysis from
+            FortFront's declared storage facts, with the `class(T)`/`class(*)`
+            form and source line in the diagnostic. The current IR has no
+            paired dynamic-type tangent selector or ownership state, so this
+            boundary does not accept active polymorphic ownership. Reverse
+            allocation handling is unchanged.
 - [ ] **P8.6 Procedure pointers and callbacks.** Treat callback identity as a
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed
