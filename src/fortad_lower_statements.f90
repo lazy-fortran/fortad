@@ -10,7 +10,7 @@ module fortad_lower_statements
         derived_type_query_t, type_binding_query_t, query_program_unit, &
         program_unit_query_t
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-        expr_const, expr_var, expr_binop, expr_call, fad_base_name, &
+        expr_const, expr_var, expr_binop, expr_call, fad_base_name, copy_decl, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
         FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
         FAD_INTENT_IN, FAD_INTENT_OUT, FAD_INTENT_INOUT, &
@@ -220,6 +220,10 @@ contains
         character(len=:), allocatable :: guard_kind
         type(fad_stmt_t) :: s
         integer :: selector, default_index, type_index, i, ignored
+        integer :: selector_decl
+        character(len=:), allocatable :: selector_name
+        type(fad_decl_t) :: saved_selector
+        logical :: saved_selector_decl
 
         status%ok = .true.
         call get_select_type_info(arena, idx, selector, guards, default_index)
@@ -234,6 +238,22 @@ contains
         s%value = lower_expr(arena, selector, proc, status)
         if (.not. status%ok) return
         ignored = proc%add_stmt(s)
+
+        ! A SELECT TYPE associate name has a concrete static type inside its
+        ! guard arm.  Keep that fact only while lowering the arm so a
+        ! type-bound call such as ``model%value(x)`` can bind to the child's
+        ! implementation without changing the generated derivative interface
+        ! (the selector remains CLASS(base_t) at the procedure boundary).
+        call select_type_selector_name(arena, selector, selector_name)
+        selector_decl = 0
+        saved_selector_decl = .false.
+        if (allocated(selector_name)) then
+            selector_decl = proc%decl_index(selector_name)
+            if (selector_decl > 0) then
+                call copy_decl(saved_selector, proc%decls(selector_decl))
+                saved_selector_decl = .true.
+            end if
+        end if
 
         do i = 1, size(guards)
             call get_type_guard_info(arena, guards(i), guard_kind, type_index, body)
@@ -273,7 +293,13 @@ contains
             end select
             s%value = 0
             ignored = proc%add_stmt(s)
+            if (saved_selector_decl) then
+                call set_select_type_alias(proc%decls(selector_decl), s%target)
+            end if
             call lower_body(arena, body, proc, status)
+            if (saved_selector_decl) then
+                call copy_decl(proc%decls(selector_decl), saved_selector)
+            end if
             if (.not. status%ok) return
         end do
 
@@ -292,6 +318,30 @@ contains
         s%value = 0
         ignored = proc%add_stmt(s)
     end subroutine lower_select_type
+
+    subroutine select_type_selector_name(arena, selector, name)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: selector
+        character(len=:), allocatable, intent(out) :: name
+
+        if (selector <= 0 .or. selector > arena%size) return
+        if (.not. arena%has_node_at(selector)) return
+        select type (node => arena%entries(selector)%node)
+            type is (identifier_node)
+            name = trim(node%name)
+        class default
+        end select
+    end subroutine select_type_selector_name
+
+    subroutine set_select_type_alias(decl, type_name)
+        type(fad_decl_t), intent(inout) :: decl
+        character(len=*), intent(in) :: type_name
+        character(len=:), allocatable :: alias_type
+
+        alias_type = "type("//trim(type_name)//")"
+        if (allocated(decl%type_name)) deallocate (decl%type_name)
+        decl%type_name = alias_type
+    end subroutine set_select_type_alias
 
     subroutine fill_decl(n, name, arena, d)
         !! Translate a fortfront declaration node into a fortad declaration.
