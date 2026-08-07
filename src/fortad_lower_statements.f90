@@ -5,6 +5,7 @@ module fortad_lower_statements
         declaration_node, do_loop_node, if_node, parameter_declaration_node, &
         subroutine_call_node, use_statement_node, comment_node, &
         pointer_assignment_node, &
+        return_node, &
         get_select_type_info, get_type_guard_info, component_access_query_t, &
         query_component_access, query_derived_type, query_type_binding, &
         derived_type_query_t, type_binding_query_t, declaration_query_t, &
@@ -27,20 +28,69 @@ module fortad_lower_statements
 
 contains
 
-    recursive subroutine lower_body(arena, body_indices, proc, status)
+    recursive subroutine lower_body(arena, body_indices, proc, status, &
+            allow_terminal_return)
         !! Lower a statement list.
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: body_indices(:)
         type(fad_proc_t), intent(inout) :: proc
         type(lower_status_t), intent(out) :: status
+        logical, intent(in), optional :: allow_terminal_return
+        logical :: terminal_return_allowed
         integer :: i
 
         status%ok = .true.
+        terminal_return_allowed = .true.
+        if (present(allow_terminal_return)) then
+            terminal_return_allowed = allow_terminal_return
+        end if
         do i = 1, size(body_indices)
+            if (body_indices(i) > 0) then
+                if (body_indices(i) <= arena%size) then
+                    if (arena%has_node_at(body_indices(i))) then
+                        select type (return_stmt => arena%entries(body_indices(i))%node)
+                            type is (return_node)
+                            if (return_stmt%has_selector) then
+                                status%ok = .false.
+                                status%message = "unsupported alternate RETURN at line "// &
+                                    itoa(return_stmt%line)
+                                return
+                            end if
+                            if (terminal_return_allowed) then
+                                if (return_is_terminal(arena, body_indices, i)) cycle
+                            end if
+                            status%ok = .false.
+                            status%message = "unsupported non-terminal RETURN at line "// &
+                                itoa(return_stmt%line)//": control flow changes the active path"
+                            return
+                        class default
+                        end select
+                    end if
+                end if
+            end if
             call lower_stmt(arena, body_indices(i), proc, status)
             if (.not. status%ok) return
         end do
     end subroutine lower_body
+
+    logical function return_is_terminal(arena, body_indices, position) result(terminal)
+        !! A plain RETURN is derivative-neutral only when it is the last
+        !! executable statement in this body. Comments may follow it.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: body_indices(:), position
+        integer :: i, idx
+
+        terminal = .true.
+        do i = position + 1, size(body_indices)
+            idx = body_indices(i)
+            if (idx <= 0) cycle
+            if (idx > arena%size) cycle
+            if (.not. arena%has_node_at(idx)) cycle
+            if (trim(arena%entries(idx)%node_type) == "comment") cycle
+            terminal = .false.
+            return
+        end do
+    end function return_is_terminal
 
     recursive subroutine lower_stmt(arena, idx, proc, status)
         !! Lower one statement, or refuse it by name.
@@ -116,7 +166,8 @@ contains
             s%value = lower_expr(arena, n%condition_index, proc, status)
             if (.not. status%ok) return
             ignored = proc%add_stmt(s)
-            call lower_body(arena, n%then_body_indices, proc, status)
+            call lower_body(arena, n%then_body_indices, proc, status, &
+                allow_terminal_return=.false.)
             if (.not. status%ok) return
             if (allocated(n%else_body_indices)) then
                 if (size(n%else_body_indices) > 0) then
@@ -125,7 +176,8 @@ contains
                         e%kind = FAD_ELSE
                         ignored = proc%add_stmt(e)
                     end block
-                    call lower_body(arena, n%else_body_indices, proc, status)
+                    call lower_body(arena, n%else_body_indices, proc, status, &
+                        allow_terminal_return=.false.)
                     if (.not. status%ok) return
                 end if
             end if
@@ -169,7 +221,8 @@ contains
                 if (.not. status%ok) return
             end if
             ignored = proc%add_stmt(s)
-            call lower_body(arena, n%body_indices, proc, status)
+            call lower_body(arena, n%body_indices, proc, status, &
+                allow_terminal_return=.false.)
             if (.not. status%ok) return
             block
                 type(fad_stmt_t) :: e
@@ -297,7 +350,8 @@ contains
             if (saved_selector_decl) then
                 call set_select_type_alias(proc%decls(selector_decl), s%target)
             end if
-            call lower_body(arena, body, proc, status)
+            call lower_body(arena, body, proc, status, &
+                allow_terminal_return=.false.)
             if (saved_selector_decl) then
                 call copy_decl(proc%decls(selector_decl), saved_selector)
             end if
@@ -311,7 +365,8 @@ contains
             s%value = 0
             if (allocated(s%target)) deallocate (s%target)
             ignored = proc%add_stmt(s)
-            call lower_body(arena, body, proc, status)
+            call lower_body(arena, body, proc, status, &
+                allow_terminal_return=.false.)
             if (.not. status%ok) return
         end if
 
