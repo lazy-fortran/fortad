@@ -245,6 +245,7 @@ directional coefficient. `tay_derivative` multiplies coefficient `k` by `k!`.
 ## CLI
 
 ```text
+fortad FILE [NAMES] [OPTIONS]
 fortad jvp|vjp|hvp FILE [NAMES] [OPTIONS]
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad all FILE [NAMES]
@@ -252,10 +253,12 @@ fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
 ```
 
-The source-first form is the normal interactive path: `fortad vjp kernel.f90`.
-When `NAMES` is omitted, FortAD lowers the first procedure (or the one named by
-`--proc`), infers its non-`intent(out)` dummies, uses the function result or
-sole `intent(out)` dummy as the reverse dependent, and chooses these defaults:
+The shortest source-first form is `fortad kernel.f90`, which emits a JVP. The
+explicit product form `fortad vjp kernel.f90` selects reverse mode. In both
+forms, when `NAMES` is omitted, FortAD lowers the first procedure (or the one
+named by `--proc`), infers its non-`intent(out)` dummies, uses the function
+result or sole `intent(out)` dummy as the reverse dependent, and chooses these
+defaults:
 
 ```text
 generated procedure: <procedure>_<product>
@@ -272,8 +275,9 @@ explicit forms remain available. The names-first compact form,
 existing scripts.
 
 Source-first parsing is selected when the first positional argument is an
-existing file. Supplying two positional paths is rejected as ambiguous instead
-of choosing one silently.
+existing file, including the bare `fortad FILE` form. Supplying two positional
+paths is rejected as ambiguous instead of choosing one silently. The legacy
+flag form still accepts its input path after the options.
 
 Values must be separate arguments. `--mode reverse` is accepted, while
 `--mode=reverse` is not. In the names-first compact form, the independent-name
@@ -301,6 +305,7 @@ rejected because one path or name would be ambiguous for two products.
 | Option | Scope | Meaning |
 | --- | --- | --- |
 | `jvp`, `vjp`, `hvp` | compact derivative form | product followed by `FILE [NAMES]` or `NAMES ... FILE` |
+| bare `FILE` | inferred JVP form | infer the first procedure and write `<stem>_jvp.f90` |
 | `all` | compact paired-product form | infer and write both JVP and VJP siblings |
 | `check` | compact round-trip form | validate and re-emit source without differentiation |
 | `-i`, `--indep a,b` | legacy derivative form | explicit independent variables; source-first compact form can infer them |

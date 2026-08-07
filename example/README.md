@@ -10,8 +10,8 @@ in the [main README](../README.md#build):
 
 ```console
 $ mkdir -p build/example
-$ fo exec fortad --mode reverse --indep x --module rosenbrock_ad \
-    --output build/example/rosenbrock_ad.f90 example/rosenbrock.f90
+$ fo exec fortad vjp example/rosenbrock.f90 \
+    --module rosenbrock_ad --output build/example/rosenbrock_ad.f90
 $ gfortran -std=f2018 -o build/example/check_rosenbrock \
     build/example/rosenbrock_ad.f90 example/check_rosenbrock.f90
 $ build/example/check_rosenbrock

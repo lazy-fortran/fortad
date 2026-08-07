@@ -1,6 +1,7 @@
 program fortad_cli
     !! Command-line driver.
     !!
+    !!     fortad kernel.f90
     !!     fortad jvp kernel.f90
     !!     fortad all kernel.f90
     !!     fortad jvp a,b --directions nd -o kernel_d.f90 kernel.f90
@@ -345,6 +346,7 @@ contains
         character(len=1024) :: arg
         integer :: i, n, length
         logical :: check_syntax, compact_syntax, source_first_syntax
+        logical :: bare_source_syntax
 
         input_path = ""
         output_path = ""
@@ -363,6 +365,7 @@ contains
         check_syntax = .false.
         compact_syntax = .false.
         source_first_syntax = .false.
+        bare_source_syntax = .false.
 
         n = command_argument_count()
         i = 1
@@ -387,8 +390,21 @@ contains
                     check_syntax = .true.
                     roundtrip_only = .true.
                     i = 2
+                case default
+                    if (existing_file(arg(1:length))) then
+                        ! A bare source is the shortest useful invocation:
+                        ! infer the first procedure's inputs and emit its JVP.
+                        ! Keep it distinct from PRODUCT's source-first spelling
+                        ! so the compact parser does not reinterpret the path.
+                        compact_syntax = .true.
+                        bare_source_syntax = .true.
+                        source_first_syntax = .true.
+                        mode = "forward"
+                        input_path = trim(arg(1:length))
+                        i = 2
+                    end if
                 end select
-                if (compact_syntax) then
+                if (compact_syntax .and. .not. bare_source_syntax) then
                     i = 2
                     if (i > n) then
                         stat = 1
@@ -437,6 +453,21 @@ contains
                         i = 3
                     end if
                 end if
+            end if
+        end if
+        if (bare_source_syntax .and. i <= n) then
+            call get_command_argument(i, arg, length)
+            if (length == 0) then
+                stat = 1
+                return
+            end if
+            if (arg(1:1) /= "-") then
+                if (existing_file(arg(1:length))) then
+                    stat = 1
+                    return
+                end if
+                indep_list = trim(arg(1:length))
+                i = i + 1
             end if
         end if
         do while (i <= n)
@@ -814,6 +845,7 @@ contains
         write (*, '(a)') "fortad "//fad_version()// &
             " - source-transformation automatic differentiation for Fortran"
         write (*, '(a)') ""
+        write (*, '(a)') "       fortad <file.f90> [names]     (inferred JVP)"
         write (*, '(a)') "usage: fortad PRODUCT <file.f90> [names] [options]"
         write (*, '(a)') "       fortad PRODUCT <names> [options] <file.f90>"
         write (*, '(a)') "       fortad all <file.f90> [names]"

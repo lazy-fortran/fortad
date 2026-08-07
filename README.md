@@ -6,8 +6,8 @@ tape library or compiler plug-in dependency. The compiler matrix currently
 checks gfortran, ifx, flang-new, nvfortran, and LFortran.
 
 ```console
-$ fo exec fortad vjp x --module rosenbrock_ad \
-    --output build/rosenbrock_ad.f90 example/rosenbrock.f90
+$ fo exec fortad vjp example/rosenbrock.f90 --module rosenbrock_ad \
+    --output build/rosenbrock_ad.f90
 ```
 
 That command differentiates the checked-in
@@ -129,15 +129,23 @@ with independent results.
 
 The command reads one Fortran source file. Explicit forms write generated
 Fortran to standard output; the source-only compact form writes a predictable
-derivative file beside the input. Start with one of these five forms:
+derivative file beside the input. Start with one of these forms:
 
 ```console
+$ fortad kernel.f90                       # infer inputs; write kernel_jvp.f90
 $ fortad jvp kernel.f90                    # infer inputs; write kernel_jvp.f90
 $ fortad vjp kernel.f90                    # infer inputs and the sole output
 $ fortad hvp kernel.f90                    # infer inputs; write kernel_hvp.f90
 $ fortad all kernel.f90                    # write both JVP and VJP siblings
 $ fortad check kernel.f90                 # parser/round-trip check
 ```
+
+The shortest form, `fortad FILE`, infers the first procedure and its
+differentiable dummy arguments and writes `<stem>_jvp.f90` beside the input.
+Add a comma-separated positional name list only when you want to override the
+inferred inputs. Use `fortad all FILE` when both JVP and VJP siblings are
+needed; explicit product names and flags remain available for multi-procedure
+files, custom interfaces, and registered rules.
 
 With source-first compact syntax, omitted names are inferred from the selected
 procedure's dummy arguments: explicit `intent(out)` dummies are outputs and
@@ -151,6 +159,7 @@ section](docs/design/public-api.md#cli). The flag form and names-first compact
 form remain available for scripts and advanced rules:
 
 ```text
+fortad FILE [NAMES] [OPTIONS]
 fortad jvp|vjp|hvp FILE [NAMES] [OPTIONS]
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad all FILE [NAMES]
