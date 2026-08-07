@@ -5,8 +5,9 @@ program test_cli_compact_oracle
     character(len=1024) :: executable_buffer, environment_buffer
     character(len=:), allocatable :: executable_path, directory, separator
     character(len=:), allocatable :: cli_path, input_path, legacy_path
-    character(len=:), allocatable :: compact_path, command
+    character(len=:), allocatable :: compact_path, source_first_path, command
     character(len=:), allocatable :: legacy_source, compact_source
+    character(len=:), allocatable :: source_first_source
     character(len=7), parameter :: modes(3) = [character(len=7) :: &
         'forward', 'reverse', 'hessian']
     character(len=3), parameter :: products(3) = [character(len=3) :: &
@@ -28,6 +29,8 @@ program test_cli_compact_oracle
             trim(modes(index)) // '.f90'
         compact_path = directory // separator // 'fortad-compact-' // &
             trim(modes(index)) // '.f90'
+        source_first_path = directory // separator // 'fortad-source-first-' // &
+            trim(modes(index)) // '.f90'
         command = quote(cli_path) // ' --mode ' // trim(modes(index)) // &
             ' --indep x --proc square --module compact_' // &
             trim(modes(index)) // ' --output ' // quote(legacy_path) // &
@@ -41,19 +44,33 @@ program test_cli_compact_oracle
         call execute_command_line(command, wait=.true., exitstat=stat)
         if (stat /= 0) call fail('compact '//trim(modes(index))//' command failed')
 
+        command = quote(cli_path) // ' ' // products(index) // ' ' // &
+            quote(input_path) // ' x --proc square --module compact_' // &
+            trim(modes(index)) // ' --output ' // quote(source_first_path)
+        call execute_command_line(command, wait=.true., exitstat=stat)
+        if (stat /= 0) call fail('source-first '//trim(modes(index))// &
+            ' command failed')
+
         call read_text(legacy_path, legacy_source)
         call read_text(compact_path, compact_source)
+        call read_text(source_first_path, source_first_source)
         if (legacy_source /= compact_source) then
             call fail(products(index)//' differs from legacy CLI')
         end if
+        if (compact_source /= source_first_source) then
+            call fail(products(index)//' differs from source-first CLI')
+        end if
         call compile_source(compact_path, products(index), modes(index))
+        call compile_source(source_first_path, products(index), modes(index))
         call delete_file(legacy_path)
         call delete_file(compact_path)
+        call delete_file(source_first_path)
     end do
 
     call require_conflict('vjp x --mode forward', 'mode')
     call require_conflict('vjp x --indep x', 'independent names')
     call require_conflict('jvp x --roundtrip', 'roundtrip')
+    call require_ambiguous_source_first()
 
     call delete_file(input_path)
     print *, 'pass cli_compact'
@@ -165,6 +182,16 @@ contains
         inquire (file=compact_path, exist=exists)
         if (exists) call fail('conflicting '//description//' wrote output')
     end subroutine require_conflict
+
+    subroutine require_ambiguous_source_first()
+        compact_path = directory // separator // 'fortad-conflict.f90'
+        command = quote(cli_path) // ' jvp ' // quote(input_path) // ' ' // &
+            quote(input_path) // ' --output ' // quote(compact_path)
+        call execute_command_line(command, wait=.true., exitstat=stat)
+        if (stat == 0) call fail('two source paths were accepted as names')
+        inquire (file=compact_path, exist=exists)
+        if (exists) call fail('ambiguous source-first command wrote output')
+    end subroutine require_ambiguous_source_first
 
     subroutine delete_file(path)
         character(len=*), intent(in) :: path

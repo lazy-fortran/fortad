@@ -625,11 +625,11 @@ does not support a general build-time advantage.
       checks generated modules, and verifies invalid option combinations. The
       advanced flags remain available for rules and multi-procedure sources.
 - [ ] **P6.4b Guided inference.** Add a source-first spelling such as
-      `fortad jvp kernel.f90 x,y` and infer the target procedure, generated
-      name, module name, and output path when the source contains one
-      unambiguous procedure. Keep refusal diagnostics explicit when inference
-      would be ambiguous. Every inferred command needs its own behavioral
-      oracle and copyable example.
+      `fortad jvp kernel.f90 x,y`. The explicit-name spelling is now accepted
+      and covered by a compiled oracle; target-procedure, generated-name,
+      module-name, and output-path inference remain open. Keep refusal
+      diagnostics explicit when inference would be ambiguous. Every inferred
+      command needs its own behavioral oracle and copyable example.
 - [ ] **P6.4c One-command defaults.** Make the source-first spelling the
       documented path: `fortad jvp kernel.f90` and `fortad vjp kernel.f90`
       infer names only when the procedure has one unambiguous active input and

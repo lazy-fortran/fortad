@@ -245,23 +245,31 @@ directional coefficient. `tay_derivative` multiplies coefficient `k` by `k!`.
 ## CLI
 
 ```text
+fortad jvp|vjp|hvp FILE NAMES [OPTIONS]
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
 ```
 
-The first form is the normal interactive path: `fortad vjp x --dep y
-kernel.f90`. It removes the repetitive `--mode` and `--indep` flags while
-retaining `--proc`, output naming, custom rules, and every other applicable
-advanced option. The original flag form remains stable for existing scripts.
+The source-first form is the normal interactive path: `fortad vjp kernel.f90 x
+--dep y`. It removes the repetitive `--mode` and `--indep` flags while keeping
+the input visible at the start of the command. The names-first compact form,
+`fortad vjp x --dep y kernel.f90`, and the original flag form remain stable for
+existing scripts.
+
+Source-first parsing is selected when the first positional argument is an
+existing file. It still requires explicit independent names; procedure and
+dependent inference remain conservative. Supplying two positional paths is
+rejected as ambiguous instead of choosing one silently.
 
 Values must be separate arguments. `--mode reverse` is accepted, while
-`--mode=reverse` is not. The compact product must be the first argument and
-its independent-name list must follow immediately. Mixing compact syntax with
-`--mode`, `--indep`, or `--roundtrip` is rejected instead of silently choosing
-one spelling. The product names are deliberately distinct from the legacy mode
-values, so an existing positional input path named `forward`, `reverse`, or
-`hessian` keeps its old meaning.
+`--mode=reverse` is not. In the names-first compact form, the independent-name
+list follows the product immediately; in the source-first form, the existing
+input path follows the product and the names follow it. Mixing compact syntax
+with `--mode`, `--indep`, or `--roundtrip` is rejected instead of silently
+choosing one spelling. The product names are deliberately distinct from the
+legacy mode values, so an existing positional input path named `forward`,
+`reverse`, or `hessian` keeps its old meaning.
 
 `fortad check FILE` is the compact spelling of the existing `--roundtrip`
 operation. It parses the file and re-emits its default procedure, or the one
@@ -272,7 +280,7 @@ file or that FortAD can differentiate it.
 
 | Option | Scope | Meaning |
 | --- | --- | --- |
-| `jvp`, `vjp`, `hvp` | compact derivative form | product followed immediately by independent names |
+| `jvp`, `vjp`, `hvp` | compact derivative form | product followed by `FILE NAMES` or `NAMES ... FILE` |
 | `check` | compact round-trip form | validate and re-emit source without differentiation |
 | `-i`, `--indep a,b` | derivative modes | independent variables, required |
 | `-m`, `--mode MODE` | derivative modes | `forward`, `reverse`, or `hessian` |
