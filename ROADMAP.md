@@ -82,7 +82,7 @@ has a successful Ubuntu job, including the #2975 owner-boundary regression;
 Windows retains the documented nine-test portability baseline. The downstream
 multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc docs `ec87e25` over code `caf3203`, which
+The compiler-path handoff is ffc docs `82fa035` over code `caf3203`, which
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, and GOTO extractions,
 the rebased integer(8)/descriptor dispatch guard, the bare-DIMENSION #2848
