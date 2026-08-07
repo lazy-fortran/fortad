@@ -68,10 +68,14 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront `main` is `a1d07243` (the semantic-context fix is `229f5f11`). Its focused #2993, #2996, nested-binding,
-and implicit-DIMENSION oracles are green locally. The current GNU gate is
-green as well: 1,545 static modules, 381 build targets, 378 derivative
-targets, 483/483 tests, and clean lint. The Windows lane remains open.
+FortFront `main` is pinned to `f46a005`, the merge of PR #3003, which fixes
+lazy untyped function-result inference (#2980) and carries its independent
+GNU Fortran differential oracle. Its focused #2993, #2996, nested-binding,
+implicit-DIMENSION, and #2980 oracles are green on the GNU lane. The current
+GNU gate is green as well: 1,545 static modules, 381 build targets, 378
+derivative targets, 483/483 tests, and clean lint. The Windows lane remains
+open and must be rerun against this pin before the downstream multi-compiler
+gate is called green.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
@@ -87,9 +91,12 @@ targets, 483/483 tests, and clean lint. The Windows lane remains open.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures; the fixed-form and submodule acceptance oracles are green.
-- [ ] FortFront `main` is green on Windows. The six failures listed under
-      Repository state are the last-known Windows set; the GNU gate above is
-      current-head evidence.
+- [ ] FortFront `main` is green on Windows. The latest observed Windows
+      evidence before pinning `f46a005` is run
+      [31138641474](https://github.com/lazy-fortran/fortfront/actions/runs/31138641474),
+      whose Ubuntu job passed but whose Windows job failed the ten concrete
+      executables recorded under Repository state. Rerun the same shard on
+      `f46a005`; do not mask any of those failures with XFAILs.
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
@@ -195,17 +202,26 @@ builds pass this boundary.
 
 FortFront's former 15-source blocker list, 25-test GNU failure list, continued
 character literals, and nvfortran cold build are closed. GNU now builds 381
-targets and 378 test programs containing 483 tests. The remaining Windows
-tests are `test_compiler_facing_queries`, `test_reject_bind_02_diagnostics`,
-`test_reject_placement_01_diagnostics`,
-`test_reject_value_scope_01_diagnostics`, `test_all_examples_slow`, and
-`test_elemental_validation`. `test_module_distribution` also remains
+targets and 378 test programs containing 483 tests. The latest Windows
+failure signature is ten concrete executables from run 31138641474:
+`test_alternate_return_frontend.exe`, `test_compiler_facing_queries.exe`,
+`test_fixed_form_comment_oracle.exe`,
+`test_fixed_form_implicit_dimension_oracle.exe`,
+`test_type_bound_call_base_oracle.exe`,
+`test_reject_bind_01_diagnostics.exe`,
+`test_reject_placement_01_diagnostics.exe`,
+`test_reject_value_scope_01_diagnostics.exe`, `test_all_examples_slow.exe`,
+and `test_elemental_validation.exe`. These are a rerun gate against
+`f46a005`, not an authorization to weaken expected failures; the older
+six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` pins FortFront `main`, and fpm caches its dependency clone. After a
-FortFront change, remove `build/dependencies` and `build/cache.toml` before
-reinstalling `fo`, or the old revision will be reused.
+`fo` must consume FortFront `f46a005` (the merged #2980 fix), while fpm caches
+its dependency clone. After a FortFront change, remove `build/dependencies`
+and `build/cache.toml` before reinstalling `fo`, or the old revision will be
+reused. Record the exact FortFront pin in every downstream gate so a warm
+cache cannot silently test an older semantic contract.
 
 ### Benchmark records
 
