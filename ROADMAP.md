@@ -658,17 +658,18 @@ does not support a general build-time advantage.
       differences, and the reverse adjoint value.
 - [x] **P6.5 Automated source workflow.** The companion
       `fortad-bench/scripts/probe_tapenade_fortad.py` command accepts a case
-      manifest or deterministic queue shard, discovers a root only when static
-      triage finds one unambiguous source procedure, and otherwise records an
-      explicit ambiguity without transforming the source. It runs pinned
-      Tapenade and FortAD parser/forward/reverse probes, preserves generated
-      source and complete stdout/stderr diagnostics, and writes one JSON
-      result per case. `--jobs`, `--shard-count`, and `--shard-index` support
-      parallel corpus sweeps. It never silently selects a dependent or active
-      argument; manifests or `--entry-point` provide that authority. The
-      independent numerical oracle and ledger promotion gates remain case
-      responsibilities. The current multi-flag invocation remains a
-      compatibility interface for scripts and advanced rules.
+      manifest or deterministic queue shard and expands queue rows across every
+      canonical source procedure found by static triage. A single case can use
+      `--all-entry-points`; rows with no discoverable procedure remain explicit
+      refusals without transforming the source. It runs pinned Tapenade and
+      FortAD parser/forward/reverse probes, preserves generated source and
+      complete stdout/stderr diagnostics, and writes one JSON result per entry
+      point. `--jobs`, `--shard-count`, and `--shard-index` support parallel
+      corpus sweeps. It never silently selects a dependent or active argument;
+      manifests or `--entry-point` provide that authority. The independent
+      numerical oracle and ledger promotion gates remain case responsibilities.
+      The current multi-flag invocation remains a compatibility interface for
+      scripts and advanced rules.
 
 ## End-to-end contract
 
