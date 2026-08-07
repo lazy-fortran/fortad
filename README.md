@@ -160,6 +160,18 @@ accepted too. The procedure name is equivalent to `--proc`; the names inside
 the parentheses are equivalent to `--indep`, while omitted names still use
 FortAD's inference.
 
+The common Tapenade command shapes map directly to compact FortAD commands:
+
+| Tapenade shape | FortAD equivalent |
+| --- | --- |
+| `-p source.f90` | `fortad check source.f90` |
+| `-d -root kernel source.f90` | `fortad jvp --head 'kernel(x)' source.f90` |
+| `-b -root kernel source.f90` | `fortad vjp --head 'kernel(x)' source.f90` |
+| `-head 'kernel(x)'` | `--head 'kernel(x)'` or `-head 'kernel(x)'` |
+
+For the usual single-procedure file, `fortad source.f90` is shorter still: it
+infers the active dummies, procedure name, wrapper module, and output path.
+
 With source-first compact syntax, omitted names are inferred from the selected
 procedure's dummy arguments: explicit `intent(out)` dummies are outputs and
 the other dummies are treated as differentiable inputs. The first procedure is
