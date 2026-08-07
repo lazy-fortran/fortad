@@ -514,7 +514,7 @@ contains
             if (.not. has_active_complex(primal, primal%stmts(i)%value, active)) &
                 cycle
             if (.not. safe_real_projection_expr(primal, &
-                    primal%stmts(i)%value, active)) return
+                primal%stmts(i)%value, active)) return
         end do
         yes = .true.
     end function complex_real_projection_path
@@ -581,7 +581,7 @@ contains
             if (.not. allocated(primal%exprs(idx)%args)) return
             do i = 1, size(primal%exprs(idx)%args)
                 if (.not. safe_real_projection_expr(primal, &
-                        primal%exprs(idx)%args(i), active)) then
+                    primal%exprs(idx)%args(i), active)) then
                     yes = .false.
                     return
                 end if
@@ -599,7 +599,7 @@ contains
         yes = .false.
         if (idx <= 0 .or. idx > primal%n_exprs) return
         if (primal%exprs(idx)%kind /= FAD_VAR .and. &
-                primal%exprs(idx)%kind /= FAD_INDEX) return
+            primal%exprs(idx)%kind /= FAD_INDEX) return
         di = primal%decl_index(fad_base_name(primal%exprs(idx)%text))
         if (di <= 0 .or. di > size(active)) return
         yes = active(di) .and. decl_is_complex(primal, di)
@@ -1083,7 +1083,8 @@ contains
             if (a == 1) then
                 common = arm_ssa
             else
-                if (.not. same_ssa_state(common, arm_ssa)) then
+                if (.not. select_ssa_state_compatible(primal, common, arm_ssa, &
+                    end_at)) then
                     status%ok = .false.
                     status%message = "reverse mode: select type arms must assign "// &
                         "the same variables the same number of times"
@@ -1132,6 +1133,125 @@ contains
         end do
         same = .true.
     end function same_ssa_state
+
+    logical function select_ssa_state_compatible(primal, a, b, end_at) result(ok)
+        !! A type-bound implementation may introduce a private result local
+        !! while it is inlined into one SELECT TYPE arm.  Such a local is not
+        !! part of the state after the dispatch and may therefore have a
+        !! different name in each arm.  Require exact SSA agreement for every
+        !! value used after the select; private arm-only locals are ignored.
+        type(fad_proc_t), intent(in) :: primal
+        type(ssa_map_t), intent(in) :: a, b
+        integer, intent(in) :: end_at
+        integer :: i
+
+        ok = .false.
+        if (a%n /= b%n) return
+        do i = 1, a%n
+            if (trim(a%current(i)) == trim(b%current(i)) .and. &
+                a%version(i) == b%version(i)) cycle
+            if (select_name_used_after(primal, trim(a%base(i)), end_at)) return
+        end do
+        ok = .true.
+    end function select_ssa_state_compatible
+
+    logical function select_name_used_after(primal, name, end_at) result(used)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: end_at
+        integer :: i
+
+        used = .false.
+        do i = end_at + 1, primal%n_stmts
+            if (allocated(primal%stmts(i)%target)) then
+                if (same_variable_name(fad_base_name(primal%stmts(i)%target), &
+                    name)) then
+                    used = .true.
+                    return
+                end if
+            end if
+            if (select_expr_mentions(primal, primal%stmts(i)%value, name)) then
+                used = .true.
+                return
+            end if
+            if (select_expr_mentions(primal, primal%stmts(i)%lo, name) .or. &
+                select_expr_mentions(primal, primal%stmts(i)%hi, name) .or. &
+                select_expr_mentions(primal, primal%stmts(i)%step, name)) then
+                used = .true.
+                return
+            end if
+            if (allocated(primal%stmts(i)%call_args)) then
+                if (any_call_arg_mentions(primal, primal%stmts(i)%call_args, &
+                    name)) then
+                    used = .true.
+                    return
+                end if
+            end if
+        end do
+    end function select_name_used_after
+
+    recursive logical function select_expr_mentions(primal, idx, name) &
+            result(found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        found = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind == FAD_VAR .or. &
+            primal%exprs(idx)%kind == FAD_INDEX) then
+            if (same_variable_name(fad_base_name(primal%exprs(idx)%text), name)) then
+                found = .true.
+                return
+            end if
+        end if
+        if (.not. allocated(primal%exprs(idx)%args)) return
+        do i = 1, size(primal%exprs(idx)%args)
+            if (select_expr_mentions(primal, primal%exprs(idx)%args(i), name)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function select_expr_mentions
+
+    logical function any_call_arg_mentions(primal, args, name) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: args(:)
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        found = .false.
+        do i = 1, size(args)
+            if (select_expr_mentions(primal, args(i), name)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function any_call_arg_mentions
+
+    logical function same_variable_name(a, b) result(equal)
+        character(len=*), intent(in) :: a, b
+        integer :: i
+
+        equal = len_trim(a) == len_trim(b)
+        if (.not. equal) return
+        do i = 1, len_trim(a)
+            if (lower_name_char(a(i:i)) /= lower_name_char(b(i:i))) then
+                equal = .false.
+                return
+            end if
+        end do
+    end function same_variable_name
+
+    character function lower_name_char(c)
+        character, intent(in) :: c
+
+        lower_name_char = c
+        if (c >= "A" .and. c <= "Z") then
+            lower_name_char = achar(iachar(c) + iachar("a") - iachar("A"))
+        end if
+    end function lower_name_char
 
     subroutine emit_branch_forward(primal, adjoint, ssa, first, rec, after, status)
         !! Emit one if/else, renaming each arm independently and merging.

@@ -1,10 +1,10 @@
 program test_runtime_select_type_oracle
     !! A runtime type choice must select matching primal, tangent, and adjoint
-    !! arms. The selector and its dynamic type stay passive: only `x` is an
-    !! independent. Hand gradients, central differences of the untouched
-    !! primal at two step sizes, and the adjoint identity cover three named
-    !! child types and the class-default path; source inspection would not test
-    !! runtime dispatch.
+    !! arms through an abstract deferred binding. The selector and its dynamic
+    !! type stay passive: only `x` is an independent. Hand gradients, central
+    !! differences of the untouched primal at two step sizes, and the adjoint
+    !! identity cover three named child types and the class-default path;
+    !! source inspection would not test runtime dispatch.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -13,18 +13,61 @@ program test_runtime_select_type_oracle
         "module runtime_models"//nl// &
         "    implicit none"//nl// &
         "    type, abstract :: model_t"//nl// &
+        "    contains"//nl// &
+        "        procedure(value_iface), deferred :: value"//nl// &
         "    end type model_t"//nl// &
+        "    abstract interface"//nl// &
+        "        pure function value_iface(self, x) result(y)"//nl// &
+        "            import model_t"//nl// &
+        "            class(model_t), intent(in) :: self"//nl// &
+        "            real(8), intent(in) :: x"//nl// &
+        "            real(8) :: y"//nl// &
+        "        end function value_iface"//nl// &
+        "    end interface"//nl// &
         "    type, extends(model_t) :: linear_t"//nl// &
         "        real(8) :: scale"//nl// &
+        "    contains"//nl// &
+        "        procedure :: value => linear_value"//nl// &
         "    end type linear_t"//nl// &
         "    type, extends(model_t) :: quadratic_t"//nl// &
         "        real(8) :: scale"//nl// &
+        "    contains"//nl// &
+        "        procedure :: value => quadratic_value"//nl// &
         "    end type quadratic_t"//nl// &
         "    type, extends(model_t) :: cubic_t"//nl// &
         "        real(8) :: scale"//nl// &
+        "    contains"//nl// &
+        "        procedure :: value => cubic_value"//nl// &
         "    end type cubic_t"//nl// &
         "    type, extends(model_t) :: fallback_t"//nl// &
+        "    contains"//nl// &
+        "        procedure :: value => fallback_value"//nl// &
         "    end type fallback_t"//nl// &
+        "contains"//nl// &
+        "    pure function linear_value(self, x) result(y)"//nl// &
+        "        class(linear_t), intent(in) :: self"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        real(8) :: y"//nl// &
+        "        y = self%scale*x"//nl// &
+        "    end function linear_value"//nl// &
+        "    pure function quadratic_value(self, x) result(y)"//nl// &
+        "        class(quadratic_t), intent(in) :: self"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        real(8) :: y"//nl// &
+        "        y = self%scale*x*x"//nl// &
+        "    end function quadratic_value"//nl// &
+        "    pure function cubic_value(self, x) result(y)"//nl// &
+        "        class(cubic_t), intent(in) :: self"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        real(8) :: y"//nl// &
+        "        y = self%scale*x*x*x"//nl// &
+        "    end function cubic_value"//nl// &
+        "    pure function fallback_value(self, x) result(y)"//nl// &
+        "        class(fallback_t), intent(in) :: self"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        real(8) :: y"//nl// &
+        "        y = -2.0d0*x"//nl// &
+        "    end function fallback_value"//nl// &
         "end module runtime_models"//nl// &
         "module runtime_kernel"//nl// &
         "    use runtime_models, only: model_t, linear_t, quadratic_t, cubic_t"//nl// &
@@ -36,13 +79,13 @@ program test_runtime_select_type_oracle
         "        real(8) :: y"//nl// &
         "        select type (model)"//nl// &
         "        type is (linear_t)"//nl// &
-        "            y = model%scale*x"//nl// &
+        "            y = model%value(x)"//nl// &
         "        class is (quadratic_t)"//nl// &
-        "            y = model%scale*x*x"//nl// &
+        "            y = model%value(x)"//nl// &
         "        class is (cubic_t)"//nl// &
-        "            y = model%scale*x*x*x"//nl// &
+        "            y = model%value(x)"//nl// &
         "        class default"//nl// &
-        "            y = -2.0d0*x"//nl// &
+        "            y = 0.0d0"//nl// &
         "        end select"//nl// &
         "    end function evaluate"//nl// &
         "end module runtime_kernel"//nl
@@ -103,7 +146,7 @@ program test_runtime_select_type_oracle
         "    call check(linear, 6.0d0, 3.0d0, 'linear')"//nl// &
         "    call check(quadratic, 12.0d0, 12.0d0, 'quadratic')"//nl// &
         "    call check(cubic, 24.0d0, 36.0d0, 'cubic')"//nl// &
-        "    call check(fallback, -4.0d0, -2.0d0, 'class default')"//nl// &
+        "    call check(fallback, 0.0d0, 0.0d0, 'class default')"//nl// &
         "contains"//nl// &
         "    subroutine check(model, expected_y, expected_grad, label)"//nl// &
         "        class(model_t), intent(in) :: model"//nl// &
