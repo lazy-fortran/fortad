@@ -69,16 +69,18 @@ Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
 FortFront source `main` is pinned to `c0a32743`, with documentation handoff
-`ba65e3a2`, the current documentation handoff after the merge of the procedure-name
-semantic-boundary fix after PR #3003. It carries lazy untyped function-result
+`9c528d6`, the current handoff after the typed #2974 compound-declaration
+regression merged on top of the procedure-name semantic-boundary fix after PR
+#3003. It carries lazy untyped function-result
 inference (#2980) and its independent GNU Fortran differential oracle. Its
 focused #2993, #2996, nested-binding, implicit-DIMENSION, and #2980 oracles
 are green on the GNU lane. The current GNU gate is green as well: 1,545 static
 modules, 381 build targets, 378 derivative targets, 483/483 tests, and clean
-lint. The latest procedure-name observation
-[31144062538](https://github.com/lazy-fortran/fortfront/actions/runs/31144062538)
-has a successful Ubuntu job while Windows remains in progress with the known
-portability set; the downstream multi-compiler gate is therefore still open.
+lint. The latest regression observation
+[31146242801](https://github.com/lazy-fortran/fortfront/actions/runs/31146242801)
+has a successful Ubuntu job; Windows retains the documented nine-test
+portability baseline and introduced no #2974 signature. The downstream
+multi-compiler gate is therefore still open.
 
 The compiler-path handoff is ffc `f7adff5`, which contains the typed ISO C
 pointer extraction `aab7ef9`, the rebased integer(8)/descriptor dispatch
@@ -86,8 +88,11 @@ guard, the bare-DIMENSION #2848 fix, and its one-line host export needed for
 clean linking. Clean validation is `fo clean && fo build` 442/442; the focused
 DIMENSION/Lazy-array tests pass and the gfortran differential gauntlet is
 PASS=1/XFAIL=0/FAIL=0. No XFAIL or manifest changed in this link-export
-follow-up. This is recorded for cross-repository provenance; FortAD does not
-consume ffc as a build dependency, and no ffc aggregate PASS is claimed here.
+follow-up. Transfer extraction PR #698 and the bounded #643 rank-1 deep-copy
+PR #699 are the next ffc merge-train steps; neither is counted here until its
+cold build/link observation completes. This is recorded for cross-repository
+provenance; FortAD does not consume ffc as a build dependency, and no ffc
+aggregate PASS is claimed here.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
