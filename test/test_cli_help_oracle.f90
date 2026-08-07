@@ -66,6 +66,7 @@ program test_cli_help_oracle
     call require_text(help_text, '--rule SPEC')
     call require_text(help_text, '--call-rule SPEC')
     call require_text(help_text, 'fortad PRODUCT <names>')
+    call require_text(help_text, 'fortad check [--proc NAME]')
     call require_text(help_text, 'jvp, vjp, or hvp')
     print *, 'pass cli_help'
 
