@@ -828,10 +828,17 @@ of selected child ends the fixed-path derivative contract.
         diagnostics because the IR does not track storage identity. The
         independent
         [`test_alias_boundary_oracle.f90`](test/test_alias_boundary_oracle.f90)
-        checks both JVP and VJP paths. Positive element writes are separate:
+      checks both JVP and VJP paths. Positive element writes are separate:
         [`test_element_target_oracle.f90`](test/test_element_target_oracle.f90)
         checks them against central differences. Shared-target, disjoint,
         overlapping, and component-alias differentiation remain open.
+- [x] **P7.3b global-state refusal.** Commit `cc3b722` consumes FortFront's
+      active-global reference contract and refuses reachable mutable module,
+      `SAVE`, and `COMMON` state before lowering, naming the state, kind, and
+      source line. Immutable `PARAMETER` declarations remain passive. The
+      independent [`test_global_state_oracle.f90`](test/test_global_state_oracle.f90)
+      checks both public derivative modes; derivative rules for explicit state
+      models remain outside this refusal boundary.
 - [ ] **P7.4 Procedure interfaces.** Preserve optional and keyword arguments,
       `present` branches, generic resolution by type, kind, and rank, elemental
       calls, and user-defined operators. FortAD remains a source transformer.
