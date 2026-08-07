@@ -68,6 +68,16 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
+The FortFront pin for this status is semantic code `193457a9`, with roadmap
+head `2179929e`. Its focused #2993, #2996, nested-binding, and implicit-
+DIMENSION oracles are green locally. Merge run
+[31136187566](https://github.com/lazy-fortran/fortfront/actions/runs/31136187566)
+was cancelled; the documentation merge
+[31136399036](https://github.com/lazy-fortran/fortfront/actions/runs/31136399036)
+was queued at this snapshot. The completed aggregate run
+[31134675652](https://github.com/lazy-fortran/fortfront/actions/runs/31134675652)
+is historical evidence for the `ca26bf9d` parent, not a current-head gate.
+
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
       independently checks the compiler boundary and fails on the old code.
@@ -82,8 +92,9 @@ the current integration gate is still open:
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures; the fixed-form and submodule acceptance oracles are green.
-- [ ] FortFront `main` is green on Windows. The six failures and their current
-      diagnosis are recorded under Repository state.
+- [ ] FortFront `main` is green on Windows. The six failures listed under
+      Repository state are the last-known Windows set; the run above is not
+      current-head evidence because it was cancelled.
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
@@ -544,10 +555,10 @@ does not support a general build-time advantage.
       `lfortran 0.64.0`. The generated adjoint loop vectorized in every lane.
       The small affine reduction isolates emitted loop structure from
       transcendental-library profitability. The five compiler gates passed in
-      CI run 31029227263. The [acceptance record](https://github.com/lazy-fortran/fortad-bench/blob/25f4134a86e27f038c83152a8d6f0728909ebdf0/results/p61_compiler_matrix_validation.txt)
-      contains the exact reports. The Status section governs the current-head
-      rerun: its bare `fo` GNU result is current, and the other four lanes remain
-      open.
+      historical CI run 31029227263. The [acceptance record](https://github.com/lazy-fortran/fortad-bench/blob/25f4134a86e27f038c83152a8d6f0728909ebdf0/results/p61_compiler_matrix_validation.txt)
+      contains the exact reports. It is not a current-head gate. The Status
+      section governs the current-head rerun: its bare `fo` GNU result is
+      current, and the other four lanes remain open.
 - [x] **P6.2 GPU.** Fused one-level positive reduction loops now emit adjacent
       OpenMP target and OpenACC loop directives with IR-derived data clauses.
       On TU Graz `acluster` (Tesla T4), NVIDIA HPC SDK 26.5 with CUDA 12.9
@@ -1062,6 +1073,13 @@ bug now differentiate end to end and have the FortAD record named above.
 
 Intel LLVM `ifx` is supported. Legacy `ifort` is intentionally outside the
 matrix. GNU/Flang/nvfortran/ifx/LFortran remain the five lanes.
+
+The 2026-08-07 remote toolchain check verified NVHPC 23.9 and 26.5 under
+`faepkub4:/var/tmp/ert` (85 GiB free). A driver-matched NVHPC 23.9 OpenACC
+smoke passed on the `acluster` Tesla T4 (CUDA 12.2). The `scluster` Slurm
+smoke (job 1033639) was cancelled while pending resources, without an
+allocation. These are compiler/device-availability records only; they do not
+close the FortAD optimized tangent or full multi-compiler gate.
 
 An earlier nvfortran 26.5 FortAD run compiled and linked all 406 targets. Its
 declaration smoke covered `real(dp)`, a renamed `iso_fortran_env` import, five
