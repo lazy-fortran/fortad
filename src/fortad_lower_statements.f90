@@ -210,13 +210,12 @@ contains
             s%line = n%line
             block
                 integer, allocatable :: cargs(:)
-                integer :: ci
-                allocate (cargs(size(n%arg_indices)))
-                do ci = 1, size(n%arg_indices)
-                    cargs(ci) = lower_expr(arena, n%arg_indices(ci), proc, status)
-                    if (.not. status%ok) return
-                end do
+                character(len=64), allocatable :: cnames(:)
+                call lower_call_arguments(arena, n%arg_indices, proc, cargs, &
+                    cnames, status)
+                if (.not. status%ok) return
                 s%call_args = cargs
+                s%call_arg_names = cnames
             end block
             if (same_name(n%name, "move_alloc") .and. &
                 size(n%arg_indices) == 2) then
@@ -958,6 +957,7 @@ contains
         type(fad_proc_t), intent(inout) :: proc
         type(lower_status_t), intent(inout) :: status
         integer, allocatable :: args(:)
+        character(len=64), allocatable :: arg_names(:)
         type(fad_expr_t) :: e
         integer :: i
 
@@ -1003,11 +1003,9 @@ contains
                 out = proc%add_expr(expr_binop(trim(n%operator), l, r))
             end block
             type is (call_or_subscript_node)
-            allocate (args(size(n%arg_indices)))
-            do i = 1, size(n%arg_indices)
-                args(i) = lower_expr(arena, n%arg_indices(i), proc, status)
-                if (.not. status%ok) return
-            end do
+            call lower_call_arguments(arena, n%arg_indices, proc, args, &
+                arg_names, status)
+            if (.not. status%ok) return
             if (n%base_expr_index == 0) then
                 if (is_array_name(proc, n%name)) then
                     if (has_vector_subscript(arena, n%arg_indices, args, proc)) then
@@ -1045,7 +1043,7 @@ contains
                 e%args = args
                 out = proc%add_expr(e)
             else
-                out = proc%add_expr(expr_call(n%name, args))
+                out = proc%add_expr(expr_call(n%name, args, arg_names))
             end if
         class default
             status%ok = .false.
@@ -1053,6 +1051,75 @@ contains
                 itoa(node_line(arena, idx))
         end select
     end function lower_expr
+
+    subroutine lower_call_arguments(arena, arg_indices, proc, args, names, status)
+        !! Lower actuals while retaining the formal name of keyword actuals.
+        !! FortFront represents ``f(x=1)`` as an assignment node, so lowering
+        !! only its RHS would silently turn a reordered call back into a
+        !! positional one before same-file inlining sees it.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: arg_indices(:)
+        type(fad_proc_t), intent(inout) :: proc
+        integer, allocatable, intent(out) :: args(:)
+        character(len=64), allocatable, intent(out) :: names(:)
+        type(lower_status_t), intent(inout) :: status
+        integer :: i
+        character(len=64) :: keyword
+
+        allocate (args(size(arg_indices)))
+        allocate (names(size(arg_indices)))
+        names = ""
+        do i = 1, size(arg_indices)
+            args(i) = lower_actual(arena, arg_indices(i), proc, keyword, status)
+            if (.not. status%ok) return
+            if (len_trim(keyword) > 0) names(i) = keyword
+        end do
+    end subroutine lower_call_arguments
+
+    recursive integer function lower_actual(arena, idx, proc, keyword, status) &
+            result(out)
+        !! Extract a keyword's formal name, then lower its value expression.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(inout) :: proc
+        character(len=*), intent(out) :: keyword
+        type(lower_status_t), intent(inout) :: status
+        integer :: value_idx
+
+        out = 0
+        keyword = ""
+        value_idx = idx
+        if (idx > 0) then
+            if (idx <= arena%size) then
+                if (arena%has_node_at(idx)) then
+                    select type (n => arena%entries(idx)%node)
+                        type is (assignment_node)
+                        ! Expression calls do not currently mark this AST node
+                        ! with is_keyword_argument; within an actual-argument
+                        ! list an assignment node is nevertheless unambiguously
+                        ! the Fortran keyword form.
+                        if (n%target_index <= 0 .or. &
+                            n%target_index > arena%size .or. &
+                            .not. arena%has_node_at(n%target_index)) then
+                            status%ok = .false.
+                            status%message = "keyword actual has no formal name"
+                            return
+                        end if
+                        select type (target => arena%entries(n%target_index)%node)
+                            type is (identifier_node)
+                            keyword = target%name
+                            value_idx = n%value_index
+                        class default
+                            status%ok = .false.
+                            status%message = "keyword actual needs a simple formal name"
+                            return
+                        end select
+                    end select
+                end if
+            end if
+        end if
+        out = lower_expr(arena, value_idx, proc, status)
+    end function lower_actual
 
     logical function is_section_node(arena, idx) result(found)
         !! Whether an AST node denotes an array section rather than an element.
@@ -1154,6 +1221,7 @@ contains
         type(program_unit_query_t) :: unit
         character(len=:), allocatable :: object_type, type_name, method, impl
         integer, allocatable :: args(:)
+        character(len=64), allocatable :: arg_names(:)
         integer :: receiver, i, j, binding_index
         integer :: type_matches, function_matches
         logical :: found_type, found_binding, found_function
@@ -1292,9 +1360,12 @@ contains
             receiver = lower_expr(arena, access%base_node_index, proc, status)
             if (.not. status%ok) return
             allocate (args(size(node%arg_indices) + 1))
+            allocate (arg_names(size(node%arg_indices) + 1))
             args(1) = receiver
+            arg_names(1) = ""
             do i = 1, size(node%arg_indices)
-                args(i + 1) = lower_expr(arena, node%arg_indices(i), proc, status)
+                args(i + 1) = lower_actual(arena, node%arg_indices(i), proc, &
+                    arg_names(i + 1), status)
                 if (.not. status%ok) return
             end do
         else
@@ -1302,12 +1373,14 @@ contains
             ! the receiver out of the ordinary call is essential: the
             ! implementation's first dummy is the first explicit actual.
             allocate (args(size(node%arg_indices)))
+            allocate (arg_names(size(node%arg_indices)))
             do i = 1, size(node%arg_indices)
-                args(i) = lower_expr(arena, node%arg_indices(i), proc, status)
+                args(i) = lower_actual(arena, node%arg_indices(i), proc, &
+                    arg_names(i), status)
                 if (.not. status%ok) return
             end do
         end if
-        out = proc%add_expr(expr_call(impl, args))
+        out = proc%add_expr(expr_call(impl, args, arg_names))
     end function lower_type_bound_call
 
     logical function is_type_bound_reference(arena, base_idx, proc) result(found)

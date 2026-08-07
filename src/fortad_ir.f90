@@ -65,6 +65,9 @@ module fortad_ir
         integer :: kind = 0
         character(len=:), allocatable :: text
         integer, allocatable :: args(:)
+        !! Keyword names for a procedure call, aligned with ``args``.  A
+        !! blank entry is a positional actual.
+        character(len=:), allocatable :: call_arg_names(:)
         !! Index of the array subscript base for FAD_INDEX, else 0.
         integer :: rank = 0
     end type fad_expr_t
@@ -82,6 +85,8 @@ module fortad_ir
         integer :: line = 0
         !! Actual arguments of a FAD_CALL_STMT.
         integer, allocatable :: call_args(:)
+        !! Keyword names for ``call_args``; blank entries are positional.
+        character(len=:), allocatable :: call_arg_names(:)
         !! For FAD_ALLOCATE/FAD_DEALLOCATE, the first entry is the owning
         !! object and the remaining entries are shape expressions.  The
         !! optional SOURCE= and MOLD= expressions use the fields below.
@@ -518,14 +523,16 @@ contains
         e%args(1) = a
     end function expr_unop
 
-    type(fad_expr_t) function expr_call(name, args) result(e)
+    type(fad_expr_t) function expr_call(name, args, arg_names) result(e)
         !! An intrinsic or procedure reference.
         character(len=*), intent(in) :: name
         integer, intent(in) :: args(:)
+        character(len=*), intent(in), optional :: arg_names(:)
 
         e%kind = FAD_CALL
         e%text = name
         e%args = args
+        if (present(arg_names)) e%call_arg_names = arg_names
     end function expr_call
 
     logical function fad_expr_equal(a, b) result(same)
@@ -541,6 +548,11 @@ contains
         if (size(a%args) /= size(b%args)) return
         if (size(a%args) > 0) then
             if (any(a%args /= b%args)) return
+        end if
+        if (allocated(a%call_arg_names) .neqv. allocated(b%call_arg_names)) return
+        if (allocated(a%call_arg_names)) then
+            if (size(a%call_arg_names) /= size(b%call_arg_names)) return
+            if (any(a%call_arg_names /= b%call_arg_names)) return
         end if
         same = .true.
     end function fad_expr_equal

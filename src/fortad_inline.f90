@@ -19,10 +19,10 @@ module fortad_inline
     !! Inlining happens before differentiation, so every later pass sees one
     !! flat procedure and needs no notion of calls at all.
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-                         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
-                         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_CALL_STMT, &
-                         FAD_IF, FAD_ELSE, FAD_END_IF, &
-                         FAD_INTENT_NONE, expr_var
+        FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
+        FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_CALL_STMT, &
+        FAD_IF, FAD_ELSE, FAD_END_IF, &
+        FAD_INTENT_NONE, expr_const, expr_var
     use fortad_registry, only: registry_has, call_rule_has
     implicit none
     private
@@ -104,7 +104,7 @@ contains
         end do
         status%ok = .false.
         status%message = "a call chain in this file did not settle; it is "// &
-                         "probably recursive, which has no finite inlining"
+            "probably recursive, which has no finite inlining"
     end subroutine inline_calls
 
     subroutine inline_round(target, others, n_others, tag, n_inlined, status)
@@ -121,7 +121,7 @@ contains
             if (tag > 256) then
                 status%ok = .false.
                 status%message = "a call chain in this file did not settle; "// &
-                                 "it is probably recursive"
+                    "it is probably recursive"
                 return
             end if
             if (target%stmts(i)%kind == FAD_CALL_STMT) then
@@ -178,68 +178,11 @@ contains
         integer, intent(in) :: at, tag
         type(inline_status_t), intent(inout) :: status
         type(binding_t) :: binds(MAX_BINDINGS)
-        character(len=32) :: suffix
-        integer :: n_binds, i, n_actual, a
+        integer :: n_binds
 
-        n_actual = 0
-        if (allocated(target%stmts(at)%call_args)) &
-            n_actual = size(target%stmts(at)%call_args)
-        n_binds = 0
-        if (allocated(callee%params)) then
-            ! Fewer actuals than dummies means the trailing dummies are
-            ! optional and were left out. They are bound as absent, and
-            ! `present` of them folds to false when the body is spliced.
-            if (n_actual > size(callee%params)) then
-                status%ok = .false.
-                status%message = "call to "//trim(callee%name)// &
-                                 " does not match its argument list"
-                return
-            end if
-            do i = 1, size(callee%params)
-                if (i > n_actual) then
-                    n_binds = n_binds + 1
-                    binds(n_binds)%name = trim(callee%params(i))
-                    binds(n_binds)%expr = 0
-                    binds(n_binds)%renamed = ""
-                    binds(n_binds)%absent = .true.
-                    cycle
-                end if
-                a = target%stmts(at)%call_args(i)
-                if (a <= 0 .or. a > target%n_exprs) then
-                    status%ok = .false.
-                    status%message = "call to "//trim(callee%name)// &
-                                     " has an argument fortad cannot follow"
-                    return
-                end if
-                if (target%exprs(a)%kind /= FAD_VAR) then
-                    status%ok = .false.
-                    status%message = "inlining "//trim(callee%name)// &
-                        " needs plain variables as arguments, because it may "// &
-                        "write to them"
-                    return
-                end if
-                n_binds = n_binds + 1
-                binds(n_binds)%name = trim(callee%params(i))
-                binds(n_binds)%expr = 0
-                binds(n_binds)%renamed = trim(target%exprs(a)%text)
-            end do
-        end if
-
-        write (suffix, '(a,i0,a)') "_", tag, "_"
-        do i = 1, callee%n_decls
-            if (bound(binds, n_binds, callee%decls(i)%name)) cycle
-            if (n_binds >= MAX_BINDINGS) then
-                status%ok = .false.
-                status%message = trim(callee%name)//" has more names than "// &
-                                 "inlining can rename"
-                return
-            end if
-            n_binds = n_binds + 1
-            binds(n_binds)%name = trim(callee%decls(i)%name)
-            binds(n_binds)%expr = 0
-            binds(n_binds)%renamed = trim(callee%name)//trim(suffix)// &
-                                     trim(callee%decls(i)%name)
-        end do
+        call bind_arguments(target, callee, target%stmts(at)%call_args, &
+            target%stmts(at)%call_arg_names, binds, n_binds, .true., tag, status)
+        if (.not. status%ok) return
 
         call declare_locals(target, callee, binds, n_binds)
         call splice_body(target, callee, binds, n_binds, at, status)
@@ -330,11 +273,12 @@ contains
         if (site <= 0) then
             status%ok = .false.
             status%message = "lost the call to "//trim(callee%name)// &
-                             " while inlining it"
+                " while inlining it"
             return
         end if
 
-        call bind_arguments(target, callee, site, binds, n_binds, tag, status)
+        call bind_arguments(target, callee, target%exprs(site)%args, &
+            target%exprs(site)%call_arg_names, binds, n_binds, .false., tag, status)
         if (.not. status%ok) return
         call declare_locals(target, callee, binds, n_binds)
         call splice_body(target, callee, binds, n_binds, at, status)
@@ -354,7 +298,7 @@ contains
             return
         end if
         call replace_expr(target, target%stmts(target%n_stmts)%value, site, &
-                          result_expr)
+            result_expr)
         do i = 1, target%n_stmts
             if (target%stmts(i)%value <= 0) cycle
             call replace_expr(target, target%stmts(i)%value, site, result_expr)
@@ -383,36 +327,107 @@ contains
         end do
     end function find_call
 
-    subroutine bind_arguments(target, callee, site, binds, n_binds, tag, status)
+    subroutine bind_arguments(target, callee, actuals, actual_names, binds, &
+            n_binds, require_plain, tag, status)
         !! Bind each dummy to its actual, and give every other name of the
         !! callee a fresh name so two inlinings of the same procedure cannot
         !! collide.
         type(fad_proc_t), intent(in) :: target
         type(fad_proc_t), intent(in) :: callee
-        integer, intent(in) :: site, tag
+        integer, intent(in) :: actuals(:)
+        character(len=:), allocatable, intent(in) :: actual_names(:)
         type(binding_t), intent(out) :: binds(:)
         integer, intent(out) :: n_binds
+        logical, intent(in) :: require_plain
+        integer, intent(in) :: tag
         type(inline_status_t), intent(inout) :: status
         character(len=32) :: suffix
-        integer :: i, n_actual
+        integer, allocatable :: formal_actual(:)
+        logical :: named
+        integer :: i, j, n_actual, n_formal, next_formal, formal
 
         n_binds = 0
-        n_actual = 0
-        if (allocated(target%exprs(site)%args)) n_actual = size(target%exprs(site)%args)
-        if (allocated(callee%params)) then
-            if (n_actual /= size(callee%params)) then
-                status%ok = .false.
-                status%message = "call to "//trim(callee%name)// &
-                                 " does not match its argument list"
-                return
-            end if
-            do i = 1, size(callee%params)
-                n_binds = n_binds + 1
-                binds(n_binds)%name = trim(callee%params(i))
-                binds(n_binds)%expr = target%exprs(site)%args(i)
-                binds(n_binds)%renamed = ""
-            end do
+        n_actual = size(actuals)
+        n_formal = 0
+        if (allocated(callee%params)) n_formal = size(callee%params)
+        if (n_actual > n_formal) then
+            status%ok = .false.
+            status%message = "call to "//trim(callee%name)// &
+                " does not match its argument list"
+            return
         end if
+        allocate (formal_actual(n_formal))
+        formal_actual = 0
+        next_formal = 1
+        do j = 1, n_actual
+            named = .false.
+            if (allocated(actual_names)) then
+                if (len_trim(actual_names(j)) > 0) named = .true.
+            end if
+            if (named) then
+                formal = 0
+                do i = 1, n_formal
+                    if (same_name(actual_names(j), callee%params(i))) then
+                        formal = i
+                        exit
+                    end if
+                end do
+                if (formal == 0 .or. formal_actual(formal) /= 0) then
+                    status%ok = .false.
+                    status%message = "call to "//trim(callee%name)// &
+                        " has an unknown or duplicate keyword actual"
+                    return
+                end if
+            else
+                do while (next_formal <= n_formal .and. &
+                        formal_actual(next_formal) /= 0)
+                    next_formal = next_formal + 1
+                end do
+                formal = next_formal
+                if (formal > n_formal) then
+                    status%ok = .false.
+                    status%message = "call to "//trim(callee%name)// &
+                        " does not match its argument list"
+                    return
+                end if
+                next_formal = next_formal + 1
+            end if
+            formal_actual(formal) = j
+        end do
+
+        do i = 1, n_formal
+            n_binds = n_binds + 1
+            binds(n_binds)%name = trim(callee%params(i))
+            binds(n_binds)%absent = formal_actual(i) == 0
+            if (formal_actual(i) > 0) then
+                if (require_plain) then
+                    if (actuals(formal_actual(i)) <= 0 .or. &
+                        actuals(formal_actual(i)) > target%n_exprs .or. &
+                        target%exprs(actuals(formal_actual(i)))%kind /= FAD_VAR) then
+                        status%ok = .false.
+                        status%message = "inlining "//trim(callee%name)// &
+                            " needs plain variables as arguments, because it may "// &
+                            "write to them"
+                        return
+                    end if
+                    binds(n_binds)%expr = 0
+                    binds(n_binds)%renamed = &
+                        trim(target%exprs(actuals(formal_actual(i)))%text)
+                else
+                    binds(n_binds)%expr = actuals(formal_actual(i))
+                    binds(n_binds)%renamed = ""
+                end if
+            else
+                if (.not. dummy_optional(callee, callee%params(i))) then
+                    status%ok = .false.
+                    status%message = "call to "//trim(callee%name)// &
+                        " omits required argument '"//trim(callee%params(i))//"'"
+                    return
+                end if
+                binds(n_binds)%expr = 0
+                binds(n_binds)%renamed = ""
+            end if
+        end do
 
         write (suffix, '(a,i0,a)') "_", tag, "_"
         do i = 1, callee%n_decls
@@ -420,16 +435,26 @@ contains
             if (n_binds >= MAX_BINDINGS) then
                 status%ok = .false.
                 status%message = trim(callee%name)//" has more names than "// &
-                                 "inlining can rename"
+                    "inlining can rename"
                 return
             end if
             n_binds = n_binds + 1
             binds(n_binds)%name = trim(callee%decls(i)%name)
             binds(n_binds)%expr = 0
             binds(n_binds)%renamed = trim(callee%name)//trim(suffix)// &
-                                     trim(callee%decls(i)%name)
+                trim(callee%decls(i)%name)
         end do
     end subroutine bind_arguments
+
+    logical function dummy_optional(callee, name) result(yes)
+        type(fad_proc_t), intent(in) :: callee
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        yes = .false.
+        i = callee%decl_index(name)
+        if (i > 0) yes = callee%decls(i)%is_optional
+    end function dummy_optional
 
     logical function bound(binds, n_binds, name) result(yes)
         type(binding_t), intent(in) :: binds(:)
@@ -488,6 +513,7 @@ contains
         type(inline_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
         integer :: i, where_at
+        logical :: guard_known, guard_present
 
         where_at = at
         i = 0
@@ -508,13 +534,20 @@ contains
                 s%kind = FAD_ASSIGN
                 s%target = renamed_target(binds, n_binds, callee%stmts(i)%target)
                 s%value = import(target, callee, callee%stmts(i)%value, binds, &
-                                 n_binds)
+                    n_binds)
                 s%line = callee%stmts(i)%line
             case (FAD_IF, FAD_ELSE, FAD_END_IF)
                 s = callee%stmts(i)
-                if (callee%stmts(i)%kind == FAD_IF) &
-                    s%value = import(target, callee, callee%stmts(i)%value, &
-                                     binds, n_binds)
+                if (callee%stmts(i)%kind == FAD_IF) then
+                    call present_guard(callee, callee%stmts(i)%value, binds, &
+                        n_binds, guard_known, guard_present)
+                    if (guard_known .and. guard_present) then
+                        s%value = target%add_expr(expr_const(".true."))
+                    else
+                        s%value = import(target, callee, callee%stmts(i)%value, &
+                            binds, n_binds)
+                    end if
+                end if
             case (FAD_DO, FAD_END_DO)
                 s = callee%stmts(i)
                 if (callee%stmts(i)%kind == FAD_DO) then
@@ -523,12 +556,12 @@ contains
                     s%hi = import(target, callee, callee%stmts(i)%hi, binds, n_binds)
                     if (callee%stmts(i)%step > 0) &
                         s%step = import(target, callee, callee%stmts(i)%step, &
-                                        binds, n_binds)
+                        binds, n_binds)
                 end if
             case default
                 status%ok = .false.
                 status%message = "inlining "//trim(callee%name)// &
-                                 " would need a statement form it does not have"
+                    " would need a statement form it does not have"
                 return
             end select
             call insert_stmt(target, where_at, s)
@@ -542,23 +575,42 @@ contains
         integer, intent(in) :: cond
         type(binding_t), intent(in) :: binds(:)
         integer, intent(in) :: n_binds
+        logical :: known, is_present
+
+        call present_guard(callee, cond, binds, n_binds, known, is_present)
+        yes = known .and. .not. is_present
+    end function guards_absent
+
+    subroutine present_guard(callee, cond, binds, n_binds, known, is_present)
+        !! Recognise ``present(dummy)`` and use the call-site binding to fold
+        !! it.  A supplied expression is present even when it is not a valid
+        !! argument to PRESENT after substitution (for example ``4.0d0``).
+        type(fad_proc_t), intent(in) :: callee
+        integer, intent(in) :: cond, n_binds
+        type(binding_t), intent(in) :: binds(:)
+        logical, intent(out) :: known, is_present
         integer :: arg, k
 
-        yes = .false.
-        if (cond <= 0 .or. cond > callee%n_exprs) return
+        known = .false.
+        is_present = .false.
+        if (cond <= 0) return
+        if (cond > callee%n_exprs) return
         if (callee%exprs(cond)%kind /= FAD_CALL) return
         if (.not. same_name(callee%exprs(cond)%text, "present")) return
         if (.not. allocated(callee%exprs(cond)%args)) return
         if (size(callee%exprs(cond)%args) /= 1) return
         arg = callee%exprs(cond)%args(1)
+        if (arg <= 0) return
+        if (arg > callee%n_exprs) return
         if (callee%exprs(arg)%kind /= FAD_VAR) return
         do k = 1, n_binds
             if (same_name(binds(k)%name, callee%exprs(arg)%text)) then
-                yes = binds(k)%absent
+                known = .true.
+                is_present = .not. binds(k)%absent
                 return
             end if
         end do
-    end function guards_absent
+    end subroutine present_guard
 
     integer function end_of_if(callee, at) result(out)
         !! The index of the FAD_END_IF closing the FAD_IF at `at`.
@@ -602,7 +654,7 @@ contains
         base = trim(text(:paren - 1))
         subs = text(paren + 1:len_trim(text) - 1)
         out = renamed_of(binds, n_binds, base)//"("// &
-              rename_in_text(binds, n_binds, subs)//")"
+            rename_in_text(binds, n_binds, subs)//")"
     end function renamed_target
 
     function rename_in_text(binds, n_binds, text) result(out)
@@ -648,7 +700,7 @@ contains
         character, intent(in) :: c
 
         yes = (c >= "a" .and. c <= "z") .or. (c >= "A" .and. c <= "Z") .or. &
-              (c >= "0" .and. c <= "9") .or. c == "_"
+            (c >= "0" .and. c <= "9") .or. c == "_"
     end function name_char
 
     function renamed_of(binds, n_binds, name) result(out)
@@ -684,7 +736,7 @@ contains
     end function renamed_of
 
     recursive integer function import(target, callee, idx, binds, n_binds) &
-        result(out)
+            result(out)
         !! Rebuild one of the callee's expressions in the caller's arena.
         type(fad_proc_t), intent(inout) :: target
         type(fad_proc_t), intent(in) :: callee
@@ -712,7 +764,7 @@ contains
                     integer :: percent
                     percent = index(trim(callee%exprs(idx)%text), "%")
                     if (percent > 1 .and. same_name(binds(k)%name, &
-                            trim(callee%exprs(idx)%text(:percent - 1)))) then
+                        trim(callee%exprs(idx)%text(:percent - 1)))) then
                         e%kind = FAD_VAR
                         if (binds(k)%expr > 0) then
                             if (target%exprs(binds(k)%expr)%kind == FAD_VAR) then
@@ -758,7 +810,7 @@ contains
             allocate (e%args(size(callee%exprs(idx)%args)))
             do i = 1, size(callee%exprs(idx)%args)
                 e%args(i) = import(target, callee, callee%exprs(idx)%args(i), &
-                                   binds, n_binds)
+                    binds, n_binds)
             end do
         end if
         out = target%add_expr(e)
