@@ -68,14 +68,21 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront `main` is pinned to `f46a005`, the merge of PR #3003, which fixes
-lazy untyped function-result inference (#2980) and carries its independent
-GNU Fortran differential oracle. Its focused #2993, #2996, nested-binding,
-implicit-DIMENSION, and #2980 oracles are green on the GNU lane. The current
-GNU gate is green as well: 1,545 static modules, 381 build targets, 378
-derivative targets, 483/483 tests, and clean lint. The Windows lane remains
-open and must be rerun against this pin before the downstream multi-compiler
-gate is called green.
+FortFront `main` is pinned to `c0a32743`, the merge of the procedure-name
+semantic-boundary fix after PR #3003. It carries lazy untyped function-result
+inference (#2980) and its independent GNU Fortran differential oracle. Its
+focused #2993, #2996, nested-binding, implicit-DIMENSION, and #2980 oracles
+are green on the GNU lane. The current GNU gate is green as well: 1,545 static
+modules, 381 build targets, 378 derivative targets, 483/483 tests, and clean
+lint. The latest procedure-name observation
+[31144062538](https://github.com/lazy-fortran/fortfront/actions/runs/31144062538)
+has a successful Ubuntu job while Windows remains in progress with the known
+portability set; the downstream multi-compiler gate is therefore still open.
+
+The compiler-path handoff is ffc `7dc6059`, which contains the typed ISO C
+pointer extraction `aab7ef9` and the rebased integer(8)/descriptor dispatch
+guard. This is recorded for cross-repository provenance; FortAD does not
+consume ffc as a build dependency, and no ffc aggregate PASS is claimed here.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
@@ -91,12 +98,15 @@ gate is called green.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures; the fixed-form and submodule acceptance oracles are green.
-- [ ] FortFront `main` is green on Windows. The latest observed Windows
-      evidence before pinning `f46a005` is run
+- [ ] FortFront `main` is green on Windows. The latest procedure-name
+      observation is run
+      [31144062538](https://github.com/lazy-fortran/fortfront/actions/runs/31144062538),
+      whose Ubuntu job passed while Windows remains in progress. The prior
+      concrete Windows failure set is run
       [31138641474](https://github.com/lazy-fortran/fortfront/actions/runs/31138641474),
       whose Ubuntu job passed but whose Windows job failed the ten concrete
       executables recorded under Repository state. Rerun the same shard on
-      `f46a005`; do not mask any of those failures with XFAILs.
+      `c0a32743`; do not mask any of those failures with XFAILs.
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
@@ -212,12 +222,13 @@ failure signature is ten concrete executables from run 31138641474:
 `test_reject_placement_01_diagnostics.exe`,
 `test_reject_value_scope_01_diagnostics.exe`, `test_all_examples_slow.exe`,
 and `test_elemental_validation.exe`. These are a rerun gate against
-`f46a005`, not an authorization to weaken expected failures; the older
+`c0a32743`, not an authorization to weaken expected failures; the older
 six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `f46a005` (the merged #2980 fix), while fpm caches
+`fo` must consume FortFront `c0a32743` (the merged procedure-name and #2980
+fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
 and `build/cache.toml` before reinstalling `fo`, or the old revision will be
 reused. Record the exact FortFront pin in every downstream gate so a warm
