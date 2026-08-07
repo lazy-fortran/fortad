@@ -316,6 +316,8 @@ contains
 
     logical function has_fixed_source_component(primal, stmt_index, active) result(supported)
         !! One component acquisition from a declared concrete SOURCE object.
+        !! The component classification is a FortFront storage fact carried by
+        !! the allocation statement, including array-element components.
         type(fad_proc_t), intent(in) :: primal
         integer, intent(in) :: stmt_index
         logical, intent(in) :: active(:)
@@ -324,9 +326,9 @@ contains
 
         supported = .false.
         if (stmt_index <= 0 .or. stmt_index > primal%n_stmts) return
+        if (.not. primal%stmts(stmt_index)%allocation_target_polymorphic) return
         if (.not. allocated(primal%stmts(stmt_index)%allocation_args)) return
         target_text = emit_expr(primal, primal%stmts(stmt_index)%allocation_args(1))
-        if (index(target_text, "%") == 0) return
         holder_di = primal%decl_index(fad_base_name(target_text))
         if (holder_di <= 0) return
         if (primal%decls(holder_di)%is_polymorphic) return

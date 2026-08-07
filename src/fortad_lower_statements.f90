@@ -562,6 +562,9 @@ contains
                     call refuse_allocation(node%line, "non-allocatable target", status)
                     return
                 end if
+                ! query_storage resolves both a component and a component of
+                ! an array element.  Keep that frontend fact in the IR; later
+                ! passes must not rediscover it from rendered source text.
                 s%allocation_target_polymorphic = .true.
                 s%allocation_target_unlimited_polymorphic = &
                     component_storage%is_unlimited_polymorphic

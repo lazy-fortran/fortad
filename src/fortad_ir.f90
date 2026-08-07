@@ -190,7 +190,8 @@ contains
         !! (for example ``state%position%x``).  Activity and SSA bookkeeping
         !! still need the declaration which owns that storage, namely
         !! ``state``.  This helper also handles ``a(i)`` and
-        !! ``state%values(i)`` without attempting to parse Fortran generally.
+        !! ``state%values(i)`` and ``state(i)%value`` without attempting to
+        !! parse Fortran generally.
         character(len=*), intent(in) :: raw
         character(len=:), allocatable :: base
         integer :: cut, pos
@@ -225,6 +226,15 @@ contains
         percent = index(raw, "%")
         open = index(raw, "(")
         if (percent > 0) then
+            ! An array element can be the object that owns a component, as in
+            ! ``holders(2)%payload``.  The subscript belongs before the
+            ! derivative suffix: ``holders_d(2)%payload``.  The older branch
+            ! below handles a subscript on the component itself, such as
+            ! ``state%values(2)``.
+            if (open > 0 .and. open < percent) then
+                name = trim(raw(:open - 1))//trim(suffix)//raw(open:)
+                return
+            end if
             if (open > 0) then
                 name = trim(raw(:percent - 1))//trim(suffix)// &
                     raw(percent:open - 1)
