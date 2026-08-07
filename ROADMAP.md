@@ -68,7 +68,7 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront `main` is `a06d13d4` (the semantic fix is `dd4635fd`). Its focused #2993, #2996, nested-binding,
+FortFront `main` is `54bec57d` (the semantic fix is `dd4635fd`). Its focused #2993, #2996, nested-binding,
 and implicit-DIMENSION oracles are green locally. The current GNU gate is
 green as well: 1,545 static modules, 381 build targets, 378 derivative
 targets, 483/483 tests, and clean lint. The Windows lane remains open.
