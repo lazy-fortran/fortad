@@ -656,14 +656,19 @@ does not support a general build-time advantage.
       [`test_cli_tapenade_compat_oracle.f90`](test/test_cli_tapenade_compat_oracle.f90)
       checks generated-file naming, independent compilation, central finite
       differences, and the reverse adjoint value.
-- [ ] **P6.5 Automated source workflow.** Add a manifest-aware command that
-      discovers procedures, runs the appropriate forward/reverse probes, and
-      writes generated source, diagnostics, and a machine-readable result
-      record. The command must stop at named unsupported constructs and never
-      silently choose a dependent or active argument. It should reuse the
-      P6.4c inference policy, emit a short summary by default, and reserve
-      full option dumps for `--verbose`. The current multi-flag invocation
-      remains a compatibility interface for scripts and advanced rules.
+- [x] **P6.5 Automated source workflow.** The companion
+      `fortad-bench/scripts/probe_tapenade_fortad.py` command accepts a case
+      manifest or deterministic queue shard, discovers a root only when static
+      triage finds one unambiguous source procedure, and otherwise records an
+      explicit ambiguity without transforming the source. It runs pinned
+      Tapenade and FortAD parser/forward/reverse probes, preserves generated
+      source and complete stdout/stderr diagnostics, and writes one JSON
+      result per case. `--jobs`, `--shard-count`, and `--shard-index` support
+      parallel corpus sweeps. It never silently selects a dependent or active
+      argument; manifests or `--entry-point` provide that authority. The
+      independent numerical oracle and ledger promotion gates remain case
+      responsibilities. The current multi-flag invocation remains a
+      compatibility interface for scripts and advanced rules.
 
 ## End-to-end contract
 
