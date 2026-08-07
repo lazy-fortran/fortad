@@ -652,7 +652,9 @@ does not support a general build-time advantage.
       `-multi` directly. Legacy subroutines without `INTENT` use bounded
       write-before-read inference for a unique output; ambiguous outputs remain
       explicit refusals. `-ext` is accepted as a migration spelling but does
-      not pretend to consume Tapenade's external-summary format. The compiled
+      not pretend to consume Tapenade's external-summary format. Routine
+      `-context`, `-fixinterface`, and `-standalonediff` switches are accepted
+      because their FortAD equivalents are automatic. The compiled
       [`test_cli_tapenade_compat_oracle.f90`](test/test_cli_tapenade_compat_oracle.f90)
       checks generated-file naming, independent compilation, central finite
       differences, and the reverse adjoint value.
