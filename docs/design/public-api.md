@@ -267,7 +267,7 @@ values, so an existing positional input path named `forward`, `reverse`, or
 operation. It parses the file and re-emits its default procedure, or the one
 selected by `--proc`, and accepts `--output`. Derivative-only options are
 rejected. Success means the FortAD parser/normalizer round-trip completed for
-that procedure; it is not a claim that a Fortran compiler accepts the whole
+that procedure. It is not a claim that a Fortran compiler accepts the whole
 file or that FortAD can differentiate it.
 
 | Option | Scope | Meaning |

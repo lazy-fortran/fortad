@@ -165,7 +165,7 @@ fortad --indep NAMES [OPTIONS] FILE
 
 `check` parses and re-emits the default procedure without differentiating it.
 Use `--proc` to select another procedure and `--output` to retain the normalized
-Fortran; otherwise it writes to standard output. A successful check establishes
+Fortran. Otherwise it writes to standard output. A successful check establishes
 FortAD round-trip support for that procedure, not whole-file compiler
 conformance or derivative support.
 
