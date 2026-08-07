@@ -13,12 +13,14 @@ program fortad_cli
     use fortad, only: fad_add_rule
     use fortad, only: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, &
         fad_result_t, fad_version
-    use fortad_ir, only: fad_proc_t, FAD_INTENT_OUT
+    use fortad_ir, only: fad_proc_t, fad_base_name, FAD_ASSIGN, FAD_CALL_STMT, &
+        FAD_INDEX, FAD_INTENT_OUT, FAD_VAR
     use fortad_lower, only: lower_source, lower_status_t
     use fortfront, only: is_fixed_form_file, normalize_fixed_form_source_text
     implicit none
 
     character(len=:), allocatable :: input_path, output_path, indep_list, dep_name
+    character(len=:), allocatable :: output_directory, output_stem
     character(len=:), allocatable :: from_name
     character(len=:), allocatable :: directions, proc_name, source, mode
     character(len=:), allocatable :: module_name
@@ -27,15 +29,30 @@ program fortad_cli
     character(len=32), allocatable :: independents(:)
     type(fad_result_t) :: res
     logical :: roundtrip_only, with_primal, verbose, all_products
+    logical :: tapenade_compat, tapenade_multi
     logical :: source_first_inference
     integer :: unit, stat
 
-    call parse_arguments(input_path, output_path, indep_list, directions, &
+    call parse_arguments(input_path, output_path, output_directory, output_stem, &
+        indep_list, directions, &
         proc_name, mode, module_name, roundtrip_only, &
         with_primal, dep_name, from_name, verbose, all_products, &
-        source_first_inference, stat)
+        source_first_inference, tapenade_compat, tapenade_multi, stat)
     if (stat /= 0) then
         call usage()
+        stop 2, quiet=.true.
+    end if
+
+    call finalize_tapenade_output(input_path, mode, output_path, output_directory, &
+        output_stem, tapenade_compat, stat)
+    if (stat /= 0) then
+        write (error_unit_or_output(), '(a)') &
+            "fortad: invalid Tapenade-compatible output specification"
+        stop 2, quiet=.true.
+    end if
+    if (tapenade_multi .and. mode == "reverse") then
+        write (error_unit_or_output(), '(a)') &
+            "fortad: Tapenade -multi is supported for forward mode only"
         stop 2, quiet=.true.
     end if
 
@@ -62,12 +79,22 @@ program fortad_cli
         source_first_inference)) then
         explicit_indep = indep_list
         call infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
-            output_path, module_name, indep_list, inference_message, verbose, stat)
+            output_path, module_name, indep_list, inference_message, verbose, stat, &
+            legacy_compat=tapenade_compat)
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
             stop 2, quiet=.true.
         end if
         if (len_trim(explicit_indep) > 0) indep_list = explicit_indep
+    end if
+
+    if (tapenade_compat .and. mode == "reverse" .and. len_trim(dep_name) == 0) then
+        call infer_tapenade_dependent(source, from_name, dep_name, stat)
+        if (stat /= 0) then
+            write (error_unit_or_output(), '(a)') &
+                "fortad: could not infer Tapenade dependent; use --dep NAME"
+            stop 2, quiet=.true.
+        end if
     end if
 
     if (roundtrip_only) then
@@ -336,12 +363,14 @@ contains
             module_name=module_name, from=from_name)
     end function run_hessian
 
-    subroutine parse_arguments(input_path, output_path, indep_list, directions, &
+    subroutine parse_arguments(input_path, output_path, output_directory, output_stem, &
+            indep_list, directions, &
             proc_name, mode, module_name, roundtrip_only, &
             with_primal, dep_name, from_name, verbose, all_products, &
-            source_first_inference, stat)
+            source_first_inference, tapenade_compat, tapenade_multi, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
+        character(len=:), allocatable, intent(out) :: output_directory, output_stem
         character(len=:), allocatable, intent(out) :: indep_list, directions
         character(len=:), allocatable, intent(out) :: proc_name, mode
         character(len=:), allocatable, intent(out) :: module_name
@@ -349,6 +378,7 @@ contains
         character(len=:), allocatable, intent(out) :: dep_name
         character(len=:), allocatable, intent(out) :: from_name
         logical, intent(out) :: verbose, all_products, source_first_inference
+        logical, intent(out) :: tapenade_compat, tapenade_multi
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
@@ -357,6 +387,8 @@ contains
 
         input_path = ""
         output_path = ""
+        output_directory = ""
+        output_stem = ""
         indep_list = ""
         directions = ""
         proc_name = ""
@@ -369,6 +401,8 @@ contains
         verbose = .false.
         all_products = .false.
         source_first_inference = .false.
+        tapenade_compat = .false.
+        tapenade_multi = .false.
         stat = 0
         check_syntax = .false.
         compact_syntax = .false.
@@ -482,6 +516,41 @@ contains
         do while (i <= n)
             call get_command_argument(i, arg, length)
             select case (trim(arg(1:length)))
+            case ("-p")
+                ! Tapenade parser mode: round-trip the selected procedure.
+                tapenade_compat = .true.
+                roundtrip_only = .true.
+                mode = "parser"
+            case ("-b")
+                ! Tapenade reverse mode.
+                tapenade_compat = .true.
+                mode = "reverse"
+                source_first_inference = .true.
+            case ("-d")
+                ! Tapenade uses bare -d for forward mode.  FortAD's native
+                ! vector spelling is --directions NAME; retain it when the
+                ! following argument is an explicit non-file value.
+                tapenade_compat = .true.
+                source_first_inference = .true.
+                if (i < n) then
+                    call get_command_argument(i + 1, arg, length)
+                    if (length > 0) then
+                        if (arg(1:1) /= "-") then
+                            if (.not. existing_file(arg(1:length))) then
+                                directions = trim(arg(1:length))
+                                i = i + 1
+                            else
+                                mode = "forward"
+                            end if
+                        else
+                            mode = "forward"
+                        end if
+                    else
+                        mode = "forward"
+                    end if
+                else
+                    mode = "forward"
+                end if
             case ("--indep", "-i")
                 if ((compact_syntax .and. .not. bare_source_syntax) .or. &
                     check_syntax) then
@@ -495,7 +564,7 @@ contains
                 end if
                 call get_command_argument(i, arg, length)
                 indep_list = trim(arg(1:length))
-            case ("--directions", "-d")
+            case ("--directions")
                 if (check_syntax) then
                     stat = 1
                     return
@@ -519,7 +588,19 @@ contains
                 end if
                 call get_command_argument(i, arg, length)
                 proc_name = trim(arg(1:length))
-            case ("-o", "--output")
+            case ("-o")
+                if (all_products) then
+                    stat = 1
+                    return
+                end if
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, arg, length)
+                output_stem = trim(arg(1:length))
+            case ("--output")
                 if (all_products) then
                     stat = 1
                     return
@@ -531,6 +612,41 @@ contains
                 end if
                 call get_command_argument(i, arg, length)
                 output_path = trim(arg(1:length))
+            case ("-O")
+                tapenade_compat = .true.
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, arg, length)
+                output_directory = trim(arg(1:length))
+            case ("-root", "--root")
+                tapenade_compat = .true.
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, length=length)
+                if (allocated(from_name)) deallocate (from_name)
+                allocate (character(len=length) :: from_name)
+                call get_command_argument(i, from_name)
+                source_first_inference = .true.
+            case ("-ext")
+                ! Accept Tapenade's external-summary option for migration.
+                ! FortAD derivative rules remain explicit via --rule or
+                ! --call-rule; this option only avoids a parser-level failure.
+                tapenade_compat = .true.
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+            case ("-multi")
+                tapenade_compat = .true.
+                tapenade_multi = .true.
+                if (len_trim(directions) == 0) directions = "nd"
             case ("-m", "--mode")
                 if ((compact_syntax .and. .not. bare_source_syntax) .or. &
                     check_syntax) then
@@ -697,10 +813,68 @@ contains
             i = i + 1
         end do
 
+        if (.not. tapenade_compat .and. len_trim(output_path) == 0 .and. &
+            len_trim(output_stem) > 0) output_path = output_stem
         if (len(input_path) == 0) stat = 1
         if (.not. roundtrip_only .and. len(indep_list) == 0 .and. &
-            .not. (compact_syntax .and. source_first_syntax)) stat = 1
+            .not. ((compact_syntax .and. source_first_syntax) .or. &
+            (tapenade_compat .and. source_first_inference))) stat = 1
     end subroutine parse_arguments
+
+    subroutine finalize_tapenade_output(input_path, mode, output_path, &
+            output_directory, output_stem, tapenade_compat, stat)
+        !! Map Tapenade's `-O DIR -o STEM` naming to a free-form output file.
+        character(len=*), intent(in) :: input_path, mode
+        character(len=:), allocatable, intent(inout) :: output_path
+        character(len=:), allocatable, intent(in) :: output_directory, output_stem
+        logical, intent(in) :: tapenade_compat
+        integer, intent(out) :: stat
+        character(len=:), allocatable :: stem, basename, suffix
+        integer :: separator, dot
+
+        stat = 0
+        if (.not. tapenade_compat .or. len_trim(output_path) > 0) return
+
+        if (len_trim(output_stem) > 0) then
+            stem = trim(output_stem)
+        else
+            separator = max(scan(input_path, "/", back=.true.), &
+                scan(input_path, achar(92), back=.true.))
+            dot = scan(input_path, ".", back=.true.)
+            if (dot <= separator) dot = len_trim(input_path) + 1
+            if (dot > separator + 1) then
+                stem = input_path(separator + 1:dot - 1)
+            else
+                stat = 1
+                return
+            end if
+        end if
+
+        separator = max(scan(stem, "/", back=.true.), &
+            scan(stem, achar(92), back=.true.))
+        dot = scan(stem, ".", back=.true.)
+        if (dot > separator) stem = stem(:dot - 1)
+        select case (trim(mode))
+        case ("parser")
+            suffix = "p"
+        case ("reverse")
+            suffix = "b"
+        case default
+            suffix = "d"
+        end select
+
+        if (len_trim(output_directory) > 0) then
+            if (separator > 0) then
+                basename = stem(separator + 1:)
+            else
+                basename = stem
+            end if
+            output_path = trim(output_directory)//"/"//trim(basename)//"_"// &
+                trim(suffix)//".f90"
+        else
+            output_path = trim(stem)//"_"//trim(suffix)//".f90"
+        end if
+    end subroutine finalize_tapenade_output
 
     subroutine parse_head_spec(spec, from_name, indep_list, stat)
         !! Parse Tapenade's `-head name(arg1 arg2)` shorthand.
@@ -759,7 +933,7 @@ contains
     end subroutine parse_head_spec
 
     subroutine infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
-            output_path, module_name, indep_list, message, verbose, stat)
+            output_path, module_name, indep_list, message, verbose, stat, legacy_compat)
         !! Infer the common CLI arguments from the selected primal.
         !!
         !! The library already lowers a source before differentiation, so the
@@ -773,13 +947,17 @@ contains
         character(len=:), allocatable, intent(out) :: indep_list, message
         logical, intent(in) :: verbose
         integer, intent(out) :: stat
+        logical, intent(in), optional :: legacy_compat
         type(fad_proc_t) :: primal
         type(lower_status_t) :: lower_status
         character(len=:), allocatable :: product, generated_name
+        logical :: use_legacy_compat
 
         stat = 0
         indep_list = ""
         message = ""
+        use_legacy_compat = .false.
+        if (present(legacy_compat)) use_legacy_compat = legacy_compat
         if (len_trim(from_name) > 0) then
             call lower_source(source, primal, lower_status, trim(from_name))
         else
@@ -794,7 +972,8 @@ contains
         ! Make the selected default visible to the later transformation call.
         ! This is equivalent to lower_source's first-procedure default.
         if (len_trim(from_name) == 0) from_name = primal%name
-        call infer_independent_names(primal, indep_list, stat)
+        call infer_independent_names(primal, indep_list, stat, &
+            legacy_outputs=use_legacy_compat)
         if (stat /= 0) then
             message = "could not infer independent variables for "//trim(primal%name)// &
                 "; use the explicit NAMES argument or --indep NAMES"
@@ -831,7 +1010,7 @@ contains
         end if
     end subroutine infer_cli_defaults
 
-    subroutine infer_independent_names(primal, indep_list, stat)
+    subroutine infer_independent_names(primal, indep_list, stat, legacy_outputs)
         !! Select dummy arguments that can carry an incoming derivative.
         !!
         !! An absent INTENT is treated as INOUT, which is the useful default
@@ -840,11 +1019,15 @@ contains
         type(fad_proc_t), intent(in) :: primal
         character(len=:), allocatable, intent(out) :: indep_list
         integer, intent(out) :: stat
+        logical, intent(in), optional :: legacy_outputs
         integer :: i, decl_index
         character(len=:), allocatable :: name
+        logical :: use_legacy_outputs
 
         indep_list = ""
         stat = 0
+        use_legacy_outputs = .false.
+        if (present(legacy_outputs)) use_legacy_outputs = legacy_outputs
         if (.not. allocated(primal%params)) then
             stat = 1
             return
@@ -856,6 +1039,9 @@ contains
             if (decl_index == 0) cycle
             if (primal%decls(decl_index)%is_result) cycle
             if (primal%decls(decl_index)%intent == FAD_INTENT_OUT) cycle
+            if (use_legacy_outputs) then
+                if (legacy_output_candidate(primal, name)) cycle
+            end if
             if (len_trim(indep_list) == 0) then
                 indep_list = trim(name)
             else
@@ -864,6 +1050,111 @@ contains
         end do
         if (len_trim(indep_list) == 0) stat = 1
     end subroutine infer_independent_names
+
+    subroutine infer_tapenade_dependent(source, from_name, dependent, stat)
+        !! Infer a legacy subroutine's output from its first write.
+        character(len=*), intent(in) :: source
+        character(len=*), intent(in) :: from_name
+        character(len=:), allocatable, intent(out) :: dependent
+        integer, intent(out) :: stat
+        type(fad_proc_t) :: primal
+        type(lower_status_t) :: lower_status
+        integer :: i, n_outputs
+        character(len=:), allocatable :: name
+
+        dependent = ""
+        stat = 0
+        if (len_trim(from_name) > 0) then
+            call lower_source(source, primal, lower_status, trim(from_name))
+        else
+            call lower_source(source, primal, lower_status)
+        end if
+        if (.not. lower_status%ok) then
+            stat = 1
+            return
+        end if
+        if (primal%is_function) then
+            dependent = primal%result_name
+            return
+        end if
+        n_outputs = 0
+        if (.not. allocated(primal%params)) then
+            stat = 1
+            return
+        end if
+        do i = 1, size(primal%params)
+            name = dummy_name(primal%params(i))
+            if (len_trim(name) == 0) cycle
+            if (legacy_output_candidate(primal, name)) then
+                n_outputs = n_outputs + 1
+                dependent = name
+            end if
+        end do
+        if (n_outputs /= 1) then
+            dependent = ""
+            stat = 1
+        end if
+    end subroutine infer_tapenade_dependent
+
+    logical function legacy_output_candidate(primal, name) result(is_output)
+        !! Identify a legacy dummy written before it is read.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: name
+        logical :: written
+        integer :: i, j
+
+        is_output = .false.
+        written = .false.
+        do i = 1, primal%n_stmts
+            select case (primal%stmts(i)%kind)
+            case (FAD_ASSIGN)
+                if (.not. written) then
+                    if (expression_mentions(primal, primal%stmts(i)%value, name)) return
+                end if
+                if (allocated(primal%stmts(i)%target)) then
+                    if (trim(fad_base_name(primal%stmts(i)%target)) == trim(name)) then
+                        written = .true.
+                    end if
+                end if
+            case (FAD_CALL_STMT)
+                if (.not. written) then
+                    if (allocated(primal%stmts(i)%call_args)) then
+                        do j = 1, size(primal%stmts(i)%call_args)
+                            if (expression_mentions(primal, &
+                                primal%stmts(i)%call_args(j), name)) return
+                        end do
+                    end if
+                end if
+            end select
+        end do
+        is_output = written
+    end function legacy_output_candidate
+
+    recursive logical function expression_mentions(primal, index, name) result(found)
+        !! Return whether an IR expression mentions NAME as a variable.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: index
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        found = .false.
+        if (index < 1) return
+        if (index > primal%n_exprs) return
+        select case (primal%exprs(index)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            if (trim(fad_base_name(primal%exprs(index)%text)) == trim(name)) then
+                found = .true.
+                return
+            end if
+        end select
+        if (.not. allocated(primal%exprs(index)%args)) return
+        do i = 1, size(primal%exprs(index)%args)
+            if (expression_mentions(primal, primal%exprs(index)%args(i), name)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function expression_mentions
 
     function dummy_name(parameter) result(name)
         !! Return the object name from a procedure dummy specification.
@@ -947,12 +1238,13 @@ contains
             "or hessian"
         write (*, '(a)') "      --module NAME     wrap the result in a module, "// &
             "for a checked interface"
-        write (*, '(a)') "  -d, --directions nd   vector mode: name of the "// &
+        write (*, '(a)') "      --directions nd   vector mode: name of the "// &
             "direction-count argument"
         write (*, '(a)') "      --name f_jvp      name of the generated procedure"
         write (*, '(a)') "      --proc NAME       target procedure in the input"
         write (*, '(a)') "      --head SPEC       Tapenade form: NAME(arg1 arg2)"
-        write (*, '(a)') "  -o, --output path     write here instead of stdout"
+        write (*, '(a)') "  -o STEM               Tapenade output basename; adds _p/_d/_b.f90"
+        write (*, '(a)') "      --output PATH     write here instead of stdout"
         write (*, '(a)') "      --dep name        which output to "// &
             "differentiate, when there is more than one"
         write (*, '(a)') "      --no-primal       return the derivative only, "// &
@@ -963,6 +1255,9 @@ contains
         write (*, '(a)') "      --rule SPEC       register scalar partials"
         write (*, '(a)') "      --call-rule SPEC  register tangent and adjoint "// &
             "statements"
+        write (*, '(a)') "  Tapenade: -p/-d/-b -root NAME -O DIR -o STEM"
+        write (*, '(a)') "      -multi            forward vector mode (directions nd)"
+        write (*, '(a)') "      -ext FILE         accepted for migration; use --rule instead"
         write (*, '(a)') "      --version         print version and exit"
     end subroutine usage
 
