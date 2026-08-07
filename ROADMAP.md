@@ -605,6 +605,21 @@ does not support a general build-time advantage.
       [CLI evidence](https://github.com/lazy-fortran/fortad-bench/blob/4c444b5a7b2322783a1500cfc2f918786299932c/results/p54_public_api_validation.txt)
       contains direct `--help` and `--version` checks. It does not validate the
       example reverse invocation.
+- [ ] **P6.4 Guided CLI.** Make the common workflow a short positional command:
+      `fortad jvp kernel.f90 x,y`, `fortad vjp kernel.f90 x,y --dep f`, and
+      `fortad check kernel.f90`. Infer the target procedure, generated name,
+      module name, and output path when the source contains one unambiguous
+      procedure. Keep expert flags such as `--rule`, `--call-rule`, and
+      `--roundtrip` available under an explicit advanced section. Every guided
+      command must have a compiled behavioral oracle and an example that can
+      be copied without consulting the full option matrix.
+- [ ] **P6.5 Automated source workflow.** Add a manifest-aware command that
+      discovers procedures, runs the appropriate forward/reverse probes, and
+      writes generated source, diagnostics, and a machine-readable result
+      record. The command must stop at named unsupported constructs and never
+      silently choose a dependent or active argument. The current multi-flag
+      invocation remains a compatibility interface for scripts and advanced
+      rules.
 
 ## End-to-end contract
 
@@ -870,10 +885,13 @@ An unsupported result is recorded as such and never counted as a runtime win.
 - [ ] **B0 Tapenade corpus closeout.** The companion manifest
       (`fortad-bench/docs/corpora/tapenade.toml`) pins the upstream tree and
       inventories 2,014 candidate cases. Classify
-      every candidate, port runnable Fortran cases with an independent oracle,
-      and record transform, compile, runtime, memory, and generated-source
-      measurements. Invalid, non-Fortran, and dependency-blocked entries stay
-      in the ledger with a reproducible refusal. They do not count as wins.
+      every candidate and close **all 1,432 strict pure-Fortran rows**. Each
+      pure-Fortran row ends as a measured support case or a reproducible,
+      source-located refusal. A static queue, parser acceptance, or compiler
+      syntax check never counts as support. Port runnable cases with an
+      independent oracle and record transform, compile, runtime, memory, and
+      generated-source measurements. Mixed C/C++-Fortran rows remain a
+      separate dependency lane and do not dilute the pure-Fortran target.
 
 - [x] **B1** abstract base with runtime `select type` children, JVP and VJP;
       measured in the itpplasma polymorphism case linked under P8.4b
