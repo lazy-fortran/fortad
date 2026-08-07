@@ -183,6 +183,12 @@ external intrinsic-summary format. Register the needed operation with
 `--rule` or `--call-rule` instead. Tapenade's multidirectional reverse mode is
 not silently emulated: `-multi` currently has forward-mode semantics only.
 
+The common `-context`, `-fixinterface`, and `-standalonediff` switches are
+also accepted. They are no-ops because FortAD always lowers with the complete
+source context, emits checked module interfaces, and writes standalone
+Fortran source. This lets an existing Tapenade `Options` file remain usable
+without a flag-filtering wrapper.
+
 With source-first compact syntax, omitted names are inferred from the selected
 procedure's dummy arguments: explicit `intent(out)` dummies are outputs and
 the other dummies are treated as differentiable inputs. The first procedure is

@@ -307,6 +307,11 @@ unsupported boundary rather than a silent scalar fallback. `-ext FILE` is
 accepted for command-line migration but its Tapenade summary file is not
 imported; use `--rule` or `--call-rule` for FortAD derivative rules.
 
+The routine Tapenade switches `-context`, `-fixinterface`, and
+`-standalonediff` are accepted as compatibility no-ops. FortAD already has
+whole-file context, checked generated interfaces, and standalone source
+output, respectively, so an existing `Options` file can be reused directly.
+
 Source-first parsing is selected when the first positional argument is an
 existing file, including the bare `fortad FILE` form. Supplying two positional
 paths is rejected as ambiguous instead of choosing one silently. The legacy
