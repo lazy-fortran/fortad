@@ -235,6 +235,12 @@ contains
                     call lower_subroutine(res%arena, unit, source, proc, status)
                 end if
                 proc%is_elemental = header_has_attribute(source_header, "elemental")
+                proc%is_pure = header_has_attribute(source_header, "pure")
+                if (proc%is_elemental) then
+                    if (.not. header_has_attribute(source_header, "impure")) then
+                        proc%is_pure = .true.
+                    end if
+                end if
                 chosen = i
             end if
             if (chosen > 0) exit
@@ -297,7 +303,7 @@ contains
     logical function header_has_attribute(header, attribute) result(found)
         !! Return whether a procedure header contains a standalone prefix.
         !! FortFront exposes procedure names and bodies through its stable
-        !! query, but not the ELEMENTAL prefix. The source header is already
+        !! query, but not procedure prefixes. The source header is already
         !! assembled here for dummy-argument extraction.
         character(len=*), intent(in) :: header, attribute
         character(len=:), allocatable :: text, needle

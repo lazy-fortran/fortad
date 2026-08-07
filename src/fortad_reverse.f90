@@ -239,7 +239,7 @@ contains
             end do
             adjoint%n_uses = primal%n_uses
         end if
-        adjoint%is_pure = .true.
+        adjoint%is_pure = primal%is_pure
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind == FAD_CALL_STMT) adjoint%is_pure = .false.
         end do

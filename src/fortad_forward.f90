@@ -117,7 +117,8 @@ contains
             end do
             tangent%n_uses = primal%n_uses
         end if
-        tangent%is_pure = .not. has_calls(primal)
+        tangent%is_pure = primal%is_pure
+        if (tangent%is_pure) tangent%is_pure = .not. has_calls(primal)
 
         call build_signature(primal, tangent, active, suffix, spec%vector, ndir, &
             spec%with_primal)

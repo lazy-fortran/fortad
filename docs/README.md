@@ -14,6 +14,7 @@ defaults.
 | [Derivative products](products.md) | first-order products, HVPs, UQ, sparse recovery, checkpointing, and Taylor mode |
 | [Public API](design/public-api.md) | exported Fortran calls and types, with defaults and CLI syntax |
 | [Procedure interfaces](design/procedure-interfaces.md) | optional dummies, `present`, elemental procedures, and generated call shape |
+| [Source forms](design/source-forms.md) | fixed-form CLI path and open preprocessing boundaries |
 | [Derived components](design/derived-components.md) | bounded scalar, nested, inherited, and array component derivatives |
 | [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch overrides across an abstract/deferred hierarchy |
 | [Complex values](design/complex-values.md) | real-coordinate JVP contract and bounded real-objective VJP |
@@ -43,6 +44,7 @@ independent oracle.
 | [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch concrete overrides and named runtime/deferred refusals | [`test_abstract_hierarchy_oracle.f90`](../test/test_abstract_hierarchy_oracle.f90) |
 | [GPU emission](design/gpu.md) | restricted OpenMP target and OpenACC loop shape | external `fortad-bench` device record |
 | [Procedure interfaces](design/procedure-interfaces.md) | elemental JVP/VJP preservation and array calls | [`test_elemental_interface_oracle.f90`](../test/test_elemental_interface_oracle.f90) |
+| [Source forms](design/source-forms.md) | fixed-form file normalization and legacy procedure purity | [`test_tapenade_fixed_form_oracle.f90`](../test/test_tapenade_fixed_form_oracle.f90) |
 
 ## Planning and evidence
 

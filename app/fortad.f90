@@ -10,6 +10,7 @@ program fortad_cli
     use fortad, only: fad_add_rule
     use fortad, only: fad_jvp, fad_vjp, fad_hvp, fad_roundtrip, &
         fad_result_t, fad_version
+    use fortfront, only: is_fixed_form_file, normalize_fixed_form_source_text
     implicit none
 
     character(len=:), allocatable :: input_path, output_path, indep_list, dep_name
@@ -33,6 +34,9 @@ program fortad_cli
     if (stat /= 0) then
         write (error_unit_or_output(), '(a)') "fortad: cannot read "//input_path
         error stop 2
+    end if
+    if (is_fixed_form_file(input_path)) then
+        call normalize_fixed_form_source_text(source)
     end if
 
     if (roundtrip_only) then

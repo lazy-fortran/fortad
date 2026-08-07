@@ -670,6 +670,15 @@ of selected child ends the fixed-path derivative contract.
 - [ ] **P7.6 Source forms.** Accept fixed form, CPP and includes,
       semicolon-separated statements, mixed legacy modules, and generated
       interfaces on the same path used by the production build.
+      - [x] **P7.6a fixed-form CLI slice.** The production CLI recognizes
+            `.f`, `.for`, `.ftn`, and `.f77`, normalizes column-1 legacy
+            comments through FortFront, and does not label an ordinary legacy
+            procedure derivative `PURE`. The compiled
+            [`test_tapenade_fixed_form_oracle.f90`](test/test_tapenade_fixed_form_oracle.f90)
+            transforms a Tapenade-style `DOUBLE PRECISION` kernel, checks the
+            hand JVP and a central finite difference, and exercises the real
+            CLI. Library source strings, CPP, include expansion, mixed forms,
+            semicolon parity, and broad legacy syntax remain open.
 - [ ] **P7.7 Language-completeness lane.** Add assumed-rank and `select rank`,
       submodules, `do concurrent`, coarrays, parameterized derived types, and
       finalizers after the application blockers above. The 2026-08-06

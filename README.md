@@ -50,6 +50,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Long integrations | Revolve checkpoint schedules supplied to a caller-owned time loop |
 | Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
 | Elemental procedures | same-file elemental functions retain elemental JVP/VJP array calls |
+| Fixed-form input | CLI `.f`, `.for`, `.ftn`, and `.f77` files with legacy comments and declarations |
 | Derived components | bounded concrete scalar, nested, inherited, and array component paths |
 | Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known child overrides |
 | Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
@@ -85,6 +86,10 @@ generated JVP and VJP can therefore be called with scalar or conformable array
 actuals. See [`test_elemental_interface_oracle.f90`](test/test_elemental_interface_oracle.f90)
 for the finite-difference and compiled array oracle. Generic resolution by
 type, kind, or rank and user-defined operators still need explicit support.
+
+The CLI recognizes fixed form from the input filename and emits free-form
+derivative source. A minimal legacy example and the remaining source-form
+limits are in [the source-forms note](docs/design/source-forms.md).
 
 Unsupported constructs return `fad_result_t%ok = .false.` and name the
 refused construct in `message`. This release is not a complete Fortran
