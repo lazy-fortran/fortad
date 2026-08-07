@@ -282,7 +282,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `db0f3af`. Its GNU behavioral
+The implementation snapshot is FortAD `main` at `7d4f454`. Its GNU behavioral
 gate is green (408 build targets, 407 derivative targets, 52/52 tests);
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
@@ -902,10 +902,11 @@ of selected child ends the fixed-path derivative contract.
         [`test_element_target_oracle.f90`](test/test_element_target_oracle.f90)
         checks them against central differences. Shared-target, disjoint,
         overlapping, and component-alias differentiation remain open.
-      - [x] **P7.3c contiguous rank-one sections.** Commit `db0f3af` accepts
-        one rank-one, non-strided section when FortFront proves an explicit,
-        allocatable, or `CONTIGUOUS` base, preserving the section range as
-        passive storage selection. The independent
+      - [x] **P7.3c contiguous rank-one sections.** Commits `db0f3af` and
+        `7d4f454` accept one rank-one, non-strided section when FortFront
+        proves an explicit, allocatable, or `CONTIGUOUS` base, preserving the
+        section range as passive storage selection in both JVP and VJP paths.
+        The independent
         [`test_contiguous_section_oracle.f90`](test/test_contiguous_section_oracle.f90)
         checks generated JVP/VJP values against hand derivatives, central
         differences, and the adjoint identity. Assumed-shape noncontiguous,
