@@ -49,8 +49,12 @@ The implementation priorities are now:
 3. **Abstraction and polymorphism.** Complete abstract and deferred binding
    hierarchies, inherited overrides, type-bound generics, direct class
    dispatch, `select type`, polymorphic allocation, nested polymorphic values,
-   and active receiver components. The derivative must follow the selected
-   child while treating the runtime type choice as passive on the fixed path.
+   and active receiver components. The first supported abstraction slice is a
+   statically resolved concrete or inherited binding with implicit `PASS` or
+   `NOPASS`. The derivative follows the selected implementation without
+   flattening the application's abstract design. Runtime type choice remains
+   passive on a fixed path, while unresolved runtime dispatch, class-pointer
+   descriptor lowering, and callback flow remain explicit boundaries.
 4. **Application interfaces and rules.** Cover optional and keyword calls,
    generic resolution, procedure pointers, callbacks, numerical libraries,
    MPI, OpenMP, and accelerator operations through explicit derivative rules.
@@ -87,6 +91,9 @@ reverse per-element ownership replay remains an explicit refusal. The public
 facade also exposes the existing FortFront declaration, storage, array-bound,
 `SELECT TYPE`, and `SELECT RANK` facts for low-level transformers. That facade
 is a facts contract, not a claim of general assumed-rank differentiation.
+FortFront now also exposes bounded procedure-pointer target facts for direct
+assignments. FortAD will consume them only after callback target flow,
+interface compatibility, and reverse-lifetime rules are explicit.
 
 ## Repository responsibilities
 
@@ -125,9 +132,9 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 61 runnable pure-Fortran cases, 127 deliberate refusals, 30
-invalid-upstream closures, 1,288 queued candidates, and 508 non-Fortran or
-source-absent cases. The complete compiler-only triage covers all 1,288 queued
+candidate files: 61 runnable pure-Fortran cases, 127 deliberate refusals, 31
+invalid-upstream closures, 1,287 queued candidates, and 508 non-Fortran or
+source-absent cases. The complete compiler-only triage covers all 1,287 queued
 candidates (1,992 accepted files, 1,417 compiler diagnostics, and 147 include
 fragments). Compiler triage is classification evidence. Source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
@@ -147,7 +154,13 @@ unresolved generic call without derivative output. The following row,
 `REAL*8` actuals. Tapenade generation and strict and legacy compilation are
 recorded, and FortAD refuses parser, forward, and reverse conversion with no
 output. The independent source oracle passes the exact compiler-boundary
-checks.
+output. The independent source oracle passes the exact compiler-boundary
+checks. The next row, `nonRegressions/set05/v069`, is also an invalid-upstream
+closure: `ELEMENTAL` procedures execute `PRINT` despite the implicit `PURE`
+contract, the sources retain `REAL*8`, and the stored derivative records a
+generic-call type mismatch. Fresh Tapenade parser, tangent, and reverse
+products generate but fail strict and legacy compilation. FortAD refuses all
+three probes without output. Its independent source/compiler oracle passes.
 
 ## Hard execution rules
 
@@ -197,17 +210,18 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is currently `7bbffa87`. This handoff includes the
+FortFront source `main` is currently `77008167`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
-actual-to-formal call mappings, exact generic candidate facts, and a bounded
-type-binding hierarchy query for local-to-parent binding metadata. The earlier
+actual-to-formal call mappings, exact generic candidate facts, a bounded
+type-binding hierarchy query for local-to-parent binding metadata, and bounded
+procedure-pointer target facts for direct assignments. The earlier
 procedure-name, #2980, public array-query, nested
 substring, and issue-1968 assumed-shape fixes.
 The focused `test_ownership_dispatch_metadata`,
 `test_call_argument_mapping`, and `test_binding_hierarchy_query` API oracles
-pass. A clean FortFront worktree passes its broader GNU gate at 1,563 static
+pass. A clean FortFront worktree passes its broader GNU gate at 1,565 static
 modules, 381 build targets, 378 derivative targets, and 483/483 tests.
 the Windows and downstream multi-compiler gates remain open.
 
@@ -256,13 +270,14 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `7bbffa87`, which includes the
+The current FortFront `main` handoff is `77008167`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths, plus formal-ordered actual-to-formal call
       mappings for positional, keyword, and omitted optional arguments, exact
-      generic candidates, and the bounded type-binding hierarchy query. The
-      focused API oracles pass on the current 378-target GNU build.
+      generic candidates, the bounded type-binding hierarchy query, and the
+      procedure-pointer target query. The focused API oracles pass on the
+      current 378-target GNU build.
 - [ ] FortFront `main` is green on Windows. The latest procedure-name
       observation is run
       [31144062538](https://github.com/lazy-fortran/fortfront/actions/runs/31144062538),
@@ -293,7 +308,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `a41afde`. Its GNU behavioral
+The implementation snapshot is FortAD `main` at `02a1aeb`. Its GNU behavioral
 gate is green (408 build targets, 407 derivative targets, 53/53 tests).
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
@@ -398,10 +413,10 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `7bbffa87` (the ownership/storage and dispatch
+`fo` must consume FortFront `77008167` (the ownership/storage and dispatch
 metadata handoff plus the merged procedure-name, #2980, public array-query,
 nested-substring, issue-1968, call-argument mapping, exact generic candidate,
-and bounded type-binding hierarchy fixes), while fpm caches
+bounded type-binding hierarchy, and procedure-pointer target fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
 and `build/cache.toml` before reinstalling `fo`, or the old revision will be
 reused. Record the exact FortFront pin in every downstream gate so a warm
@@ -986,6 +1001,13 @@ of selected child ends the fixed-path derivative contract.
         that an ambiguous generic is refused without output. Generic
         operators, conversion-required calls, elemental expansion, and
         procedure-pointer calls remain open.
+      - [x] **P7.4g procedure-pointer target facts.** FortFront commit
+        `77008167` exposes a bounded `query_procedure_target` contract for
+        direct assignments to declared procedure pointers. Its independent API
+        oracle covers resolved internal and external targets, `NULL()`, and
+        unresolved targets. Flow-sensitive callback state, generic dispatch,
+        interface compatibility, and AD policy remain FortAD work. Callback
+        differentiation is not claimed by this facts query.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.
@@ -1110,13 +1132,15 @@ problem-specific rule.
             central differences, and the adjoint identity. The measured bench
             case is
             [`itpplasma_polymorphic_select_type_validation.txt`](https://github.com/lazy-fortran/fortad-bench/blob/main/results/itpplasma_polymorphic_select_type_validation.txt).
-      - [x] **P8.4c upstream hierarchy facts.** FortFront `7bbffa87` exposes a
+      - [x] **P8.4c upstream hierarchy facts.** FortFront `77008167` exposes a
             bounded local-to-parent type-binding hierarchy query with declaring
             type, inherited status, PASS metadata, deferred and generic flags,
             ambiguity, and resolved implementation facts. Its independent API
             oracle covers an abstract multi-level hierarchy and an ambiguous
-            generic. FortAD still needs to consume these facts for general
-            derivative hierarchy generation. Runtime `CLASS` dispatch and
+            generic. FortAD commit `02a1aeb` consumes these facts for statically
+            resolved inherited bindings with implicit `PASS` or `NOPASS`. The
+            independent JVP/VJP type-bound oracle passes. General derivative
+            hierarchy generation, runtime `CLASS` dispatch, and
             procedure-pointer dispatch remain open.
 - [ ] **P8.5 Polymorphic ownership.** Cover allocatable base-class components,
       factories, `allocate(source=child)`, nested field/coordinate objects,
