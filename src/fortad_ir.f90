@@ -94,6 +94,8 @@ module fortad_ir
         !! A declared entity: dummy argument, result, or local.
         character(len=:), allocatable :: name
         character(len=:), allocatable :: type_name !! "real(dp)", "integer"
+        !! Source line for diagnostics at transformation boundaries.
+        integer :: line = 0
         integer :: intent = FAD_INTENT_NONE
         logical :: is_value = .false.
         !! Whether this is an optional dummy argument.  Keeping this bit in
@@ -108,6 +110,12 @@ module fortad_ir
         !! descriptor and cannot be emitted as an ordinary assumed-shape
         !! array.
         logical :: is_allocatable = .false.
+        !! Semantic type facts copied from fortfront.  These are deliberately
+        !! not inferred from type_name by the differentiation passes: a
+        !! polymorphic allocatable needs a dynamic-type ownership model, not a
+        !! spelling heuristic.
+        logical :: is_polymorphic = .false.
+        logical :: is_unlimited_polymorphic = .false.
         !! Verbatim dimension text, e.g. "n" or ":,:" - emitted unchanged.
         character(len=:), allocatable :: dims
     end type fad_decl_t
@@ -361,11 +369,14 @@ contains
         if (allocated(source%type_name)) out%type_name = source%type_name
         if (allocated(source%dims)) out%dims = source%dims
         out%intent = source%intent
+        out%line = source%line
         out%is_value = source%is_value
         out%is_optional = source%is_optional
         out%is_array = source%is_array
         out%is_contiguous = source%is_contiguous
         out%is_allocatable = source%is_allocatable
+        out%is_polymorphic = source%is_polymorphic
+        out%is_unlimited_polymorphic = source%is_unlimited_polymorphic
         out%is_result = source%is_result
     end subroutine copy_decl
 
@@ -426,6 +437,7 @@ contains
         if (allocated(out%name)) deallocate (out%name)
         if (allocated(out%type_name)) deallocate (out%type_name)
         if (allocated(out%dims)) deallocate (out%dims)
+        out%line = 0
         out%name = trim(name)
         if (len_trim(type_name) > 0) out%type_name = trim(type_name)
         if (len_trim(dims) > 0) out%dims = trim(dims)
@@ -436,6 +448,8 @@ contains
         out%is_contiguous = is_contiguous
         out%is_result = is_result
         out%is_allocatable = is_allocatable
+        out%is_polymorphic = .false.
+        out%is_unlimited_polymorphic = .false.
     end subroutine set_decl_fields
 
     integer function proc_decl_index(self, name) result(idx)

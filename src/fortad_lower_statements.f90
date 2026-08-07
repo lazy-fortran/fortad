@@ -21,6 +21,7 @@ module fortad_lower_statements
         FAD_END_SELECT, FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC
     use fortad_lower_types, only: lower_status_t
     use fortad_use_store, only: ensure_use_capacity
+    use frontend_compiler_queries, only: storage_query_t, query_storage
     implicit none
     private
 
@@ -436,8 +437,10 @@ contains
         type(ast_arena_t), intent(in) :: arena
         type(fad_decl_t), intent(out) :: d
         type(declaration_query_t) :: query
+        type(storage_query_t) :: storage
 
         d%name = name
+        d%line = n%line
         d%type_name = n%type_name
         d%is_value = n%is_value
         d%is_optional = n%is_optional
@@ -447,6 +450,11 @@ contains
         d%is_array = n%is_array
         d%is_contiguous = n%is_contiguous
         d%is_allocatable = n%is_allocatable
+        storage = query_storage(arena, idx)
+        if (storage%found) then
+            d%is_polymorphic = storage%is_polymorphic
+            d%is_unlimited_polymorphic = storage%is_unlimited_polymorphic
+        end if
         d%intent = FAD_INTENT_NONE
         if (n%has_intent .and. allocated(n%intent)) then
             select case (trim(n%intent))

@@ -74,6 +74,9 @@ The storage-identity boundary and its executable refusal oracle are in
 [the aliasing and sections design note](docs/design/aliasing.md).
 The fixed-dispatch abstract/deferred hierarchy slice and its multi-level
 oracle are in [the abstract hierarchy design note](docs/design/abstract-hierarchy.md).
+Passive fixed-type polymorphic allocatable dispatch and the semantic boundary
+for active polymorphic ownership are in
+[the polymorphic ownership design note](docs/design/polymorphic-ownership.md).
 
 FortAD's product target is modern Fortran with explicit data ownership,
 procedure interfaces, derived values, and abstract or polymorphic components.

@@ -81,6 +81,8 @@ contains
 
         call seed_activity(primal, spec, active, status)
         if (.not. status%ok) return
+        call refuse_active_polymorphic_ownership(primal, active, status)
+        if (.not. status%ok) return
         if (spec%vector) then
             do i = 1, primal%n_stmts
                 if (primal%stmts(i)%kind == FAD_ALLOCATE .or. &
@@ -242,6 +244,44 @@ contains
             end do
         end do
     end subroutine seed_activity
+
+    subroutine refuse_active_polymorphic_ownership(primal, active, status)
+        !! A polymorphic allocatable needs a tangent descriptor with the same
+        !! dynamic type as the primal.  The current IR can copy a passive
+        !! selector, but it cannot pair SELECT TYPE guards or replay dynamic
+        !! allocation state for an active shadow.  Refuse that exact semantic
+        !! case after activity analysis; do not classify it from source text.
+        type(fad_proc_t), intent(in) :: primal
+        logical, intent(in) :: active(:)
+        type(forward_status_t), intent(inout) :: status
+        integer :: i
+        character(len=:), allocatable :: type_label
+
+        do i = 1, primal%n_decls
+            if (.not. active(i)) cycle
+            if (.not. primal%decls(i)%is_allocatable) cycle
+            if (.not. primal%decls(i)%is_polymorphic) cycle
+            type_label = "class(T)"
+            if (primal%decls(i)%is_unlimited_polymorphic) type_label = "class(*)"
+            status%ok = .false.
+            status%message = "forward mode: active polymorphic allocatable "// &
+                "ownership '"//trim(primal%decls(i)%name)//"' ("// &
+                trim(type_label)//") at line "//itoa(primal%decls(i)%line)// &
+                ": current IR cannot synchronize a tangent dynamic type "// &
+                "with the primal ownership descriptor; use a concrete "// &
+                "type(t) owner or await the dynamic ownership boundary"
+            return
+        end do
+    end subroutine refuse_active_polymorphic_ownership
+
+    function itoa(n) result(text)
+        integer, intent(in) :: n
+        character(len=:), allocatable :: text
+        character(len=32) :: buffer
+
+        write (buffer, '(i0)') n
+        text = trim(buffer)
+    end function itoa
 
     subroutine mark_move_alloc_peer(primal, stmt, active, changed)
         type(fad_proc_t), intent(in) :: primal
