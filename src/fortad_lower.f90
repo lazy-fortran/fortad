@@ -9,6 +9,7 @@ module fortad_lower
         compiler_frontend_options_t, compiler_frontend_result_t, &
         ast_arena_t, program_unit_query_t, query_program_unit, &
         query_declaration, declaration_query_t, INPUT_MODE_STANDARD
+    use fortfront, only: generic_call_query_t, query_generic_call
     use frontend_compiler_queries, only: global_reference_query_t, &
         query_active_global_references
     use fortad_ir, only: fad_proc_t
@@ -191,6 +192,26 @@ contains
             return
         end if
 
+        ! Generic exact matching needs FortFront's resolved type metadata.
+        ! Keep the historical parse-only path for ordinary sources (it avoids
+        ! a compiler-specific semantic pass issue for external scalar CALLs),
+        ! then rerun only when the raw arena contains a same-file generic call.
+        if (contains_generic_call(res%arena)) then
+            opts%run_semantics = .true.
+            call compile_frontend_from_string(source, res, opts)
+            if (.not. res%parse_ok) then
+                status%ok = .false.
+                status%message = "parse failed while resolving a generic call"
+                if (allocated(res%error_msg)) then
+                    if (len_trim(res%error_msg) > 0) then
+                        status%message = "parse failed while resolving a generic call: "// &
+                            trim(res%error_msg)
+                    end if
+                end if
+                return
+            end if
+        end if
+
         if (has_module_allocatable_state(source)) then
             status%ok = .false.
             status%message = "module-level allocatable mutable state is not supported; use local or dummy ownership"
@@ -354,6 +375,23 @@ contains
         status%ok = .true.
         status%message = ""
     end subroutine lower_source
+
+    logical function contains_generic_call(arena) result(found)
+        type(ast_arena_t), intent(in) :: arena
+        type(generic_call_query_t) :: query
+        integer :: i
+
+        found = .false.
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            query = query_generic_call(arena, i)
+            if (.not. query%found) cycle
+            if (query%is_generic) then
+                found = .true.
+                return
+            end if
+        end do
+    end function contains_generic_call
 
     subroutine refuse_global_state(arena, reference, status)
         !! Active mutable global state has no explicit ownership contract.
