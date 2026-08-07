@@ -24,6 +24,11 @@ the generated routine contains an unresolved call. Legacy I-N loop indices
 that are only implicitly typed in the primal are synthesized as local
 `integer` declarations in generated JVP/VJP procedures.
 
+A plain `RETURN` at the end of a procedure is derivative-neutral and is
+omitted from generated products. Alternate returns and non-terminal returns
+remain named refusal boundaries because silently removing them could change the
+active control-flow path.
+
 [`test_tapenade_fixed_form_oracle.f90`](../../test/test_tapenade_fixed_form_oracle.f90)
 runs that CLI path, compiles the generated free-form JVP with gfortran, and
 checks a hand derivative and central finite difference.
