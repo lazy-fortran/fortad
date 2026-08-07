@@ -84,10 +84,10 @@ has a successful Ubuntu job, including the #2975 owner-boundary regression.
 Windows retains the documented nine-test portability baseline. The downstream
 multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc docs `66295c7` over code `fc3ea15`, which
+The compiler-path handoff is ffc docs `e25dbc9` over code `338fea4`, which
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, GOTO, FORALL, WHERE,
-and SELECT extractions,
+SELECT, complex, intrinsic-extra, and reduction-expression extractions,
 the rebased integer(8)/descriptor dispatch guard, the bare-DIMENSION #2848
 fix, and the GCC14-safe host exports needed for clean linking. Clean
 validation is `fo clean && fo build` 447/447 on the prior structured-control
@@ -99,10 +99,10 @@ oracles pass with independent gfortran differentials. PR #699 merged as
 `0663b2d`/`e36fbe3`/`92dac2e` with repair `48d68e4` and include deletion
 `caf3203`. The later FORALL/WHERE/SELECT merges are
 `6ab632d`/`d0dbafd`/`de04a46`, with the WHERE cold-link host-export repair
-`fc3ea15`; the production ffc inventory is now 54 tracked `.inc` files /
-70,951 lines. The repair has a local 453/453 cold build, five focused
-compiler PASSes, and independent gfortran differentials; aggregate CI still
-retains known formatter/full-suite and corpus
+`fc3ea15`; complex, intrinsic-extra, and reduction-expression are
+`76c5ae9`/`f3beaa8`/`338fea4`. The production ffc inventory is now 51 tracked
+`.inc` files / 67,182 lines. Their local 454/455/455 cold builds and focused
+independent oracles pass; aggregate CI still retains known formatter/full-suite and corpus
 failures. This is recorded for
 cross-repository provenance. FortAD does not consume ffc as a build
 dependency, and no ffc aggregate PASS is claimed here.
