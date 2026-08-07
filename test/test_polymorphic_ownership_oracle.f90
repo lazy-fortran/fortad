@@ -10,6 +10,7 @@ program test_polymorphic_ownership_oracle
     character(len=1), parameter :: nl = achar(10)
     character(len=:), allocatable :: source, tangent, driver, dir
     type(fad_result_t) :: generated, generated_star, refused
+    type(fad_result_t) :: allocated_generated, allocated_star_generated
     integer :: stat, unit
 
     source = polymorphic_source("class(base_t)")
@@ -25,6 +26,22 @@ program test_polymorphic_ownership_oracle
         print *, "FAIL passive unlimited polymorphic allocatable JVP: ", &
             generated_star%message
         error stop 2
+    end if
+
+    allocated_generated = fad_jvp(source, [character(len=1) :: "x"], &
+        from="allocate_evaluate", name="allocate_evaluate_jvp")
+    if (.not. allocated_generated%ok) then
+        print *, "FAIL fixed-source polymorphic ownership JVP: ", &
+            allocated_generated%message
+        error stop 15
+    end if
+    allocated_star_generated = fad_jvp(polymorphic_source("class(*)"), &
+        [character(len=1) :: "x"], from="allocate_star_evaluate", &
+        name="allocate_star_evaluate_jvp")
+    if (.not. allocated_star_generated%ok) then
+        print *, "FAIL fixed-source unlimited polymorphic ownership JVP: ", &
+            allocated_star_generated%message
+        error stop 16
     end if
 
     refused = fad_jvp(source, [character(len=11) :: "model%scale"], &
@@ -49,6 +66,8 @@ program test_polymorphic_ownership_oracle
         "    use polymorphic_ownership_case, only: base_t, child_t"//nl// &
         "contains"//nl//generated%code// &
         generated_star%code// &
+        allocated_generated%code// &
+        allocated_star_generated%code// &
         "end module polymorphic_generated"//nl
     open (newunit=unit, file=dir//"/tangent.f90", status="replace", &
         action="write")
@@ -57,8 +76,10 @@ program test_polymorphic_ownership_oracle
 
     driver = &
         "program driver"//nl// &
-        "    use polymorphic_ownership_case, only: base_t, child_t, evaluate"//nl// &
-        "    use polymorphic_generated, only: evaluate_jvp, evaluate_star_jvp"//nl// &
+        "    use polymorphic_ownership_case, only: base_t, child_t, evaluate, "// &
+        "allocate_evaluate, allocate_star_evaluate"//nl// &
+        "    use polymorphic_generated, only: evaluate_jvp, evaluate_star_jvp, "// &
+        "allocate_evaluate_jvp, allocate_star_evaluate_jvp"//nl// &
         "    implicit none"//nl// &
         "    class(base_t), allocatable :: model"//nl// &
         "    class(*), allocatable :: universal"//nl// &
@@ -88,6 +109,16 @@ program test_polymorphic_ownership_oracle
         "    fd = (fp - fm)/(2.0d0*h)"//nl// &
         "    if (abs(fd - scale) > 1.0d-7) error stop 6"//nl// &
         "    if (abs(y_d/x_d - fd) > 1.0d-7) error stop 7"//nl// &
+        "    call allocate_evaluate_jvp(x, x_d, y, y_d)"//nl// &
+        "    if (abs(y - 2.0d0*x*x) > 1.0d-13) error stop 17"//nl// &
+        "    if (abs(y_d - 4.0d0*x*x_d) > 1.0d-13) error stop 18"//nl// &
+        "    fp = allocate_evaluate(x + h)"//nl// &
+        "    fm = allocate_evaluate(x - h)"//nl// &
+        "    fd = (fp - fm)/(2.0d0*h)"//nl// &
+        "    if (abs(y_d/x_d - fd) > 1.0d-7) error stop 19"//nl// &
+        "    call allocate_star_evaluate_jvp(x, x_d, y, y_d)"//nl// &
+        "    if (abs(y - 2.0d0*x*x) > 1.0d-13) error stop 20"//nl// &
+        "    if (abs(y_d - 4.0d0*x*x_d) > 1.0d-13) error stop 21"//nl// &
         "    print *, 'polymorphic ownership passive JVP oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", &
@@ -138,6 +169,36 @@ contains
             "            y = x"//nl// &
             "        end select"//nl// &
             "    end function evaluate"//nl// &
+            "    pure function allocate_evaluate(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        real(8) :: y"//nl// &
+            "        type(child_t) :: child"//nl// &
+            "        class(base_t), allocatable :: holder"//nl// &
+            "        child%scale = 2.0d0*x"//nl// &
+            "        allocate(holder, source=child)"//nl// &
+            "        select type (holder)"//nl// &
+            "        type is (child_t)"//nl// &
+            "            y = holder%scale*x"//nl// &
+            "        class default"//nl// &
+            "            y = x"//nl// &
+            "        end select"//nl// &
+            "        deallocate(holder)"//nl// &
+            "    end function allocate_evaluate"//nl// &
+            "    pure function allocate_star_evaluate(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        real(8) :: y"//nl// &
+            "        type(child_t) :: child"//nl// &
+            "        class(*), allocatable :: holder"//nl// &
+            "        child%scale = 2.0d0*x"//nl// &
+            "        allocate(holder, source=child)"//nl// &
+            "        select type (holder)"//nl// &
+            "        type is (child_t)"//nl// &
+            "            y = holder%scale*x"//nl// &
+            "        class default"//nl// &
+            "            y = x"//nl// &
+            "        end select"//nl// &
+            "        deallocate(holder)"//nl// &
+            "    end function allocate_star_evaluate"//nl// &
             "end module polymorphic_ownership_case"//nl
     end function polymorphic_source
 

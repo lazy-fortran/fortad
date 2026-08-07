@@ -63,7 +63,7 @@ contains
         type(fad_proc_t), intent(out) :: tangent
         type(forward_status_t), intent(out) :: status
         character(len=:), allocatable :: suffix, ndir
-        character(len=256) :: decl_name, decl_type, decl_dims
+        character(len=256) :: decl_name, decl_type, decl_dims, tangent_type
         logical, allocatable :: active(:)
         integer :: i, ignored, di
 
@@ -146,7 +146,13 @@ contains
                 primal%decls(i)%is_array, primal%decls(i)%is_contiguous, &
                 .false., decl_dims, .false., primal%decls(i)%is_allocatable)
             if (active(i)) then
-                call add_tangent_decl(tangent, decl_name, decl_type, &
+                tangent_type = decl_type
+                if (primal%decls(i)%is_polymorphic) then
+                    if (len_trim(fixed_source_type(primal, i)) > 0) then
+                        tangent_type = fixed_source_type(primal, i)
+                    end if
+                end if
+                call add_tangent_decl(tangent, decl_name, tangent_type, &
                     primal%decls(i)%is_value, &
                     primal%decls(i)%is_array, &
                     primal%decls(i)%is_contiguous, &
@@ -200,6 +206,21 @@ contains
         do while (changed)
             changed = .false.
             do j = 1, primal%n_stmts
+                if (primal%stmts(j)%kind == FAD_ALLOCATE) then
+                    if (primal%stmts(j)%allocation_source > 0 .and. &
+                        allocated(primal%stmts(j)%allocation_args)) then
+                        di = arg_decl_index(primal, &
+                            primal%stmts(j)%allocation_args(1))
+                        if (di > 0 .and. expr_reads_active(primal, &
+                            primal%stmts(j)%allocation_source, active)) then
+                            if (.not. active(di)) then
+                                active(di) = .true.
+                                changed = .true.
+                            end if
+                        end if
+                    end if
+                    cycle
+                end if
                 if (primal%stmts(j)%kind == FAD_MOVE_ALLOC) then
                     di = arg_decl_index(primal, primal%stmts(j)%call_args(1))
                     if (di > 0) then
@@ -261,6 +282,7 @@ contains
             if (.not. active(i)) cycle
             if (.not. primal%decls(i)%is_allocatable) cycle
             if (.not. primal%decls(i)%is_polymorphic) cycle
+            if (has_fixed_source_owner(primal, i, active)) cycle
             type_label = "class(T)"
             if (primal%decls(i)%is_unlimited_polymorphic) type_label = "class(*)"
             status%ok = .false.
@@ -273,6 +295,113 @@ contains
             return
         end do
     end subroutine refuse_active_polymorphic_ownership
+
+    logical function has_fixed_source_owner(primal, owner_di, active) result(supported)
+        !! The bounded active case is an allocatable polymorphic local whose
+        !! only acquisition is ALLOCATE(owner, SOURCE=concrete_value).  The
+        !! declared type of the source is a fixed dynamic type, so the
+        !! existing tangent allocation descriptor can be paired by emitting
+        !! SOURCE=concrete_value_d.  No factory, polymorphic source, or
+        !! ownership transfer is inferred here.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: owner_di
+        logical, intent(in) :: active(:)
+        integer :: i, target_di, source_di
+        character(len=:), allocatable :: owner
+        logical :: found
+
+        supported = .false.
+        if (owner_di <= 0 .or. owner_di > primal%n_decls) return
+        owner = primal%decls(owner_di)%name
+        found = .false.
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind == FAD_ALLOCATE) then
+                if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
+                if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) return
+                target_di = primal%decl_index(fad_base_name( &
+                    primal%exprs(primal%stmts(i)%allocation_args(1))%text))
+                if (target_di /= owner_di) cycle
+                if (found) return
+                if (primal%stmts(i)%allocation_source <= 0) return
+                if (primal%stmts(i)%allocation_mold > 0) return
+                source_di = fixed_source_decl(primal, &
+                    primal%stmts(i)%allocation_source)
+                if (source_di <= 0) return
+                if (.not. expr_reads_active(primal, &
+                    primal%stmts(i)%allocation_source, active)) return
+                found = .true.
+            else if (primal%stmts(i)%kind == FAD_MOVE_ALLOC) then
+                if (.not. allocated(primal%stmts(i)%call_args)) cycle
+                if (allocation_arg_is_owner(primal, primal%stmts(i)%call_args(1), &
+                    owner) .or. allocation_arg_is_owner(primal, &
+                    primal%stmts(i)%call_args(2), owner)) return
+            end if
+        end do
+        supported = found
+    end function has_fixed_source_owner
+
+    function fixed_source_type(primal, owner_di) result(type_name)
+        !! Return the concrete declared source type for the one supported
+        !! acquisition, or an empty string when no such ownership event exists.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: owner_di
+        character(len=:), allocatable :: type_name
+        integer :: i, target_di, source_di
+
+        type_name = ""
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ALLOCATE) cycle
+            if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
+            if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) then
+                type_name = ""
+                return
+            end if
+            target_di = primal%decl_index(fad_base_name( &
+                primal%exprs(primal%stmts(i)%allocation_args(1))%text))
+            if (target_di /= owner_di) cycle
+            if (primal%stmts(i)%allocation_source <= 0 .or. &
+                primal%stmts(i)%allocation_mold > 0) then
+                type_name = ""
+                return
+            end if
+            source_di = fixed_source_decl(primal, &
+                primal%stmts(i)%allocation_source)
+            if (source_di <= 0) then
+                type_name = ""
+                return
+            end if
+            if (len_trim(type_name) > 0) then
+                if (type_name /= primal%decls(source_di)%type_name) then
+                    type_name = ""
+                    return
+                end if
+            else
+                type_name = primal%decls(source_di)%type_name
+            end if
+        end do
+    end function fixed_source_type
+
+    integer function fixed_source_decl(primal, idx) result(di)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+
+        di = 0
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind /= FAD_VAR) return
+        di = primal%decl_index(fad_base_name(primal%exprs(idx)%text))
+        if (di <= 0 .or. primal%decls(di)%is_polymorphic) di = 0
+    end function fixed_source_decl
+
+    logical function allocation_arg_is_owner(primal, idx, owner) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: owner
+
+        found = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind /= FAD_VAR) return
+        found = fad_base_name(primal%exprs(idx)%text) == trim(owner)
+    end function allocation_arg_is_owner
 
     function itoa(n) result(text)
         integer, intent(in) :: n
@@ -663,6 +792,13 @@ contains
                 case (FAD_SELECT_TYPE)
                     s%kind = FAD_SELECT_TYPE
                     s%value = copy_expr(primal, tangent, ps%value)
+                    di = arg_decl_index(primal, ps%value)
+                    if (di > 0 .and. active(di) .and. &
+                        len_trim(fixed_source_type(primal, di)) == 0) then
+                        s%value = tangent_of(primal, tangent, ps%value, active, &
+                            suffix, vector, status)
+                        if (.not. status%ok) return
+                    end if
                     ignored = tangent%add_stmt(s)
 
                 case (FAD_CALL_STMT)

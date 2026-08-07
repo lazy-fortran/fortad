@@ -1005,12 +1005,15 @@ problem-specific rule.
             differentiated; the compiled
             [`test_polymorphic_ownership_oracle.f90`](test/test_polymorphic_ownership_oracle.f90)
             checks hand and finite-difference values. An active component of
-            a polymorphic allocatable is refused after activity analysis from
-            FortFront's declared storage facts, with the `class(T)`/`class(*)`
-            form and source line in the diagnostic. The current IR has no
-            paired dynamic-type tangent selector or ownership state, so this
-            boundary does not accept active polymorphic ownership. Reverse
-            allocation handling is unchanged.
+            a polymorphic allocatable is accepted for the bounded forward
+            case `allocate(owner, source=concrete_child)` when the concrete
+            source is declared and the owner has one acquisition. The oracle
+            covers both `class(base_t)` and `class(*)` owners with hand and
+            finite-difference values. Polymorphic or factory sources,
+            repeated acquisition, `move_alloc`, aliases, and reverse lifetime
+            replay remain refused with the `class(T)`/`class(*)` form and
+            source line in the diagnostic because the IR still lacks a paired
+            general dynamic-type/ownership record.
 - [ ] **P8.6 Procedure pointers and callbacks.** Treat callback identity as a
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed
