@@ -941,6 +941,15 @@ problem-specific rule.
             overrides on an abstract/deferred hierarchy are covered by P8.4a.
             Active receiver cotangents and direct class dispatch remain open.
             bounded `SELECT TYPE` dispatch is covered by P8.4b.
+            **Review checkpoint (2026-08-07):** `origin/feat/p8-concrete-type-bound`
+            through `2429f21` was compared with FortAD `main` at `232a001`.
+            Its bounded PASS/NOPASS lowering, procedure-scope receiver lookup,
+            ambiguity refusals, and independent JVP/VJP refusal checks are
+            already present in the rebased mainline (`a55c5e2`, `f3160c0`,
+            `4330567`, `6691355`, and `958088e`). The oracle is byte-identical.
+            No source transplant was needed; the review preserves the active
+            receiver, inherited, generic, deferred, and dynamic-dispatch
+            refusal boundaries.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through
