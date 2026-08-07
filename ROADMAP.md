@@ -68,15 +68,10 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-The FortFront pin for this status is semantic code `193457a9`, with roadmap
-head `2179929e`. Its focused #2993, #2996, nested-binding, and implicit-
-DIMENSION oracles are green locally. Merge run
-[31136187566](https://github.com/lazy-fortran/fortfront/actions/runs/31136187566)
-was cancelled; the documentation merge
-[31136399036](https://github.com/lazy-fortran/fortfront/actions/runs/31136399036)
-was queued at this snapshot. The completed aggregate run
-[31134675652](https://github.com/lazy-fortran/fortfront/actions/runs/31134675652)
-is historical evidence for the `ca26bf9d` parent, not a current-head gate.
+FortFront `main` is `704cd27f`. Its focused #2993, #2996, nested-binding,
+and implicit-DIMENSION oracles are green locally. The current GNU gate is
+green as well: 1,545 static modules, 381 build targets, 378 derivative
+targets, 483/483 tests, and clean lint. The Windows lane remains open.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
