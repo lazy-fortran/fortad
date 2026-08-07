@@ -42,7 +42,8 @@ program test_cli_tapenade_compat_oracle
     if (stat /= 0) call fail('Tapenade parser flags failed')
     call require_file(parser_path, 'Tapenade parser output')
 
-    command = quote(cli)//' -d -root square -O '//quote(directory)// &
+    command = quote(cli)//' -d -context -fixinterface -standalonediff '// &
+        '-root square -O '//quote(directory)// &
         ' -o fortad-tapenade-compat '//quote(input_path)
     call execute_command_line(command, wait=.true., exitstat=stat)
     if (stat /= 0) call fail('Tapenade forward flags failed')

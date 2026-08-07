@@ -647,6 +647,14 @@ contains
                 tapenade_compat = .true.
                 tapenade_multi = .true.
                 if (len_trim(directions) == 0) directions = "nd"
+            case ("-context", "-fixinterface", "-standalonediff")
+                ! These Tapenade switches request behaviour that is already
+                ! structural in FortAD: the whole source file is available
+                ! to the lowering pass, generated products have explicit
+                ! module interfaces, and the result is emitted as a
+                ! standalone source unit.  Accept them so existing Options
+                ! files can be reused without a flag-stripping wrapper.
+                tapenade_compat = .true.
             case ("-m", "--mode")
                 if ((compact_syntax .and. .not. bare_source_syntax) .or. &
                     check_syntax) then
@@ -1257,6 +1265,9 @@ contains
             "statements"
         write (*, '(a)') "  Tapenade: -p/-d/-b -root NAME -O DIR -o STEM"
         write (*, '(a)') "      -multi            forward vector mode (directions nd)"
+        write (*, '(a)') "      -context          whole-file context (already automatic)"
+        write (*, '(a)') "      -fixinterface     checked interfaces (already automatic)"
+        write (*, '(a)') "      -standalonediff   standalone source (already automatic)"
         write (*, '(a)') "      -ext FILE         accepted for migration; use --rule instead"
         write (*, '(a)') "      --version         print version and exit"
     end subroutine usage
