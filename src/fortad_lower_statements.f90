@@ -472,7 +472,8 @@ contains
             if (j <= len_trim(line)) then
                 if (is_name_char(line(j:j))) cycle
             end if
-            do while (j <= len_trim(line) .and. line(j:j) == " ")
+            do while (j <= len_trim(line))
+                if (line(j:j) /= " ") exit
                 j = j + 1
             end do
             if (j > len_trim(line)) cycle
