@@ -69,31 +69,30 @@ Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
 FortFront source `main` is pinned to `c0a32743`, with documentation handoff
-`d8c8769`, the current handoff after the typed #2974 compound-declaration and
-#2975 owner-boundary regressions merged on top of the procedure-name
-semantic-boundary fix after PR #3003. It carries lazy untyped function-result
-inference (#2980) and its independent GNU Fortran differential oracle. Its
-focused #2993, #2996, nested-binding, implicit-DIMENSION, and #2980 oracles
-are green on the GNU lane. The current GNU gate is green as well: 1,545 static
-modules, 381 build targets, 378 derivative targets, 483/483 tests, and clean
-lint. The latest regression observation
-[31146242801](https://github.com/lazy-fortran/fortfront/actions/runs/31146242801)
-has a successful Ubuntu job; Windows retains the documented nine-test
-portability baseline and introduced no #2974 signature. The downstream
+`0a082664` (source handoff `d8c8769`), the current handoff after the typed
+#2974 compound-declaration and #2975 owner-boundary regressions merged on top
+of the procedure-name semantic-boundary fix after PR #3003. It carries lazy
+untyped function-result inference (#2980) and its independent GNU Fortran
+differential oracle. Its focused #2993, #2996, nested-binding,
+implicit-DIMENSION, and #2980 oracles are green on the GNU lane. The current
+GNU gate is green as well: 1,545 static modules, 381 build targets, 378
+derivative targets, 483/483 tests, and clean lint. The latest regression
+observation [31147308041](https://github.com/lazy-fortran/fortfront/actions/runs/31147308041)
+has a successful Ubuntu job, including the #2975 owner-boundary regression;
+Windows retains the documented nine-test portability baseline. The downstream
 multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc docs `e7209f8` over code `a8f788c`, which
-contains the typed ISO C pointer and TRANSFER extractions, the rebased
-integer(8)/descriptor dispatch guard, the bare-DIMENSION #2848 fix, and its
-one-line host export needed for clean linking. Clean validation is
-`fo clean && fo build` 443/443 on the extraction heads; the focused
-DIMENSION/Lazy-array and TRANSFER oracles pass, with the gfortran differential
-gauntlet `PASS=1/XFAIL=0/FAIL=0` retained. No XFAIL or manifest changed in the
-link-export or extraction follow-ups. The bounded #643 rank-1 deep-copy PR
-#699 and integer extraction PR #700 are the next ffc merge-train steps and are
-not counted here until their cold build/link observations complete. This is
-recorded for cross-repository provenance; FortAD does not consume ffc as a
-build dependency, and no ffc aggregate PASS is claimed here.
+The compiler-path handoff is ffc docs `843b203d` over code `cc91e32`, which
+contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy, and
+typed integer-lowering extractions, the rebased integer(8)/descriptor dispatch
+guard, the bare-DIMENSION #2848 fix, and the GCC14-safe host exports needed for
+clean linking. Clean validation is `fo clean && fo build` 444/444 on the
+current head; the focused DIMENSION/Lazy-array, TRANSFER, deep-copy, and
+integer oracles pass with independent gfortran differentials. PR #699 merged
+as `b0b7775` and PR #700 as `cc91e32`; their aggregate CI retained known
+formatter/full-suite and corpus failures. This is recorded for
+cross-repository provenance; FortAD does not consume ffc as a build
+dependency, and no ffc aggregate PASS is claimed here.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
