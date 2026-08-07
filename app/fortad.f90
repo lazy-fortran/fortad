@@ -616,6 +616,26 @@ contains
                 if (allocated(from_name)) deallocate (from_name)
                 allocate (character(len=length) :: from_name)
                 call get_command_argument(i, from_name)
+            case ("--head", "-head")
+                ! Tapenade-compatible shorthand: HEAD names the selected
+                ! procedure and, optionally, its active arguments, for
+                ! example `-head square(x y)`.  Keep inference enabled so
+                ! the ordinary generated name, module, and sibling output
+                ! are selected just as they are for a source-first command.
+                i = i + 1
+                if (i > n) then
+                    stat = 1
+                    return
+                end if
+                call get_command_argument(i, length=length)
+                block
+                    character(len=:), allocatable :: head
+                    allocate (character(len=length) :: head)
+                    call get_command_argument(i, head)
+                    call parse_head_spec(head, from_name, indep_list, stat)
+                    if (stat /= 0) return
+                end block
+                source_first_inference = .true.
             case ("--rule")
                 ! The derivative of a routine fortad cannot see inside: a
                 ! kernel behind a C binding, a table lookup, a library call.
@@ -681,6 +701,62 @@ contains
         if (.not. roundtrip_only .and. len(indep_list) == 0 .and. &
             .not. (compact_syntax .and. source_first_syntax)) stat = 1
     end subroutine parse_arguments
+
+    subroutine parse_head_spec(spec, from_name, indep_list, stat)
+        !! Parse Tapenade's `-head name(arg1 arg2)` shorthand.
+        character(len=*), intent(in) :: spec
+        character(len=:), allocatable, intent(inout) :: from_name, indep_list
+        integer, intent(out) :: stat
+        character(len=:), allocatable :: body, token
+        integer :: open, close, i, start, body_length
+        logical :: separator
+
+        stat = 0
+        open = index(trim(spec), "(")
+        if (open == 0) then
+            if (len_trim(spec) == 0) then
+                stat = 1
+            else
+                from_name = trim(spec)
+            end if
+            return
+        end if
+        close = index(trim(spec), ")", back=.true.)
+        if (open <= 1 .or. close /= len_trim(spec) .or. close <= open + 1) then
+            stat = 1
+            return
+        end if
+
+        from_name = trim(spec(:open - 1))
+        body = spec(open + 1:close - 1)
+        body_length = len_trim(body)
+        indep_list = ""
+        start = 0
+        do i = 1, body_length + 1
+            if (i > body_length) then
+                separator = .true.
+            else
+                select case (body(i:i))
+                case (",", " ", achar(9))
+                    separator = .true.
+                case default
+                    separator = .false.
+                end select
+            end if
+            if (.not. separator) then
+                if (start == 0) start = i
+            else if (start > 0) then
+                token = trim(body(start:i - 1))
+                if (len_trim(indep_list) == 0) then
+                    indep_list = token
+                else
+                    indep_list = trim(indep_list)//","//token
+                end if
+                start = 0
+            end if
+        end do
+        if (len_trim(indep_list) == 0) stat = 1
+    end subroutine parse_head_spec
 
     subroutine infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
             output_path, module_name, indep_list, message, verbose, stat)
@@ -875,6 +951,7 @@ contains
             "direction-count argument"
         write (*, '(a)') "      --name f_jvp      name of the generated procedure"
         write (*, '(a)') "      --proc NAME       target procedure in the input"
+        write (*, '(a)') "      --head SPEC       Tapenade form: NAME(arg1 arg2)"
         write (*, '(a)') "  -o, --output path     write here instead of stdout"
         write (*, '(a)') "      --dep name        which output to "// &
             "differentiate, when there is more than one"

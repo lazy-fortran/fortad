@@ -296,15 +296,15 @@ contains
     end subroutine require_bare_source_jvp
 
     subroutine require_bare_source_reverse()
-        !! Source-first mode and explicit names must produce a real gradient.
+        !! Tapenade's source-first head spelling must produce a real gradient.
         integer :: driver_unit, compiler_length
         character(len=:), allocatable :: compiler
 
         source_mode_path = directory // separator // 'fortad-compact-input_vjp.f90'
         source_mode_driver_path = directory // separator // 'fortad-source-mode-driver.f90'
         source_mode_executable = directory // separator // 'fortad-source-mode-run'
-        command = quote(cli_path) // ' ' // quote(input_path) // &
-            ' --mode reverse --indep x'
+        command = quote(cli_path) // ' --mode reverse -head ' // &
+            quote('square( x )') // ' ' // quote(input_path)
         call execute_command_line(command, wait=.true., exitstat=stat)
         if (stat /= 0) call fail('bare source reverse command failed')
 
