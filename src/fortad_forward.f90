@@ -101,17 +101,6 @@ contains
                 end if
             end do
         end if
-        do i = 1, size(primal%params)
-            di = primal%decl_index(trim(primal%params(i)))
-            if (di <= 0) cycle
-            if (primal%decls(di)%is_optional .and. active(di)) then
-                status%ok = .false.
-                status%message = "active optional argument '"// &
-                    trim(primal%params(i))//"' is not supported"
-                return
-            end if
-        end do
-
         tangent%name = primal%name//"_jvp"
         if (allocated(spec%name)) tangent%name = spec%name
         tangent%is_function = .false.
@@ -451,7 +440,9 @@ contains
             call add_tangent_decl(tangent, decl_name, decl_type, decl_value, &
                 decl_array, decl_contiguous, decl_dims, suffix, &
                 tangent_intent(primal%decls(di)%intent), vector, ndir, &
-                is_optional=.false., &
+            ! The tangent is read only on the source PRESENT path, so it
+            ! has the same optional interface as its primal dummy.
+            is_optional=primal%decls(di)%is_optional, &
                 is_allocatable=primal%decls(di)%is_allocatable)
         end do
 
