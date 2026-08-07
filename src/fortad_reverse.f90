@@ -2361,6 +2361,24 @@ contains
             select case (order_kind(k))
             case (ORDER_STMT)
                 i = order_index(k)
+                if (is_section_target(lhs_names(i))) then
+                    ! A contiguous section assignment is a vector store, not a
+                    ! scalar scatter.  Propagate its whole incoming section
+                    ! seed directly; scalar materialisation would lose the
+                    ! shape and can route the seed through the wrong SSA name.
+                    call declare_seed_shadow(primal, adjoint, dependent, suffix)
+                    seed_expr = adjoint%add_expr(expr_var(shadow_element( &
+                        trim(lhs_names(i)), suffix, dependent)))
+                    call accumulate(primal, adjoint, rhs_exprs(i), seed_expr, &
+                        ssa, suffix, active, n_tmp, status)
+                    if (.not. status%ok) return
+                    s%kind = FAD_ASSIGN
+                    s%target = shadow_element(trim(lhs_names(i)), suffix, &
+                        dependent)
+                    s%value = zero
+                    ignored = adjoint%add_stmt(s)
+                    cycle
+                end if
                 if (is_element(i)) then
                     ! The adjoint of `point(1) = e` is the same element of the
                     ! array's adjoint, propagated into `e` and then cleared:
@@ -2861,6 +2879,18 @@ contains
             name = adjoint_element(target, suffix)
         end if
     end function shadow_element
+
+    logical function is_section_target(target) result(yes)
+        !! Whether an assignment target contains a range rather than an index.
+        character(len=*), intent(in) :: target
+        integer :: open, colon
+
+        yes = .false.
+        open = index(target, "(")
+        if (open <= 0) return
+        colon = index(target(open + 1:), ":")
+        if (colon > 0) yes = .true.
+    end function is_section_target
 
     subroutine declare_seed_shadow(primal, adjoint, dependent, suffix)
         !! Declare and fill the dependent's local adjoint copy.
