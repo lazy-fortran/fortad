@@ -118,7 +118,7 @@ The current corpus snapshot is also explicit. `fortad-bench` has 2,014
 candidate files: 58 runnable pure-Fortran cases, 126 deliberate refusals, 28
 invalid-upstream closures, 1,294 queued candidates, and 508 non-Fortran or
 source-absent cases. The complete compiler-only triage covers all 1,294 queued
-candidates (2,001 accepted files, 1,424 compiler diagnostics, and 147 include
+candidates (2,005 accepted files, 1,420 compiler diagnostics, and 147 include
 fragments). Compiler triage is classification evidence; source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
 committed.
