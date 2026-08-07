@@ -4,6 +4,7 @@ module fortad_lower_statements
         binary_op_node, identifier_node, literal_node, call_or_subscript_node, &
         declaration_node, do_loop_node, if_node, parameter_declaration_node, &
         subroutine_call_node, use_statement_node, comment_node, &
+        allocate_statement_node, deallocate_statement_node, &
         pointer_assignment_node, &
         return_node, &
         get_select_type_info, get_type_guard_info, component_access_query_t, &
@@ -17,7 +18,7 @@ module fortad_lower_statements
         FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
         FAD_INTENT_IN, FAD_INTENT_OUT, FAD_INTENT_INOUT, &
         FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT, &
-        FAD_END_SELECT
+        FAD_END_SELECT, FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC
     use fortad_lower_types, only: lower_status_t
     use fortad_use_store, only: ensure_use_capacity
     implicit none
@@ -142,11 +143,28 @@ contains
                 ignored = proc%add_decl(d)
             end if
 
+            type is (allocate_statement_node)
+            call lower_allocate_statement(arena, n, proc, s, status)
+            if (.not. status%ok) return
+            ignored = proc%add_stmt(s)
+
+            type is (deallocate_statement_node)
+            call lower_deallocate_statement(arena, n, proc, s, status)
+            if (.not. status%ok) return
+            ignored = proc%add_stmt(s)
+
             type is (assignment_node)
             s%kind = FAD_ASSIGN
             s%line = n%line
             call lower_target(arena, n%target_index, proc, s, status)
             if (.not. status%ok) return
+            if (whole_allocatable_target(arena, n%target_index, proc)) then
+                status%ok = .false.
+                status%message = "unsupported implicit reallocation at line "// &
+                    itoa(n%line)//" for '"//trim(s%target)//"': assign allocatable arrays only through "// &
+                    "an explicitly allocated element or section"
+                return
+            end if
             s%value = lower_expr(arena, n%value_index, proc, status)
             if (.not. status%ok) return
             ignored = proc%add_stmt(s)
@@ -188,9 +206,7 @@ contains
             end block
 
             type is (subroutine_call_node)
-            s%kind = FAD_CALL_STMT
             s%line = n%line
-            s%target = n%name
             block
                 integer, allocatable :: cargs(:)
                 integer :: ci
@@ -201,6 +217,19 @@ contains
                 end do
                 s%call_args = cargs
             end block
+            if (same_name(n%name, "move_alloc") .and. &
+                size(n%arg_indices) == 2) then
+                s%kind = FAD_MOVE_ALLOC
+                if (.not. allocation_object_declared(proc, s%call_args(1)) .or. &
+                    .not. allocation_object_declared(proc, s%call_args(2))) then
+                    call refuse_allocation(n%line, "move_alloc requires allocatable "// &
+                        "objects", status)
+                    return
+                end if
+            else
+                s%kind = FAD_CALL_STMT
+                s%target = n%name
+            end if
             ignored = proc%add_stmt(s)
 
             type is (pointer_assignment_node)
@@ -417,6 +446,7 @@ contains
         end if
         d%is_array = n%is_array
         d%is_contiguous = n%is_contiguous
+        d%is_allocatable = n%is_allocatable
         d%intent = FAD_INTENT_NONE
         if (n%has_intent .and. allocated(n%intent)) then
             select case (trim(n%intent))
@@ -448,6 +478,156 @@ contains
             end if
         end if
     end subroutine fill_decl
+
+    subroutine lower_allocate_statement(arena, node, proc, s, status)
+        !! Lower one-owner ALLOCATE.  Multiple allocation objects, STAT=,
+        !! ERRMSG=, and polymorphic TYPE-spec forms remain a named boundary;
+        !! they need a transaction/state representation rather than a text
+        !! copy.  SOURCE= and MOLD= are retained as ownership metadata so the
+        !! forward shadow can acquire the same shape and initial values.
+        type(ast_arena_t), intent(in) :: arena
+        type(allocate_statement_node), intent(in) :: node
+        type(fad_proc_t), intent(inout) :: proc
+        type(fad_stmt_t), intent(out) :: s
+        type(lower_status_t), intent(out) :: status
+        integer :: i
+
+        status%ok = .true.
+        s%kind = FAD_ALLOCATE
+        s%line = node%line
+        if (node%stat_var_index > 0 .or. node%errmsg_var_index > 0) then
+            call refuse_allocation(node%line, "STAT=/ERRMSG=", status)
+            return
+        end if
+        if (allocated(node%type_spec)) then
+            if (len_trim(node%type_spec) > 0) then
+                call refuse_allocation(node%line, "TYPE-spec", status)
+                return
+            end if
+        end if
+        if (.not. allocated(node%var_indices)) then
+            call refuse_allocation(node%line, "missing allocation object", status)
+            return
+        end if
+        if (size(node%var_indices) /= 1) then
+            call refuse_allocation(node%line, "multiple allocation objects", status)
+            return
+        end if
+        allocate (s%allocation_args(1))
+        s%allocation_args(1) = lower_expr(arena, node%var_indices(1), proc, status)
+        if (.not. status%ok) return
+        if (.not. allocation_object_declared(proc, s%allocation_args(1))) then
+            call refuse_allocation(node%line, "non-allocatable target", status)
+            return
+        end if
+        if (allocated(node%shape_indices)) then
+            if (size(node%shape_indices) > 0) then
+                block
+                    integer, allocatable :: shapes(:)
+                    allocate (shapes(size(node%shape_indices)))
+                    do i = 1, size(node%shape_indices)
+                        shapes(i) = lower_expr(arena, node%shape_indices(i), &
+                            proc, status)
+                        if (.not. status%ok) return
+                    end do
+                    s%allocation_args = [s%allocation_args, shapes]
+                end block
+            end if
+        end if
+        if (node%source_expr_index > 0) then
+            s%allocation_source = lower_expr(arena, node%source_expr_index, &
+                proc, status)
+        else if (node%mold_expr_index > 0) then
+            s%allocation_mold = lower_expr(arena, node%mold_expr_index, &
+                proc, status)
+        end if
+    end subroutine lower_allocate_statement
+
+    subroutine lower_deallocate_statement(arena, node, proc, s, status)
+        !! Lower one-owner DEALLOCATE without status side channels.
+        type(ast_arena_t), intent(in) :: arena
+        type(deallocate_statement_node), intent(in) :: node
+        type(fad_proc_t), intent(inout) :: proc
+        type(fad_stmt_t), intent(out) :: s
+        type(lower_status_t), intent(out) :: status
+
+        status%ok = .true.
+        s%kind = FAD_DEALLOCATE
+        s%line = node%line
+        if (node%stat_var_index > 0 .or. node%errmsg_var_index > 0) then
+            call refuse_allocation(node%line, "STAT=/ERRMSG=", status)
+            return
+        end if
+        if (.not. allocated(node%var_indices)) then
+            call refuse_allocation(node%line, "missing deallocation object", status)
+            return
+        end if
+        if (size(node%var_indices) /= 1) then
+            call refuse_allocation(node%line, "multiple deallocation objects", status)
+            return
+        end if
+        allocate (s%allocation_args(1))
+        s%allocation_args(1) = lower_expr(arena, node%var_indices(1), proc, status)
+        if (.not. status%ok) return
+        if (.not. allocation_object_declared(proc, s%allocation_args(1))) then
+            call refuse_allocation(node%line, "non-allocatable target", status)
+            return
+        end if
+    end subroutine lower_deallocate_statement
+
+    subroutine refuse_allocation(line, construct, status)
+        integer, intent(in) :: line
+        character(len=*), intent(in) :: construct
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .false.
+        status%message = "unsupported allocation lifetime form '"//trim(construct)// &
+            "' at line "//itoa(line)//": ownership side effects are not represented"
+    end subroutine refuse_allocation
+
+    logical function whole_allocatable_target(arena, idx, proc) result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(in) :: proc
+        character(len=:), allocatable :: name
+        integer :: di
+
+        found = .false.
+        if (idx <= 0 .or. idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        select type (node => arena%entries(idx)%node)
+            type is (identifier_node)
+            name = node%name
+            type is (call_or_subscript_node)
+            if (allocated(node%arg_indices)) then
+                if (size(node%arg_indices) /= 0) return
+            end if
+            name = node%name
+        class default
+            return
+        end select
+        di = proc%decl_index(trim(name))
+        found = .false.
+        if (di > 0) found = proc%decls(di)%is_allocatable
+    end function whole_allocatable_target
+
+    logical function allocation_object_declared(proc, idx) result(found)
+        type(fad_proc_t), intent(in) :: proc
+        integer, intent(in) :: idx
+        integer :: di
+
+        found = .false.
+        if (idx <= 0 .or. idx > proc%n_exprs) return
+        if (.not. allocated(proc%exprs(idx)%text)) return
+        di = proc%decl_index(fad_base_name(proc%exprs(idx)%text))
+        ! Component ownership needs a containing-object lifetime model.  Do
+        ! not accept it merely because the expression contains a percent sign.
+        found = .false.
+        if (di > 0) then
+            found = proc%decls(di)%is_allocatable .and. &
+                index(proc%exprs(idx)%text, "%") == 0
+        end if
+    end function allocation_object_declared
 
     function declaration_dims_from_source(arena, line_number, name) result(dims)
         !! Fallback for declaration bounds not attached to the parser node.

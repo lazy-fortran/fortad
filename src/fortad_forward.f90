@@ -14,7 +14,7 @@ module fortad_forward
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
         FAD_INTENT_OUT, FAD_INTENT_INOUT, FAD_INTENT_NONE, &
         FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT, &
-        FAD_END_SELECT
+        FAD_END_SELECT, FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule
     use fortad_registry, only: call_rule_has, call_rule_lines, &
         call_rule_substitute
@@ -82,6 +82,16 @@ contains
         call seed_activity(primal, spec, active, status)
         if (.not. status%ok) return
         if (spec%vector) then
+            do i = 1, primal%n_stmts
+                if (primal%stmts(i)%kind == FAD_ALLOCATE .or. &
+                    primal%stmts(i)%kind == FAD_DEALLOCATE .or. &
+                    primal%stmts(i)%kind == FAD_MOVE_ALLOC) then
+                    status%ok = .false.
+                    status%message = "vector mode with explicit allocation lifetime is "// &
+                        "not supported; use scalar directions"
+                    return
+                end if
+            end do
             do i = 1, primal%n_decls
                 if (active(i) .and. is_derived_decl(primal, i)) then
                     status%ok = .false.
@@ -143,7 +153,7 @@ contains
             ignored = tangent%add_decl_fields(decl_name, decl_type, &
                 FAD_INTENT_NONE, primal%decls(i)%is_value, &
                 primal%decls(i)%is_array, primal%decls(i)%is_contiguous, &
-                .false., decl_dims)
+                .false., decl_dims, .false., primal%decls(i)%is_allocatable)
             if (active(i)) then
                 call add_tangent_decl(tangent, decl_name, decl_type, &
                     primal%decls(i)%is_value, &
@@ -151,7 +161,8 @@ contains
                     primal%decls(i)%is_contiguous, &
                     decl_dims, suffix, &
                     FAD_INTENT_NONE, spec%vector, ndir, &
-                    is_optional=.false.)
+                    is_optional=.false., &
+                    is_allocatable=primal%decls(i)%is_allocatable)
             end if
         end do
     end subroutine differentiate_forward
@@ -198,6 +209,20 @@ contains
         do while (changed)
             changed = .false.
             do j = 1, primal%n_stmts
+                if (primal%stmts(j)%kind == FAD_MOVE_ALLOC) then
+                    di = arg_decl_index(primal, primal%stmts(j)%call_args(1))
+                    if (di > 0) then
+                        if (active(di)) call mark_move_alloc_peer(primal, &
+                            primal%stmts(j), active, changed)
+                    else
+                        di = arg_decl_index(primal, primal%stmts(j)%call_args(2))
+                        if (di > 0) then
+                            if (active(di)) call mark_move_alloc_peer(primal, &
+                                primal%stmts(j), active, changed)
+                        end if
+                    end if
+                    cycle
+                end if
                 if (primal%stmts(j)%kind == FAD_CALL_STMT) then
                     ! A call is opaque, so which arguments it writes is unknown.
                     ! If any argument is active, every argument is treated as
@@ -228,6 +253,23 @@ contains
             end do
         end do
     end subroutine seed_activity
+
+    subroutine mark_move_alloc_peer(primal, stmt, active, changed)
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_stmt_t), intent(in) :: stmt
+        logical, intent(inout) :: active(:)
+        logical, intent(inout) :: changed
+        integer :: i, di
+
+        do i = 1, 2
+            di = arg_decl_index(primal, stmt%call_args(i))
+            if (di <= 0 .or. di > size(active)) cycle
+            if (.not. active(di)) then
+                active(di) = .true.
+                changed = .true.
+            end if
+        end do
+    end subroutine mark_move_alloc_peer
 
     logical function has_calls(p) result(yes)
         !! True when the procedure calls something fortad cannot see into.
@@ -384,14 +426,15 @@ contains
                         decl_value, decl_array, decl_contiguous, &
                         decl_dims, suffix, &
                         FAD_INTENT_OUT, vector, ndir, &
-                        is_optional=.false.)
+                        is_optional=.false., &
+                        is_allocatable=primal%decls(di)%is_allocatable)
                     ! Dropped from the signature but still written by the primal
                     ! statements, so it stays as a local. Whether those writes
                     ! survive is dead-store elimination's decision, not this
                     ! routine's - and an undeclared name would not compile.
                     ignored = tangent%add_decl_fields(decl_name, decl_type, &
                         FAD_INTENT_NONE, decl_value, decl_array, decl_contiguous, &
-                        .false., decl_dims, .false.)
+                        .false., decl_dims, .false., primal%decls(di)%is_allocatable)
                     cycle
                 end if
             end if
@@ -401,14 +444,15 @@ contains
             ignored = tangent%add_decl_fields(decl_name, decl_type, &
                 primal%decls(di)%intent, decl_value, decl_array, decl_contiguous, &
                 primal%decls(di)%is_result, decl_dims, &
-                primal%decls(di)%is_optional)
+                primal%decls(di)%is_optional, primal%decls(di)%is_allocatable)
             if (.not. active(di)) cycle
             n = n + 1
             names(n) = trim(primal%params(i))//suffix
             call add_tangent_decl(tangent, decl_name, decl_type, decl_value, &
                 decl_array, decl_contiguous, decl_dims, suffix, &
                 tangent_intent(primal%decls(di)%intent), vector, ndir, &
-                is_optional=.false.)
+                is_optional=.false., &
+                is_allocatable=primal%decls(di)%is_allocatable)
         end do
 
         if (primal%is_function) then
@@ -432,12 +476,14 @@ contains
                 decl_contiguous = primal%decls(di)%is_contiguous
                 if (with_primal) ignored = tangent%add_decl_fields( &
                     decl_name, decl_type, FAD_INTENT_OUT, decl_value, decl_array, &
-                    decl_contiguous, .true., decl_dims)
+                    decl_contiguous, .true., decl_dims, .false., &
+                    primal%decls(di)%is_allocatable)
                 n = n + 1
                 names(n) = primal%result_name//suffix
                 call add_tangent_decl(tangent, decl_name, decl_type, decl_value, &
                     decl_array, decl_contiguous, decl_dims, suffix, &
-                    FAD_INTENT_OUT, vector, ndir)
+                    FAD_INTENT_OUT, vector, ndir, &
+                    is_allocatable=primal%decls(di)%is_allocatable)
             end if
         end if
 
@@ -464,7 +510,7 @@ contains
 
     subroutine add_tangent_decl(tangent, name, type_name, is_value, is_array, &
             is_contiguous, dims, suffix, intent_code, &
-            vector, ndir, is_optional)
+            vector, ndir, is_optional, is_allocatable)
         !! Declare the tangent counterpart of a primal entity.
         !!
         !! In vector mode the direction axis goes **first**, because Fortran
@@ -480,8 +526,9 @@ contains
         logical, intent(in), optional :: vector
         character(len=*), intent(in), optional :: ndir
         logical, intent(in), optional :: is_optional
+        logical, intent(in), optional :: is_allocatable
         integer :: ignored
-        logical :: vec, optional_arg
+        logical :: vec, optional_arg, allocatable_arg
 
         associate (unused => is_value)
         end associate
@@ -489,6 +536,8 @@ contains
         if (present(vector)) vec = vector
         optional_arg = .false.
         if (present(is_optional)) optional_arg = is_optional
+        allocatable_arg = .false.
+        if (present(is_allocatable)) allocatable_arg = is_allocatable
 
         ! VALUE belongs to the primal dummy, not to its tangent. A tangent is
         ! written by the generated routine, so VALUE would conflict with the
@@ -497,18 +546,18 @@ contains
             if (is_array .and. len_trim(dims) > 0) then
                 ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
                     intent_code, .false., .true., .false., .false., &
-                    ndir//", "//trim(dims), optional_arg)
+                    ndir//", "//trim(dims), optional_arg, allocatable_arg)
             else
                 ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
                     intent_code, .false., .true., .false., .false., ndir, &
-                    optional_arg)
+                    optional_arg, allocatable_arg)
             end if
             ! Contiguity of the primal says nothing about the tangent block,
             ! and a wrong `contiguous` is a promise the caller may not keep.
         else
             ignored = tangent%add_decl_fields(trim(name)//suffix, type_name, &
                 intent_code, .false., is_array, is_contiguous, .false., dims, &
-                optional_arg)
+                optional_arg, allocatable_arg)
         end if
     end subroutine add_tangent_decl
 
@@ -590,6 +639,21 @@ contains
                         vector, status)
                     if (.not. status%ok) return
 
+                case (FAD_ALLOCATE)
+                    call emit_allocate_tangent(primal, tangent, ps, active, &
+                        suffix, vector, status)
+                    if (.not. status%ok) return
+
+                case (FAD_DEALLOCATE)
+                    call emit_deallocate_tangent(primal, tangent, ps, active, &
+                        suffix, vector, status)
+                    if (.not. status%ok) return
+
+                case (FAD_MOVE_ALLOC)
+                    call emit_move_alloc_tangent(primal, tangent, ps, active, &
+                        suffix, vector, status)
+                    if (.not. status%ok) return
+
                 case default
                     status%ok = .false.
                     status%message = "forward mode: unsupported statement kind"
@@ -598,6 +662,182 @@ contains
             end associate
         end do
     end subroutine build_body
+
+    subroutine emit_allocate_tangent(primal, tangent, ps, active, suffix, &
+            vector, status)
+        !! Mirror an explicit allocation for an active owner.  The derivative
+        !! descriptor follows the primal descriptor; SOURCE= is differentiated
+        !! when its source is active, while MOLD= and shape expressions are
+        !! passive allocation metadata.  An uninitialised tangent is cleared
+        !! immediately so later uses cannot observe undefined storage.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: tangent
+        type(fad_stmt_t), intent(in) :: ps
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: vector
+        type(forward_status_t), intent(inout) :: status
+        type(fad_stmt_t) :: s
+        integer :: i, di, ignored, target_expr, dexpr
+        character(len=:), allocatable :: target_text
+        logical :: target_active, source_active
+
+        target_text = emit_expr(primal, ps%allocation_args(1))
+        di = primal%decl_index(fad_base_name(target_text))
+        target_active = .false.
+        if (di > 0) target_active = active(di)
+
+        s%kind = FAD_ALLOCATE
+        allocate (s%allocation_args(size(ps%allocation_args)))
+        s%allocation_args(1) = tangent%add_expr(expr_var( &
+            tangent_name(target_text, suffix, vector)))
+        do i = 2, size(ps%allocation_args)
+            s%allocation_args(i) = copy_expr(primal, tangent, &
+                ps%allocation_args(i))
+        end do
+        if (ps%allocation_source > 0) then
+            source_active = expr_reads_active(primal, ps%allocation_source, active)
+            if (source_active) then
+                dexpr = tangent_of(primal, tangent, ps%allocation_source, active, &
+                    suffix, vector, status)
+                if (.not. status%ok) return
+                s%allocation_source = dexpr
+            else
+                target_expr = tangent%add_expr(expr_var(target_text))
+                s%allocation_mold = target_expr
+            end if
+        else if (ps%allocation_mold > 0) then
+            s%allocation_mold = copy_expr(primal, tangent, ps%allocation_mold)
+        end if
+        if (target_active) then
+            ignored = tangent%add_stmt(s)
+            if (s%allocation_source == 0) then
+                s%kind = FAD_ASSIGN
+                s%target = tangent_name(target_text, suffix, vector)
+                s%value = tangent%add_expr(expr_const( &
+                    "0.0"//tangent%real_suffix))
+                ignored = tangent%add_stmt(s)
+            end if
+        end if
+
+        call reset_statement(s)
+        call copy_allocation_stmt(primal, tangent, ps, s)
+        ignored = tangent%add_stmt(s)
+    end subroutine emit_allocate_tangent
+
+    subroutine emit_deallocate_tangent(primal, tangent, ps, active, suffix, &
+            vector, status)
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: tangent
+        type(fad_stmt_t), intent(in) :: ps
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: vector
+        type(forward_status_t), intent(inout) :: status
+        type(fad_stmt_t) :: s
+        character(len=:), allocatable :: target
+        integer :: di, ignored
+
+        status%ok = .true.
+        target = emit_expr(primal, ps%allocation_args(1))
+        di = primal%decl_index(fad_base_name(target))
+        if (di > 0) then
+            if (active(di)) then
+                call reset_statement(s)
+                s%kind = FAD_DEALLOCATE
+                allocate (s%allocation_args(1))
+                s%allocation_args(1) = tangent%add_expr(expr_var( &
+                    tangent_name(target, suffix, vector)))
+                ignored = tangent%add_stmt(s)
+            end if
+        end if
+        call reset_statement(s)
+        s%kind = FAD_DEALLOCATE
+        allocate (s%allocation_args(1))
+        s%allocation_args(1) = copy_expr(primal, tangent, ps%allocation_args(1))
+        ignored = tangent%add_stmt(s)
+    end subroutine emit_deallocate_tangent
+
+    subroutine emit_move_alloc_tangent(primal, tangent, ps, active, suffix, &
+            vector, status)
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: tangent
+        type(fad_stmt_t), intent(in) :: ps
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        logical, intent(in) :: vector
+        type(forward_status_t), intent(inout) :: status
+        type(fad_stmt_t) :: s
+        character(len=:), allocatable :: source, target
+        integer :: source_di, target_di, ignored
+        logical :: source_active, target_active
+
+        source = emit_expr(primal, ps%call_args(1))
+        target = emit_expr(primal, ps%call_args(2))
+        source_di = primal%decl_index(fad_base_name(source))
+        target_di = primal%decl_index(fad_base_name(target))
+        source_active = .false.
+        if (source_di > 0) source_active = active(source_di)
+        target_active = .false.
+        if (target_di > 0) target_active = active(target_di)
+        if (source_active .neqv. target_active) then
+            status%ok = .false.
+            status%message = "forward mode: move_alloc requires source and "// &
+                "destination to share an active derivative shadow"
+            return
+        end if
+        if (source_active) then
+            call reset_statement(s)
+            s%kind = FAD_MOVE_ALLOC
+            allocate (s%call_args(2))
+            s%call_args(1) = tangent%add_expr(expr_var( &
+                tangent_name(source, suffix, vector)))
+            s%call_args(2) = tangent%add_expr(expr_var( &
+                tangent_name(target, suffix, vector)))
+            ignored = tangent%add_stmt(s)
+        end if
+        call reset_statement(s)
+        s%kind = FAD_MOVE_ALLOC
+        allocate (s%call_args(2))
+        s%call_args(1) = copy_expr(primal, tangent, ps%call_args(1))
+        s%call_args(2) = copy_expr(primal, tangent, ps%call_args(2))
+        ignored = tangent%add_stmt(s)
+    end subroutine emit_move_alloc_tangent
+
+    subroutine copy_allocation_stmt(primal, tangent, ps, out)
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: tangent
+        type(fad_stmt_t), intent(in) :: ps
+        type(fad_stmt_t), intent(out) :: out
+        integer :: i
+
+        call reset_statement(out)
+        out%kind = FAD_ALLOCATE
+        allocate (out%allocation_args(size(ps%allocation_args)))
+        do i = 1, size(ps%allocation_args)
+            out%allocation_args(i) = copy_expr(primal, tangent, &
+                ps%allocation_args(i))
+        end do
+        if (ps%allocation_source > 0) out%allocation_source = &
+            copy_expr(primal, tangent, ps%allocation_source)
+        if (ps%allocation_mold > 0) out%allocation_mold = &
+            copy_expr(primal, tangent, ps%allocation_mold)
+    end subroutine copy_allocation_stmt
+
+    subroutine reset_statement(s)
+        !! A statement is reused while emitting primal and shadow events.  Its
+        !! allocatable payloads must be cleared before another payload is
+        !! allocated; intrinsic assignment of a statement retains those
+        !! descriptors.
+        type(fad_stmt_t), intent(inout) :: s
+
+        if (allocated(s%call_args)) deallocate (s%call_args)
+        if (allocated(s%allocation_args)) deallocate (s%allocation_args)
+        s%allocation_source = 0
+        s%allocation_mold = 0
+        if (allocated(s%target)) deallocate (s%target)
+        s%value = 0
+    end subroutine reset_statement
 
     subroutine emit_call_tangent(primal, tangent, ps, active, suffix, vector, &
             status)

@@ -16,7 +16,6 @@ module fortad_lower
     use fortad_lower_body, only: lower_function, lower_subroutine, &
         inherit_module_uses
     use fortad_lower_types, only: lower_status_t
-    use fortad_boundaries, only: find_allocation_construct
     implicit none
     private
 
@@ -92,6 +91,65 @@ contains
         if (c >= "A" .and. c <= "Z") down = achar(iachar(c) + 32)
     end function down
 
+    logical function has_module_allocatable_state(source) result(found)
+        !! Keep mutable module-owned allocation state outside the supported
+        !! ownership slice.  This lexical check is deliberately conservative:
+        !! a module containing such state is refused before procedure lowering,
+        !! rather than pretending that a derivative can replay its lifetime.
+        character(len=*), intent(in) :: source
+        character(len=:), allocatable :: line, lower_line
+        integer :: first, last, next, derived_depth
+        logical :: module_scope
+
+        found = .false.
+        module_scope = .false.
+        derived_depth = 0
+        first = 1
+        do while (first <= len(source))
+            next = index(source(first:), new_line('a'))
+            if (next == 0) then
+                last = len(source)
+            else
+                last = first + next - 2
+            end if
+            if (last >= first) then
+                line = adjustl(source(first:last))
+                lower_line = lower_text(line)
+                if (index(lower_line, "module ") == 1 .and. &
+                    index(lower_line, "module procedure") /= 1) then
+                    module_scope = .true.
+                else if (index(lower_line, "contains") == 1) then
+                    module_scope = .false.
+                else if (index(lower_line, "end module") == 1) then
+                    module_scope = .false.
+                else if (index(lower_line, "type ") == 1 .and. &
+                        index(lower_line, "::") > 0) then
+                    derived_depth = derived_depth + 1
+                else if (index(lower_line, "end type") == 1) then
+                    derived_depth = max(0, derived_depth - 1)
+                else if (module_scope .and. derived_depth == 0 .and. &
+                        index(lower_line, "allocatable") > 0 .and. &
+                        index(lower_line, "::") > 0) then
+                    found = .true.
+                    return
+                end if
+            end if
+            if (next == 0) exit
+            first = first + next
+        end do
+    end function has_module_allocatable_state
+
+    function lower_text(text) result(out)
+        character(len=*), intent(in) :: text
+        character(len=len(text)) :: out
+        integer :: j
+
+        out = text
+        do j = 1, len(text)
+            out(j:j) = down(text(j:j))
+        end do
+    end function lower_text
+
     subroutine lower_source(source, proc, status, proc_name)
         !! Parse `source` through fortfront and lower one of its procedures.
         !!
@@ -113,18 +171,6 @@ contains
         integer :: i, chosen, source_pos, source_next, source_line
         integer :: source_open, source_close, source_first, source_last
         integer :: source_comma, source_depth, source_n_params
-        integer :: allocation_line
-
-        if (find_allocation_construct(source, allocation_line, &
-                allocation_construct)) then
-            status%ok = .false.
-            status%message = "unsupported allocation lifetime construct '"// &
-                trim(allocation_construct)//"' at line "// &
-                line_text(allocation_line)//"; active allocation state is not "// &
-                "represented yet"
-            return
-        end if
-
         opts%input_mode = INPUT_MODE_STANDARD
         ! FortAD lowers from the parsed/query AST and performs its own
         ! derivative checks.  Running FortFront's optional semantic pass here
@@ -142,6 +188,12 @@ contains
                     status%message = "parse failed: "//trim(res%error_msg)
                 end if
             end if
+            return
+        end if
+
+        if (has_module_allocatable_state(source)) then
+            status%ok = .false.
+            status%message = "module-level allocatable mutable state is not supported; use local or dummy ownership"
             return
         end if
 

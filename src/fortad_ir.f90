@@ -48,6 +48,11 @@ module fortad_ir
     integer, parameter, public :: FAD_CLASS_IS = 11
     integer, parameter, public :: FAD_CLASS_DEFAULT = 12
     integer, parameter, public :: FAD_END_SELECT = 13
+    !! Explicit ownership operations. Allocation state belongs to the object,
+    !! not to one SSA value version.
+    integer, parameter, public :: FAD_ALLOCATE = 14
+    integer, parameter, public :: FAD_DEALLOCATE = 15
+    integer, parameter, public :: FAD_MOVE_ALLOC = 16
 
     ! Argument intents, mirroring fortfront's constants.
     integer, parameter, public :: FAD_INTENT_NONE = 0
@@ -77,6 +82,12 @@ module fortad_ir
         integer :: line = 0
         !! Actual arguments of a FAD_CALL_STMT.
         integer, allocatable :: call_args(:)
+        !! For FAD_ALLOCATE/FAD_DEALLOCATE, the first entry is the owning
+        !! object and the remaining entries are shape expressions.  The
+        !! optional SOURCE= and MOLD= expressions use the fields below.
+        integer, allocatable :: allocation_args(:)
+        integer :: allocation_source = 0
+        integer :: allocation_mold = 0
     end type fad_stmt_t
 
     type, public :: fad_decl_t
@@ -92,6 +103,11 @@ module fortad_ir
         logical :: is_array = .false.
         logical :: is_contiguous = .false.
         logical :: is_result = .false.
+        !! Whether the entity owns deferred-shape storage.  This is distinct
+        !! from ``is_array``: an allocatable tangent must carry the same
+        !! descriptor and cannot be emitted as an ordinary assumed-shape
+        !! array.
+        logical :: is_allocatable = .false.
         !! Verbatim dimension text, e.g. "n" or ":,:" - emitted unchanged.
         character(len=:), allocatable :: dims
     end type fad_decl_t
@@ -349,12 +365,13 @@ contains
         out%is_optional = source%is_optional
         out%is_array = source%is_array
         out%is_contiguous = source%is_contiguous
+        out%is_allocatable = source%is_allocatable
         out%is_result = source%is_result
     end subroutine copy_decl
 
     integer function proc_add_decl_fields(self, name, type_name, intent, &
             is_value, is_array, is_contiguous, &
-            is_result, dims, is_optional) result(idx)
+            is_result, dims, is_optional, is_allocatable) result(idx)
         !! Append declaration scalars and strings directly. This is the
         !! compiler-neutral path for transformation code that repeatedly
         !! mirrors declarations; it avoids passing an allocatable-component
@@ -364,17 +381,22 @@ contains
         integer, intent(in) :: intent
         logical, intent(in) :: is_value, is_array, is_contiguous, is_result
         logical, intent(in), optional :: is_optional
+        logical, intent(in), optional :: is_allocatable
         type(fad_decl_t), allocatable :: tmp(:)
         integer :: cap, existing
         logical :: optional_arg
+        logical :: allocatable_arg
 
         optional_arg = .false.
         if (present(is_optional)) optional_arg = is_optional
+        allocatable_arg = .false.
+        if (present(is_allocatable)) allocatable_arg = is_allocatable
 
         existing = self%decl_index(name)
         if (existing > 0) then
             call set_decl_fields(self%decls(existing), name, type_name, intent, &
-                is_value, is_array, is_contiguous, is_result, dims, optional_arg)
+                is_value, is_array, is_contiguous, is_result, dims, optional_arg, &
+                allocatable_arg)
             idx = existing
             return
         end if
@@ -387,17 +409,19 @@ contains
         end if
         self%n_decls = self%n_decls + 1
         call set_decl_fields(self%decls(self%n_decls), name, type_name, intent, &
-            is_value, is_array, is_contiguous, is_result, dims, optional_arg)
+            is_value, is_array, is_contiguous, is_result, dims, optional_arg, &
+            allocatable_arg)
         idx = self%n_decls
     end function proc_add_decl_fields
 
     subroutine set_decl_fields(out, name, type_name, intent, is_value, &
-            is_array, is_contiguous, is_result, dims, is_optional)
+            is_array, is_contiguous, is_result, dims, is_optional, is_allocatable)
         type(fad_decl_t), intent(inout) :: out
         character(len=*), intent(in) :: name, type_name, dims
         integer, intent(in) :: intent
         logical, intent(in) :: is_value, is_array, is_contiguous, is_result
         logical, intent(in) :: is_optional
+        logical, intent(in) :: is_allocatable
 
         if (allocated(out%name)) deallocate (out%name)
         if (allocated(out%type_name)) deallocate (out%type_name)
@@ -411,6 +435,7 @@ contains
         out%is_array = is_array
         out%is_contiguous = is_contiguous
         out%is_result = is_result
+        out%is_allocatable = is_allocatable
     end subroutine set_decl_fields
 
     integer function proc_decl_index(self, name) result(idx)

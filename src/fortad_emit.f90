@@ -16,6 +16,7 @@ module fortad_emit
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
         FAD_DIRECTIVE, FAD_SELECT_TYPE, FAD_TYPE_IS, &
         FAD_CLASS_IS, FAD_CLASS_DEFAULT, FAD_END_SELECT, &
+        FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC, &
         FAD_INTENT_IN, FAD_INTENT_OUT, &
         FAD_INTENT_INOUT
     use fortgen_buffer, only: buffer_t
@@ -235,6 +236,7 @@ contains
         case (FAD_INTENT_INOUT)
             line = line//", intent(inout)"
         end select
+        if (d%is_allocatable) line = line//", allocatable"
         if (d%is_contiguous) line = line//", contiguous"
         if (d%is_array) then
             if (allocated(d%dims)) then
@@ -306,10 +308,49 @@ contains
             call b%put("end select")
         case (FAD_DIRECTIVE)
             call b%put(s%target)
+        case (FAD_ALLOCATE)
+            call write_allocate_stmt(b, p, s)
+        case (FAD_DEALLOCATE)
+            call b%put("deallocate(")
+            call write_expr(b, p, s%allocation_args(1))
+            call b%put(")")
+        case (FAD_MOVE_ALLOC)
+            call b%put("call move_alloc(")
+            call write_expr(b, p, s%call_args(1))
+            call b%put(", ")
+            call write_expr(b, p, s%call_args(2))
+            call b%put(")")
         case default
             call b%put("! unsupported statement")
         end select
     end subroutine write_stmt
+
+    subroutine write_allocate_stmt(b, p, s)
+        !! Emit the bounded one-owner allocation form represented by the IR.
+        type(buffer_t), intent(inout) :: b
+        type(fad_proc_t), intent(in) :: p
+        type(fad_stmt_t), intent(in) :: s
+        integer :: i
+
+        call b%put("allocate(")
+        call write_expr(b, p, s%allocation_args(1))
+        if (size(s%allocation_args) > 1) then
+            call b%put("(")
+            do i = 2, size(s%allocation_args)
+                if (i > 2) call b%put(", ")
+                call write_expr(b, p, s%allocation_args(i))
+            end do
+            call b%put(")")
+        end if
+        if (s%allocation_source > 0) then
+            call b%put(", source=")
+            call write_expr(b, p, s%allocation_source)
+        else if (s%allocation_mold > 0) then
+            call b%put(", mold=")
+            call write_expr(b, p, s%allocation_mold)
+        end if
+        call b%put(")")
+    end subroutine write_allocate_stmt
 
     subroutine write_omp_directive(b, p, s, directive_index, indent, limit)
         !! Add race-free data-sharing clauses from the final IR.

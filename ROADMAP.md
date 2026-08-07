@@ -810,14 +810,17 @@ of selected child ends the fixed-path derivative contract.
       deep assignment, and `move_alloc`. Reverse mode must reproduce the
       lifetime of every active allocation without leaking or reading a dead
       object.
-      - [x] **P7.2a executable refusal boundary.** The public transforms now
-        reject the first allocatable declaration/component or lifetime-changing
-        statement with its source line before lowering. The independent
-        [`test_allocation_lifetime_oracle.f90`](test/test_allocation_lifetime_oracle.f90)
-        compiles and runs a primal using `mold=`, `source=`, deep assignment,
-        automatic reallocation, `deallocate`, and `move_alloc`, then checks
-        named JVP and VJP refusals. Shadow allocation state and reverse replay
-        remain open P7.2 work.
+      - [x] **P7.2a bounded forward ownership slice.** Local and dummy
+        allocatable arrays can now carry explicit `allocate`/`deallocate`,
+        `source=`, `mold=`, and `move_alloc` operations through IR, lowering,
+        tangent generation, emission, and dead-code elimination. The
+        independent [`test_allocation_lifetime_oracle.f90`](test/test_allocation_lifetime_oracle.f90)
+        checks the generated JVP against a central finite difference and
+        verifies that active module-level allocatable state is refused.
+        Reverse mode deliberately refuses these operations until an
+        allocation-state replay tape exists; implicit whole-array
+        reallocation, allocatable components, and polymorphic ownership remain
+        open P7.2 work.
 - [ ] **P7.3 Aliasing and sections.** Track `pointer`, `target`, association,
       overlapping actual arguments, noncontiguous sections, and component
       aliases by storage identity. Test aliases that share a target and aliases

@@ -22,6 +22,7 @@ module fortad_dce
         FAD_IF, FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, &
         FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT, &
         FAD_END_SELECT, &
+        FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC, &
         FAD_INTENT_NONE
     implicit none
     private
@@ -226,6 +227,11 @@ contains
 
         do d = 1, p%n_decls
             if (.not. p%decls(d)%is_array) cycle
+            ! An allocatable declaration owns storage whose lifetime is
+            ! represented by explicit statements.  Its stores must not be
+            ! removed merely because the owner is only observed through an
+            ! ALLOCATE/SOURCE or MOVE_ALLOC operation.
+            if (p%decls(d)%is_allocatable) cycle
             if (.not. allocated(p%decls(d)%name)) cycle
             name = p%decls(d)%name
             if (is_dummy(p, name)) cycle
@@ -530,6 +536,34 @@ contains
         case (FAD_IF, FAD_SELECT_TYPE)
             yes = expr_reads(p, p%stmts(idx)%value, name)
         case (FAD_CALL_STMT)
+            if (.not. allocated(p%stmts(idx)%call_args)) return
+            do k = 1, size(p%stmts(idx)%call_args)
+                if (expr_reads(p, p%stmts(idx)%call_args(k), name)) then
+                    yes = .true.
+                    return
+                end if
+            end do
+        case (FAD_ALLOCATE)
+            if (allocated(p%stmts(idx)%allocation_args)) then
+                do k = 1, size(p%stmts(idx)%allocation_args)
+                    if (expr_reads(p, p%stmts(idx)%allocation_args(k), name)) then
+                        yes = .true.
+                        return
+                    end if
+                end do
+            end if
+            if (expr_reads(p, p%stmts(idx)%allocation_source, name)) yes = .true.
+            if (expr_reads(p, p%stmts(idx)%allocation_mold, name)) yes = .true.
+        case (FAD_DEALLOCATE)
+            if (allocated(p%stmts(idx)%allocation_args)) then
+                do k = 1, size(p%stmts(idx)%allocation_args)
+                    if (expr_reads(p, p%stmts(idx)%allocation_args(k), name)) then
+                        yes = .true.
+                        return
+                    end if
+                end do
+            end if
+        case (FAD_MOVE_ALLOC)
             if (.not. allocated(p%stmts(idx)%call_args)) return
             do k = 1, size(p%stmts(idx)%call_args)
                 if (expr_reads(p, p%stmts(idx)%call_args(k), name)) then
