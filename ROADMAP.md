@@ -184,14 +184,17 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is currently `840ef4a6`. This handoff includes the
+FortFront source `main` is currently `0f08b7f1`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
-along with allocation-event `SOURCE=`/`MOLD=` expression facts and the earlier
+along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
+actual-to-formal call mappings, and the earlier
 procedure-name, #2980, public array-query, nested
 substring, and issue-1968 assumed-shape fixes.
 The focused `test_ownership_dispatch_metadata` oracle passes on the current
-378-target GNU build. FortFront's broader GNU gate remains green at 1,556
+378-target GNU build. Its independent
+`test_call_argument_mapping` API oracle also passes. FortFront's broader GNU
+gate remains green at 1,558
 static modules, 381 build targets, 378 derivative targets, and 483/483 tests;
 the Windows and downstream multi-compiler gates remain open.
 
@@ -235,10 +238,11 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `840ef4a6`, which includes the
+The current FortFront `main` handoff is `0f08b7f1`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
-      component storage paths; its focused
+      component storage paths, plus formal-ordered actual-to-formal call
+      mappings for positional, keyword, and omitted optional arguments; its focused
       `test_ownership_dispatch_metadata` oracle passes on the current
       378-target GNU build.
 - [ ] FortFront `main` is green on Windows. The latest procedure-name
@@ -376,9 +380,9 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `840ef4a6` (the ownership/storage and dispatch
+`fo` must consume FortFront `0f08b7f1` (the ownership/storage and dispatch
 metadata handoff plus the merged procedure-name, #2980, public array-query,
-nested-substring, and issue-1968 fixes), while fpm caches
+nested-substring, issue-1968, and call-argument mapping fixes), while fpm caches
 its dependency clone. After a FortFront change, remove `build/dependencies`
 and `build/cache.toml` before reinstalling `fo`, or the old revision will be
 reused. Record the exact FortFront pin in every downstream gate so a warm
@@ -931,6 +935,12 @@ of selected child ends the fixed-path derivative contract.
         differences, and the adjoint identity. Active optional arguments,
         optional components or expressions, generic resolution, and
         procedure-pointer interfaces remain explicit boundaries.
+      - [x] **P7.4d upstream call-argument facts.** FortFront `0f08b7f1`
+        exposes formal-ordered actual mappings with original and value-node
+        indices, keyword markers, optionality, and omitted-argument records.
+        The independent `test_call_argument_mapping` API oracle covers
+        positional, reordered keyword, and omitted optional calls. Generic
+        resolution and overloaded operators remain open in FortAD.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.
