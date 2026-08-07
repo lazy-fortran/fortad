@@ -69,7 +69,7 @@ Phases 0 through 6 contain 42 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
 FortFront source `main` is pinned to `c0a32743`, with documentation handoff
-`0a082664` (source handoff `d8c8769`), the current handoff after the typed
+`0689f81c` (source handoff `d8c8769`), the current handoff after the typed
 #2974 compound-declaration and #2975 owner-boundary regressions merged on top
 of the procedure-name semantic-boundary fix after PR #3003. It carries lazy
 untyped function-result inference (#2980) and its independent GNU Fortran
@@ -82,7 +82,7 @@ has a successful Ubuntu job, including the #2975 owner-boundary regression;
 Windows retains the documented nine-test portability baseline. The downstream
 multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc docs `843b203d` over code `cc91e32`, which
+The compiler-path handoff is ffc docs `968ae4a` over code `cc91e32`, which
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy, and
 typed integer-lowering extractions, the rebased integer(8)/descriptor dispatch
 guard, the bare-DIMENSION #2848 fix, and the GCC14-safe host exports needed for
