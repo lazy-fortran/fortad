@@ -129,12 +129,13 @@ with independent results.
 
 The command reads one Fortran source file. Explicit forms write generated
 Fortran to standard output; the source-only compact form writes a predictable
-derivative file beside the input. Start with one of these four forms:
+derivative file beside the input. Start with one of these five forms:
 
 ```console
 $ fortad jvp kernel.f90                    # infer inputs; write kernel_jvp.f90
 $ fortad vjp kernel.f90                    # infer inputs and the sole output
 $ fortad hvp kernel.f90                    # infer inputs; write kernel_hvp.f90
+$ fortad all kernel.f90                    # write both JVP and VJP siblings
 $ fortad check kernel.f90                 # parser/round-trip check
 ```
 
@@ -152,9 +153,16 @@ form remain available for scripts and advanced rules:
 ```text
 fortad jvp|vjp|hvp FILE [NAMES] [OPTIONS]
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
+fortad all FILE [NAMES]
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
 ```
+
+`fortad all FILE` is the short path when a workflow needs both forward and
+reverse products. It infers the same procedure and active dummies, writes
+`<stem>_jvp.f90` and `<stem>_vjp.f90` beside the input, and gives each a
+distinct checked wrapper module. Use `jvp` or `vjp` separately when custom
+names, modules, or output paths are needed.
 
 `check` parses and re-emits the selected procedure without differentiating it.
 A successful check establishes round-trip support for that procedure. It does

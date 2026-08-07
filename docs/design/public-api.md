@@ -247,6 +247,7 @@ directional coefficient. `tay_derivative` multiplies coefficient `k` by `k!`.
 ```text
 fortad jvp|vjp|hvp FILE [NAMES] [OPTIONS]
 fortad jvp|vjp|hvp NAMES [OPTIONS] FILE
+fortad all FILE [NAMES]
 fortad check [--proc NAME] [--output PATH] FILE
 fortad --indep NAMES [OPTIONS] FILE
 ```
@@ -290,9 +291,17 @@ rejected. Success means the FortAD parser/normalizer round-trip completed for
 that procedure. It is not a claim that a Fortran compiler accepts the whole
 file or that FortAD can differentiate it.
 
+`fortad all FILE` runs the inferred JVP and VJP transformations together and
+writes `<source-stem>_jvp.f90` and `<source-stem>_vjp.f90`, with distinct
+`<source-stem>_jvp_mod` and `<source-stem>_vjp_mod` wrappers. It accepts
+positional independent names plus `--proc`, `--dep`, `--directions`,
+`--no-primal`, and `--verbose`. `--output`, `--name`, and `--module` are
+rejected because one path or name would be ambiguous for two products.
+
 | Option | Scope | Meaning |
 | --- | --- | --- |
 | `jvp`, `vjp`, `hvp` | compact derivative form | product followed by `FILE [NAMES]` or `NAMES ... FILE` |
+| `all` | compact paired-product form | infer and write both JVP and VJP siblings |
 | `check` | compact round-trip form | validate and re-emit source without differentiation |
 | `-i`, `--indep a,b` | legacy derivative form | explicit independent variables; source-first compact form can infer them |
 | `-m`, `--mode MODE` | derivative modes | `forward`, `reverse`, or `hessian` |

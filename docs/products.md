@@ -8,6 +8,7 @@ and solver policy with the caller.
 | --- | --- | --- | --- |
 | scalar-objective gradient | `J^T` with seed 1 | VJP | one reverse sweep |
 | directional sensitivity | `Jv` | JVP | one forward sweep |
+| both first-order products | JVP and VJP source | `all` | one command, two generated modules |
 | several directions | `JV` | vector JVP | one primal sweep for all columns |
 | Hessian action | `Hv` | forward-over-reverse | one composed product per direction |
 | a few Jacobian rows | `u^T J` | VJP | one reverse sweep per output seed |

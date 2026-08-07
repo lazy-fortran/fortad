@@ -2,6 +2,7 @@ program fortad_cli
     !! Command-line driver.
     !!
     !!     fortad jvp kernel.f90
+    !!     fortad all kernel.f90
     !!     fortad jvp a,b --directions nd -o kernel_d.f90 kernel.f90
     !!     fortad vjp x --no-primal kernel.f90
     !!     fortad check kernel.f90
@@ -23,12 +24,12 @@ program fortad_cli
     character(len=:), allocatable :: inference_message
     character(len=32), allocatable :: independents(:)
     type(fad_result_t) :: res
-    logical :: roundtrip_only, with_primal, verbose
+    logical :: roundtrip_only, with_primal, verbose, all_products
     integer :: unit, stat
 
     call parse_arguments(input_path, output_path, indep_list, directions, &
         proc_name, mode, module_name, roundtrip_only, &
-        with_primal, dep_name, from_name, verbose, stat)
+        with_primal, dep_name, from_name, verbose, all_products, stat)
     if (stat /= 0) then
         call usage()
         error stop 2
@@ -41,6 +42,16 @@ program fortad_cli
     end if
     if (is_fixed_form_file(input_path)) then
         call normalize_fixed_form_source_text(source)
+    end if
+
+    if (all_products) then
+        call run_all_products(source, input_path, indep_list, directions, &
+            dep_name, from_name, with_primal, verbose, stat, inference_message)
+        if (stat /= 0) then
+            write (error_unit_or_output(), '(a)') "fortad: "//inference_message
+            error stop 1
+        end if
+        stop
     end if
 
     if (len_trim(indep_list) == 0 .and. .not. roundtrip_only) then
@@ -192,6 +203,106 @@ contains
         end if
     end subroutine register_rule
 
+    subroutine run_all_products(source, input_path, indep_list, directions, &
+            dep_name, from_name, with_primal, verbose, stat, message)
+        !! Emit the inferred JVP and VJP products beside the source.
+        character(len=*), intent(in) :: source, input_path, directions
+        character(len=:), allocatable, intent(inout) :: indep_list, from_name
+        character(len=:), allocatable, intent(in) :: dep_name
+        logical, intent(in) :: with_primal, verbose
+        integer, intent(out) :: stat
+        character(len=:), allocatable, intent(out) :: message
+        character(len=:), allocatable :: explicit_indep, inferred_names
+        character(len=:), allocatable :: jvp_name, vjp_name
+        character(len=:), allocatable :: jvp_module, vjp_module
+        character(len=:), allocatable :: jvp_output, vjp_output
+        character(len=:), allocatable :: inference_message
+        character(len=32), allocatable :: independents(:)
+        type(fad_result_t) :: jvp, vjp
+        integer :: unit, ios
+
+        stat = 0
+        message = ""
+        explicit_indep = trim(indep_list)
+        jvp_name = ""
+        jvp_module = ""
+        jvp_output = ""
+        call infer_cli_defaults(source, input_path, "forward", from_name, &
+            jvp_name, jvp_output, jvp_module, inferred_names, &
+            inference_message, verbose, stat)
+        if (stat /= 0) then
+            message = inference_message
+            return
+        end if
+        if (len_trim(explicit_indep) > 0) then
+            indep_list = explicit_indep
+        else
+            indep_list = inferred_names
+        end if
+
+        vjp_name = ""
+        vjp_module = ""
+        vjp_output = ""
+        call infer_cli_defaults(source, input_path, "reverse", from_name, &
+            vjp_name, vjp_output, vjp_module, inferred_names, &
+            inference_message, verbose, stat)
+        if (stat /= 0) then
+            message = inference_message
+            return
+        end if
+        if (len_trim(explicit_indep) > 0) then
+            indep_list = explicit_indep
+        else
+            indep_list = inferred_names
+        end if
+        independents = split_commas(indep_list)
+
+        jvp = fad_jvp(source, independents, name=jvp_name, from=from_name, &
+            module_name=jvp_module, n_directions=directions, &
+            with_primal=with_primal)
+        if (.not. jvp%ok) then
+            stat = 1
+            message = "JVP: "//jvp%message
+            return
+        end if
+        vjp = fad_vjp(source, independents, dependent=dep_name, name=vjp_name, &
+            module_name=vjp_module, with_primal=with_primal, from=from_name)
+        if (.not. vjp%ok) then
+            stat = 1
+            message = "VJP: "//vjp%message
+            return
+        end if
+
+        open (newunit=unit, file=jvp_output, status="replace", action="write", &
+            iostat=ios)
+        if (ios /= 0) then
+            stat = 1
+            message = "cannot write "//jvp_output
+            return
+        end if
+        write (unit, '(a)', iostat=ios) jvp%code
+        close (unit)
+        if (ios /= 0) then
+            stat = 1
+            message = "cannot write "//jvp_output
+            return
+        end if
+
+        open (newunit=unit, file=vjp_output, status="replace", action="write", &
+            iostat=ios)
+        if (ios /= 0) then
+            stat = 1
+            message = "cannot write "//vjp_output
+            return
+        end if
+        write (unit, '(a)', iostat=ios) vjp%code
+        close (unit)
+        if (ios /= 0) then
+            stat = 1
+            message = "cannot write "//vjp_output
+        end if
+    end subroutine run_all_products
+
     function run_reverse(source, independents, proc_name, module_name, &
             with_primal, dep_name, from_name) result(res)
         !! Reverse mode. A blank name, module or dependent means "the default".
@@ -220,7 +331,7 @@ contains
 
     subroutine parse_arguments(input_path, output_path, indep_list, directions, &
             proc_name, mode, module_name, roundtrip_only, &
-            with_primal, dep_name, from_name, verbose, stat)
+            with_primal, dep_name, from_name, verbose, all_products, stat)
         !! Parse the command line.
         character(len=:), allocatable, intent(out) :: input_path, output_path
         character(len=:), allocatable, intent(out) :: indep_list, directions
@@ -229,7 +340,7 @@ contains
         logical, intent(out) :: roundtrip_only, with_primal
         character(len=:), allocatable, intent(out) :: dep_name
         character(len=:), allocatable, intent(out) :: from_name
-        logical, intent(out) :: verbose
+        logical, intent(out) :: verbose, all_products
         integer, intent(out) :: stat
         character(len=1024) :: arg
         integer :: i, n, length
@@ -247,6 +358,7 @@ contains
         dep_name = ""
         from_name = ""
         verbose = .false.
+        all_products = .false.
         stat = 0
         check_syntax = .false.
         compact_syntax = .false.
@@ -267,6 +379,10 @@ contains
                 case ("hvp")
                     compact_syntax = .true.
                     mode = "hessian"
+                case ("all")
+                    compact_syntax = .true.
+                    all_products = .true.
+                    mode = "all"
                 case ("check")
                     check_syntax = .true.
                     roundtrip_only = .true.
@@ -351,7 +467,7 @@ contains
                 call get_command_argument(i, arg, length)
                 directions = trim(arg(1:length))
             case ("--name")
-                if (check_syntax) then
+                if (check_syntax .or. all_products) then
                     stat = 1
                     return
                 end if
@@ -363,6 +479,10 @@ contains
                 call get_command_argument(i, arg, length)
                 proc_name = trim(arg(1:length))
             case ("-o", "--output")
+                if (all_products) then
+                    stat = 1
+                    return
+                end if
                 i = i + 1
                 if (i > n) then
                     stat = 1
@@ -390,7 +510,7 @@ contains
                     return
                 end select
             case ("--module")
-                if (check_syntax) then
+                if (check_syntax .or. all_products) then
                     stat = 1
                     return
                 end if
@@ -696,10 +816,12 @@ contains
         write (*, '(a)') ""
         write (*, '(a)') "usage: fortad PRODUCT <file.f90> [names] [options]"
         write (*, '(a)') "       fortad PRODUCT <names> [options] <file.f90>"
+        write (*, '(a)') "       fortad all <file.f90> [names]"
         write (*, '(a)') "       fortad check [--proc NAME] [-o PATH] <file.f90>"
         write (*, '(a)') "       fortad --indep <names> [options] <file.f90>"
         write (*, '(a)') ""
         write (*, '(a)') "  PRODUCT               jvp, vjp, or hvp"
+        write (*, '(a)') "  all                   write inferred JVP and VJP siblings"
         write (*, '(a)') "  check                 parse and re-emit without differentiating"
         write (*, '(a)') "  -i, --indep a,b       independent variables (legacy form)"
         write (*, '(a)') "  -m, --mode MODE       forward (default), reverse, "// &
