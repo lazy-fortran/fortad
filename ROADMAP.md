@@ -84,7 +84,7 @@ has a successful Ubuntu job, including the #2975 owner-boundary regression.
 Windows retains the documented nine-test portability baseline. The downstream
 multi-compiler gate is therefore still open.
 
-The compiler-path handoff is ffc docs `e25dbc9` over code `338fea4`, which
+The compiler-path handoff is ffc docs `f7664d5` over code `338fea4`, which
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, GOTO, FORALL, WHERE,
 SELECT, complex, intrinsic-extra, and reduction-expression extractions,
@@ -105,7 +105,10 @@ oracles pass with independent gfortran differentials. PR #699 merged as
 independent oracles pass; aggregate CI still retains known formatter/full-suite and corpus
 failures. This is recorded for
 cross-repository provenance. FortAD does not consume ffc as a build
-dependency, and no ffc aggregate PASS is claimed here.
+dependency. The final ffc union measurement covers 11,053 cases: 2,919 PASS
+(26.41% observed; 24.03% excluding 263 NOREF), with 304 FAIL, 285 XPASS,
+5,240 XFAIL, and 2,305 SKIP; it is not provenance-verified and is not a
+FortAD gate.
 
 - [x] `fo` retains sources that FortFront cannot parse and sends them to the
       compiler. Commit `f1a8e56` fixed the source loss. Commit `15e95f6`
