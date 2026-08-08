@@ -272,18 +272,20 @@ split it into smaller checkboxes before writing code.
 
 ## Status on 2026-08-08
 
-Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
-the current integration gate is still open:
+Phases 0 through 6 contain 43 completed items. The arithmetic core works, and
+the current bounded integration wave is green. Broader modern-Fortran support
+remains open below.
 
 The 2026-08-08 integration wave is recorded at these repository heads:
 
-- FortFront `55c0c5b6`, including abstract/deferred hierarchy, concrete-only
+- FortFront `d5f492f8`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
   one branch-merged callback target set query, and loop-sensitive callback
   refusal facts. It also accepts legal keyword-named subroutines and preserves
-  component ranks for modern derived-type sources.
+  component ranks and complete component identities for modern and exact v290
+  derived-type sources. The focused v290 metadata oracle passes.
 - FFC `f0ed424`, including rank-three and rank-four intrinsic
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
@@ -299,20 +301,23 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   whole-object, aliased, polymorphic, allocatable, pointer, global, and
   multiply-written component dependents remain refusals.
   The exact legacy v290 spelling that uses old-style type declarations and
-  compound component declarations remains a FortFront metadata boundary; it
-  is not counted as modern runnable support.
-  FortAD `02d4dd2`, including active concrete rank-four allocatable-component
-  JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded polymorphic reverse
-  ownership replay, one-arm rank-one assumed-rank JVP/VJP, and branch-merged
-  callback-flow JVP/VJP lowering with an independent oracle, plus fixed-shape
-  array-element type-bound receiver JVP/VJP. The latest NVIDIA compatibility
-  slice removes remaining intrinsic assignment of allocatable expression and
-  statement arenas and lowers ordinary call arguments directly into the IR
-  record. The GNU gate is green at 409 build targets, 408 derivative targets,
-  and 66 tests.
-- fortad-bench `1d30a0f`, including the separate `next8` four-row exact-source
-  modern-feature queue shard and refreshed queue, batch, compiler, ledger, and
-  provenance artifacts.
+  compound component declarations now retains complete component metadata and
+  compiles through the explicit reverse probe; it remains a legacy
+  compatibility case, not modern runnable support.
+  FortAD `a45dbea` (on top of `02d4dd2`), including active concrete rank-four
+  allocatable-component JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded
+  polymorphic reverse ownership replay, one-arm rank-one assumed-rank JVP/VJP,
+  and branch-merged callback-flow JVP/VJP lowering with an independent oracle,
+  plus fixed-shape array-element type-bound receiver JVP/VJP. The latest NVIDIA
+  compatibility slice removes remaining intrinsic assignment of allocatable
+  expression and statement arenas and lowers ordinary call arguments directly
+  into the IR record. The bounded component-dependent reverse slice adds a shaped
+  cotangent for one unique concrete `REAL` component without activating the
+  containing object. The full `fo` gate is green: 409 build targets, 408
+  derivative targets, 69/69 tests, and lint.
+- fortad-bench `201d345`, including the current queue, batch, classifier, and
+  next7/next8/next9 evidence contracts. The reproducible queue contains 1,229
+  rows: 1,155 pure-Fortran and 74 mixed-language candidates.
 
 The next feature order has four steps. The first callback-flow step is
 complete: FortAD consumes the FortFront branch-merged callback target-set facts
@@ -327,7 +332,7 @@ checkpointing and numerical/application rules. Active global mutable state,
 uncontrolled aliases, active I/O, and opaque calls without rules remain
 product refusals rather than compatibility work.
 
-FortFront source `main` is currently `55c0c5b6`. This handoff includes the
+FortFront source `main` is currently `d5f492f8`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
