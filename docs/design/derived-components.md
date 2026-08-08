@@ -19,9 +19,11 @@ array components use ordinary Fortran component syntax.  The independent
 name may include an array element, for example `state%values(1)`.
 
 The same bounded path also lowers a same-file concrete type-bound subroutine
-with PASS or NOPASS.  Receiver arrays, allocatables, pointers/targets,
-polymorphic receivers, and unresolved or generic/deferred bindings remain
-named refusal cases.
+with PASS or NOPASS.  A direct one-dimensional concrete allocatable array may
+now provide a literal-indexed receiver element; its allocation is caller-owned
+and remains passive.  Whole allocatable receivers, dynamic indices, sections,
+pointers/targets, polymorphic receivers, and unresolved or generic/deferred
+bindings remain named refusal cases.
 
 ## Component dependents in reverse mode
 

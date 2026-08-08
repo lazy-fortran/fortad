@@ -1521,6 +1521,14 @@ problem-specific rule.
             identity. Dynamic indices, sections, allocatable or polymorphic
             arrays, pointers, aliases, and ownership-changing receivers remain
             named refusals.
+      - [x] **P8.3d statically indexed allocatable receivers.** A direct,
+            one-dimensional concrete allocatable array with one literal-indexed
+            element can use the same type-bound function lowering as a fixed
+            array. The independent array-receiver oracle compiles JVP and VJP,
+            checks hand values, central differences, and the adjoint identity,
+            and retains refusals for whole allocatable receivers, dynamic
+            indices, sections, polymorphic dispatch, pointers, aliases, and
+            ownership-changing operations.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through

@@ -2885,7 +2885,7 @@ contains
     subroutine validate_indexed_receiver_node(arena, idx, proc, receiver_name, &
             receiver_decl, receiver_index, status)
         !! Validate the one supported array receiver designator: a direct
-        !! fixed-shape array name with exactly one integer literal subscript.
+        !! concrete array name with exactly one integer literal subscript.
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: idx
         type(fad_proc_t), intent(in) :: proc
@@ -2970,11 +2970,6 @@ contains
             status%message = "the indexed receiver is not an array"
             return
         end if
-        if (proc%decls(receiver_decl)%is_allocatable) then
-            status%ok = .false.
-            status%message = "allocatable receivers are unsupported"
-            return
-        end if
         if (proc%decls(receiver_decl)%is_polymorphic) then
             status%ok = .false.
             status%message = "polymorphic receivers are unsupported"
@@ -2990,15 +2985,17 @@ contains
             status%message = "polymorphic receivers are unsupported"
             return
         end if
-        if (.not. allocated(proc%decls(receiver_decl)%dims)) then
-            status%ok = .false.
-            status%message = "array receiver shape is not fixed"
-            return
-        end if
-        if (.not. fixed_shape_dims(proc%decls(receiver_decl)%dims)) then
-            status%ok = .false.
-            status%message = "array receiver shape is not fixed"
-            return
+        if (.not. proc%decls(receiver_decl)%is_allocatable) then
+            if (.not. allocated(proc%decls(receiver_decl)%dims)) then
+                status%ok = .false.
+                status%message = "array receiver shape is not fixed"
+                return
+            end if
+            if (.not. fixed_shape_dims(proc%decls(receiver_decl)%dims)) then
+                status%ok = .false.
+                status%message = "array receiver shape is not fixed"
+                return
+            end if
         end if
         if (receiver_index == 0) then
             status%ok = .false.
@@ -3256,7 +3253,7 @@ contains
                 "array receivers are unsupported")
             return
         end if
-        if (proc%decls(receiver_decl)%is_allocatable) then
+        if (proc%decls(receiver_decl)%is_allocatable .and. .not. indexed_receiver) then
             call refuse_type_bound(status, node%name, &
                 "allocatable receivers are unsupported")
             return
@@ -3902,7 +3899,7 @@ contains
                 "array receivers are unsupported")
             return
         end if
-        if (proc%decls(receiver_decl)%is_allocatable) then
+        if (proc%decls(receiver_decl)%is_allocatable .and. .not. indexed_receiver) then
             call refuse_type_bound(status, method, &
                 "allocatable receivers are unsupported")
             return
