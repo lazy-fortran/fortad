@@ -337,11 +337,11 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   index when FortFront proves exactly one same-file concrete dispatch target.
   JVPs carry active base and child components through paired primal/tangent
   `SELECT TYPE` aliases; the independent gfortran oracle also checks the
-  passive-receiver VJP path and refuses pointers, aliases, sections, dynamic
-  indices, ownership-changing receivers, and unresolved multi-target dispatch.
-  This remains a borrowed fixed-path slice: dynamic type perturbations,
-  runtime target selection, and active receiver VJP scattering are not yet
-  claimed.
+  active receiver VJP path and refuses pointers, aliases, sections, dynamic
+  indices, ownership-changing receivers, unresolved multi-target dispatch,
+  and bare active dynamic-type perturbations. This remains a borrowed
+  fixed-path slice: general polymorphic ownership replay and runtime target
+  selection remain outside the contract.
 - fortad-bench `9fb6137` (on top of `1e34b90`), including the current queue,
   batch, classifier, live-hash repins, and next7/next8/next9/next10/next11/next12
   evidence contracts. The reproducible queue contains 1,217 rows: 1,143 pure-Fortran
@@ -1558,6 +1558,22 @@ problem-specific rule.
             and retains refusals for whole allocatable receivers, dynamic
             indices, sections, polymorphic dispatch, pointers, aliases, and
             ownership-changing operations.
+      - [x] **P8.3e fixed-path polymorphic array receiver JVP.** A borrowed
+            one-dimensional class(base_t) array receiver at one literal index
+            is lowered through exactly one proven concrete dispatch arm.
+            Active base and child components are carried through paired
+            SELECT TYPE aliases; dynamic type perturbations, dynamic indices,
+            sections, pointers, aliases, ownership-changing receivers, and
+            unresolved dispatch remain refusals.
+      - [x] **P8.3f active polymorphic array receiver VJP scattering.** The
+            reverse sweep replays the same concrete dispatch and selects the
+            caller-owned cotangent element in parallel, scattering active base
+            and child component cotangents without changing JVP behavior.
+            The independent polymorphic receiver oracle checks hand values,
+            central finite differences, and the full adjoint identity, and
+            checks the refusal contract in both modes. General dynamic-type
+            perturbation and polymorphic ownership replay remain outside this
+            slice.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through

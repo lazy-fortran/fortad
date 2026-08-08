@@ -799,7 +799,7 @@ contains
             return
         end if
         if (stmt%target_component_is_pointer .or. &
-                stmt%target_component_is_target) then
+            stmt%target_component_is_target) then
             status%ok = .false.
             status%message = "reverse mode: pointer/TARGET component storage "// &
                 "identity is not tracked"
@@ -3392,6 +3392,10 @@ contains
             if (primal%exprs(i)%kind /= FAD_VAR .and. &
                 primal%exprs(i)%kind /= FAD_INDEX) cycle
             if (index(primal%exprs(i)%text, "%") == 0) cycle
+            ! A polymorphic dispatch receiver is selected again in the reverse
+            ! sweep. Its cotangent is selected in parallel there; emitting a
+            ! bare receiver-alias shadow here would be invalid.
+            if (is_select_alias_path(primal, primal%exprs(i)%text)) cycle
             base = fad_base_name(primal%exprs(i)%text)
             di = primal%decl_index(base)
             if (di <= 0) cycle
@@ -3415,6 +3419,7 @@ contains
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
             if (index(primal%stmts(i)%target, "%") == 0) cycle
+            if (is_select_alias_path(primal, primal%stmts(i)%target)) cycle
             base = fad_base_name(primal%stmts(i)%target)
             di = primal%decl_index(base)
             if (di <= 0) cycle
@@ -3690,7 +3695,14 @@ contains
         integer, intent(inout) :: n_tmp
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
-        integer :: a, i, ignored, seed_expr
+        character(len=:), allocatable :: receiver_alias, cotangent_alias
+        character(len=:), allocatable :: cotangent_selector
+        logical :: receiver_cotangent
+        integer :: a, i, ignored, seed_expr, selector_expr
+
+        call receiver_cotangent_context(primal, rec, suffix, ssa%active_paths, &
+            receiver_cotangent, receiver_alias, &
+            cotangent_alias, cotangent_selector)
 
         s%kind = FAD_SELECT_TYPE
         s%value = rec%selector
@@ -3702,21 +3714,175 @@ contains
             if (allocated(s%target)) deallocate (s%target)
             if (allocated(rec%arms(a)%target)) s%target = rec%arms(a)%target
             ignored = adjoint%add_stmt(s)
+            if (receiver_cotangent .and. rec%arms(a)%kind == FAD_TYPE_IS) then
+                selector_expr = adjoint%add_expr(expr_var(cotangent_selector))
+                s%kind = FAD_SELECT_TYPE
+                s%value = selector_expr
+                s%target = cotangent_alias
+                ignored = adjoint%add_stmt(s)
+                s%kind = FAD_TYPE_IS
+                s%value = 0
+                s%target = rec%arms(a)%target
+                ignored = adjoint%add_stmt(s)
+                call zero_receiver_cotangent(primal, adjoint, ssa%active_paths, &
+                    receiver_alias, cotangent_alias)
+            end if
             do i = rec%arms(a)%n, 1, -1
                 if (.not. adjoint_is_live(primal, ssa, rec%arms(a)%lhs(i), &
                     active)) cycle
                 seed_expr = adjoint%add_expr( &
                     expr_var(trim(rec%arms(a)%lhs(i))//suffix))
-                call accumulate(primal, adjoint, rec%arms(a)%rhs(i), seed_expr, &
-                    ssa, suffix, active, n_tmp, status)
+                if (receiver_cotangent .and. rec%arms(a)%kind == FAD_TYPE_IS) then
+                    call accumulate(primal, adjoint, rec%arms(a)%rhs(i), &
+                        seed_expr, ssa, suffix, active, n_tmp, status, &
+                        receiver_alias, cotangent_alias)
+                else
+                    call accumulate(primal, adjoint, rec%arms(a)%rhs(i), &
+                        seed_expr, ssa, suffix, active, n_tmp, status)
+                end if
                 if (.not. status%ok) return
             end do
+            if (receiver_cotangent .and. rec%arms(a)%kind == FAD_TYPE_IS) then
+                s%kind = FAD_CLASS_DEFAULT
+                s%value = 0
+                if (allocated(s%target)) deallocate (s%target)
+                ignored = adjoint%add_stmt(s)
+                s%kind = FAD_END_SELECT
+                s%value = 0
+                ignored = adjoint%add_stmt(s)
+            end if
         end do
         s%kind = FAD_END_SELECT
         s%value = 0
         if (allocated(s%target)) deallocate (s%target)
         ignored = adjoint%add_stmt(s)
     end subroutine emit_select_reverse
+
+    subroutine receiver_cotangent_context(primal, rec, suffix, active_paths, &
+            enabled, receiver_alias, cotangent_alias, &
+            cotangent_selector)
+        !! Identify the P8.3f receiver shape and name the matching selected
+        !! cotangent. The lowerer has already proved a literal indexed,
+        !! one-dimensional, borrowed CLASS receiver and one dispatch target;
+        !! these checks keep the reverse emitter honest if the IR is reused.
+        type(fad_proc_t), intent(in) :: primal
+        type(select_record_t), intent(in) :: rec
+        character(len=*), intent(in) :: suffix
+        character(len=*), intent(in) :: active_paths(:)
+        logical, intent(out) :: enabled
+        character(len=:), allocatable, intent(out) :: receiver_alias
+        character(len=:), allocatable, intent(out) :: cotangent_alias
+        character(len=:), allocatable, intent(out) :: cotangent_selector
+        character(len=:), allocatable :: selector
+        integer :: alias_di, receiver_di, concrete_targets, i
+
+        enabled = .false.
+        receiver_alias = ""
+        cotangent_alias = ""
+        cotangent_selector = ""
+        if (.not. allocated(rec%selector_alias)) return
+        concrete_targets = 0
+        do i = 1, rec%n_arms
+            if (rec%arms(i)%kind == FAD_TYPE_IS) concrete_targets = &
+                concrete_targets + 1
+        end do
+        if (concrete_targets /= 1) return
+        receiver_alias = trim(rec%selector_alias)
+        alias_di = primal%decl_index(receiver_alias)
+        if (alias_di <= 0) return
+        if (.not. primal%decls(alias_di)%is_select_alias) return
+        if (.not. allocated(primal%decls(alias_di)%alias_target)) return
+        selector = trim(primal%decls(alias_di)%alias_target)
+        if (index(selector, "(") <= 0) return
+        receiver_di = primal%decl_index(fad_base_name(selector))
+        if (receiver_di <= 0) return
+        if (.not. primal%decls(receiver_di)%is_array) return
+        if (.not. primal%decls(receiver_di)%is_polymorphic) return
+        if (primal%decls(receiver_di)%is_allocatable .or. &
+            primal%decls(receiver_di)%is_associate_alias .or. &
+            primal%decls(receiver_di)%is_select_alias) return
+        if (index(selector, ",") > 0) return
+        if (.not. receiver_context_has_active(primal, receiver_alias, &
+            active_paths)) return
+        cotangent_alias = receiver_alias//trim(suffix)
+        cotangent_selector = fad_suffix_name(selector, suffix)
+        enabled = len_trim(cotangent_selector) > 0
+    end subroutine receiver_cotangent_context
+
+    logical function receiver_context_has_active(primal, receiver_alias, &
+            active_paths) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: receiver_alias
+        character(len=*), intent(in) :: active_paths(:)
+        character(len=:), allocatable :: canonical, active_path
+        integer :: i, j
+
+        found = .false.
+        do i = 1, primal%n_exprs
+            if (primal%exprs(i)%kind /= FAD_VAR .and. &
+                primal%exprs(i)%kind /= FAD_INDEX) cycle
+            if (fad_base_name(primal%exprs(i)%text) /= trim(receiver_alias)) cycle
+            if (index(trim(primal%exprs(i)%text), "%") <= 0) cycle
+            canonical = resolve_component_path(primal, primal%exprs(i)%text)
+            do j = 1, size(active_paths)
+                active_path = resolve_component_path(primal, active_paths(j))
+                if (same_component_name(canonical, active_path)) then
+                    found = .true.
+                    return
+                end if
+            end do
+        end do
+    end function receiver_context_has_active
+
+    subroutine zero_receiver_cotangent(primal, adjoint, active_paths, &
+            receiver_alias, cotangent_alias)
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        character(len=*), intent(in) :: active_paths(:)
+        character(len=*), intent(in) :: receiver_alias, cotangent_alias
+        character(len=64) :: paths(64)
+        character(len=:), allocatable :: source, canonical, target, base, tail
+        type(fad_stmt_t) :: s
+        integer :: i, n, ignored, cut
+
+        paths = ""
+        n = 0
+        do i = 1, primal%n_exprs
+            if (primal%exprs(i)%kind /= FAD_VAR .and. &
+                primal%exprs(i)%kind /= FAD_INDEX) cycle
+            source = trim(primal%exprs(i)%text)
+            if (fad_base_name(source) /= trim(receiver_alias)) cycle
+            if (index(source, "%") <= 0) cycle
+            canonical = resolve_component_path(primal, source)
+            if (.not. active_path_matches(active_paths, canonical)) cycle
+            base = fad_base_name(source)
+            cut = len_trim(base) + 1
+            tail = source(cut:)
+            target = trim(cotangent_alias)//trim(tail)
+            if (is_known_name(paths, n, target)) cycle
+            if (n == size(paths)) exit
+            n = n + 1
+            paths(n) = target
+            s%kind = FAD_ASSIGN
+            s%target = target
+            s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
+            ignored = adjoint%add_stmt(s)
+        end do
+    end subroutine zero_receiver_cotangent
+
+    logical function active_path_matches(paths, canonical) result(found)
+        character(len=*), intent(in) :: paths(:)
+        character(len=*), intent(in) :: canonical
+        integer :: i
+
+        found = .false.
+        do i = 1, size(paths)
+            if (same_component_name(paths(i), canonical)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function active_path_matches
 
     subroutine declare_array_adjoint(primal, adjoint, base, suffix, zero)
         !! Declare and zero the adjoint array of an array written in a loop.
@@ -4323,7 +4489,8 @@ contains
     end subroutine declare_adjoint
 
     recursive subroutine accumulate(primal, adjoint, idx, seed, ssa, suffix, &
-            active, n_tmp, status)
+            active, n_tmp, status, reverse_receiver_alias, &
+            reverse_cotangent_alias)
         !! Push the adjoint `seed` through expression `idx`.
         !!
         !! Partials are obtained by seeding the forward rule with one for the
@@ -4337,11 +4504,13 @@ contains
         logical, intent(in) :: active(:)
         integer, intent(inout) :: n_tmp
         type(reverse_status_t), intent(inout) :: status
+        character(len=*), intent(in), optional :: reverse_receiver_alias
+        character(len=*), intent(in), optional :: reverse_cotangent_alias
         type(fad_stmt_t) :: s
         integer, allocatable :: dargs(:), node_args(:)
         integer :: i, j, one, partial, contrib, child_seed, ignored, di
         integer :: node_kind, lhs, two
-        character(len=:), allocatable :: base, node_text, leaf_text
+        character(len=:), allocatable :: base, node_text, leaf_text, target_text
 
         if (idx <= 0 .or. idx > adjoint%n_exprs) return
         if (seed == 0) return
@@ -4374,9 +4543,11 @@ contains
                     return
                 end if
             end if
+            target_text = reverse_component_target(node_text, suffix, &
+                reverse_receiver_alias, reverse_cotangent_alias)
             s%kind = FAD_ASSIGN
-            s%target = fad_suffix_name(node_text, suffix)
-            lhs = adjoint%add_expr(expr_var(fad_suffix_name(node_text, suffix)))
+            s%target = target_text
+            lhs = adjoint%add_expr(expr_var(target_text))
             s%value = fad_add(adjoint, lhs, seed)
             ignored = adjoint%add_stmt(s)
 
@@ -4393,7 +4564,8 @@ contains
                     call materialise(primal, adjoint, contrib, ssa, n_tmp, &
                         child_seed)
                     call accumulate(primal, adjoint, node_args(1), child_seed, &
-                        ssa, suffix, active, n_tmp, status)
+                        ssa, suffix, active, n_tmp, status, &
+                        reverse_receiver_alias, reverse_cotangent_alias)
                 end if
                 return
             end if
@@ -4413,7 +4585,8 @@ contains
                 contrib = fad_mul(adjoint, seed, partial)
                 call materialise(primal, adjoint, contrib, ssa, n_tmp, child_seed)
                 call accumulate(primal, adjoint, node_args(j), child_seed, ssa, &
-                    suffix, active, n_tmp, status)
+                    suffix, active, n_tmp, status, reverse_receiver_alias, &
+                    reverse_cotangent_alias)
                 if (.not. status%ok) return
             end do
 
@@ -4424,7 +4597,8 @@ contains
             contrib = fad_mul(adjoint, seed, partial)
             call materialise(primal, adjoint, contrib, ssa, n_tmp, child_seed)
             call accumulate(primal, adjoint, node_args(1), child_seed, ssa, &
-                suffix, active, n_tmp, status)
+                suffix, active, n_tmp, status, reverse_receiver_alias, &
+                reverse_cotangent_alias)
 
         case (FAD_CALL)
             if (.not. has_rule(node_text)) then
@@ -4437,7 +4611,8 @@ contains
             if (trim(node_text) == "sum") then
                 if (size(node_args) > 0) then
                     call accumulate(primal, adjoint, node_args(1), seed, ssa, &
-                        suffix, active, n_tmp, status)
+                        suffix, active, n_tmp, status, reverse_receiver_alias, &
+                        reverse_cotangent_alias)
                 end if
                 return
             end if
@@ -4453,7 +4628,8 @@ contains
                 contrib = fad_mul(adjoint, seed, partial)
                 call materialise(primal, adjoint, contrib, ssa, n_tmp, child_seed)
                 call accumulate(primal, adjoint, node_args(j), child_seed, ssa, &
-                    suffix, active, n_tmp, status)
+                    suffix, active, n_tmp, status, reverse_receiver_alias, &
+                    reverse_cotangent_alias)
                 if (.not. status%ok) return
             end do
 
@@ -4476,7 +4652,8 @@ contains
                 type(fad_expr_t) :: target_expr
                 integer :: read_idx
                 target_expr%kind = FAD_INDEX
-                target_expr%text = fad_suffix_name(node_text, suffix)
+                target_expr%text = reverse_component_target(node_text, suffix, &
+                    reverse_receiver_alias, reverse_cotangent_alias)
                 target_expr%args = node_args
                 read_idx = adjoint%add_expr(target_expr)
                 s%kind = FAD_ASSIGN
@@ -4824,17 +5001,35 @@ contains
         character(len=*), intent(in) :: text
         logical, intent(in) :: active(:)
         character(len=*), intent(in) :: paths(:)
+        character(len=:), allocatable :: canonical_text, expression_path, &
+            active_path
         integer :: i, di
         logical :: component
 
         component = .false.
         yes = .false.
+        canonical_text = resolve_component_path(primal, text)
+        ! An explicit independent component path must remain active even when
+        ! the lowered expression has no component-path metadata of its own.
+        ! Do not classify every percent expression as a component here: the
+        ! ordinary derived-object fallback below is what keeps implicit
+        ! component activity (for example child%scale) working.
+        do di = 1, size(paths)
+            active_path = resolve_component_path(primal, paths(di))
+            if (same_component_name(active_path, canonical_text)) then
+                yes = .true.
+                return
+            end if
+        end do
         do i = 1, primal%n_exprs
             if (.not. primal%exprs(i)%is_component_path) cycle
-            if (.not. same_component_name(primal%exprs(i)%text, text)) cycle
+            expression_path = resolve_component_path(primal, &
+                primal%exprs(i)%text)
+            if (.not. same_component_name(expression_path, canonical_text)) cycle
             component = .true.
             do di = 1, size(paths)
-                if (same_component_name(paths(di), text)) then
+                active_path = resolve_component_path(primal, paths(di))
+                if (same_component_name(active_path, canonical_text)) then
                     yes = .true.
                     exit
                 end if
@@ -4842,11 +5037,71 @@ contains
             exit
         end do
         if (component) return
-        di = primal%decl_index_of(text)
+        di = primal%decl_index_of(canonical_text)
         if (di > 0) then
             yes = active(di)
         end if
     end function component_path_is_active
+
+    function resolve_component_path(primal, text) result(path)
+        !! Resolve a component read through a SELECT TYPE alias back to the
+        !! original receiver designator. FortAD's direct polymorphic-call
+        !! lowering names the selected object (for example
+        !! fad_dispatch_receiver_1), while the active path is supplied by
+        !! the caller as a(2)%scale.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: path, base, tail
+        integer :: di, cut
+
+        path = trim(text)
+        base = fad_base_name(path)
+        di = primal%decl_index(base)
+        if (di <= 0) return
+        if (.not. primal%decls(di)%is_select_alias) return
+        if (.not. allocated(primal%decls(di)%alias_target)) return
+        cut = len_trim(base) + 1
+        if (cut <= len_trim(path)) then
+            tail = path(cut:)
+        else
+            tail = ""
+        end if
+        path = trim(primal%decls(di)%alias_target)//trim(tail)
+    end function resolve_component_path
+
+    logical function is_select_alias_path(primal, text) result(yes)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        integer :: di
+
+        yes = .false.
+        di = primal%decl_index(fad_base_name(text))
+        if (di <= 0) return
+        if (.not. primal%decls(di)%is_select_alias) return
+        if (.not. allocated(primal%decls(di)%alias_target)) return
+        yes = index(primal%decls(di)%alias_target, "(") > 0
+    end function is_select_alias_path
+
+    function reverse_component_target(text, suffix, receiver_alias, &
+            cotangent_alias) result(target)
+        !! Route an active component in a selected receiver to the matching
+        !! selected cotangent alias. Outside this bounded dispatch context
+        !! ordinary suffixing remains unchanged.
+        character(len=*), intent(in) :: text, suffix
+        character(len=*), intent(in), optional :: receiver_alias, cotangent_alias
+        character(len=:), allocatable :: target, base
+        integer :: cut
+
+        target = fad_suffix_name(text, suffix)
+        if (.not. present(receiver_alias)) return
+        if (.not. present(cotangent_alias)) return
+        if (len_trim(receiver_alias) == 0 .or. len_trim(cotangent_alias) == 0) return
+        base = fad_base_name(text)
+        if (.not. same_component_name(base, receiver_alias)) return
+        if (index(trim(text), "%") <= 0) return
+        cut = len_trim(base) + 1
+        target = trim(cotangent_alias)//trim(text(cut:))
+    end function reverse_component_target
 
     logical function same_component_name(a, b) result(equal)
         character(len=*), intent(in) :: a, b
