@@ -184,8 +184,6 @@ program test_type_bound_array_receiver_oracle
         error stop 1
     end if
     call check_allocatable_receiver(alloc_jvp%code, alloc_vjp%code)
-    call expect_refusal(polymorphic_source(), "polymorphic receivers", &
-        "polymorphic receivers")
     call expect_refusal(alias_source(), "aliasing", "alias")
     print *, "test_type_bound_array_receiver_oracle: all cases passed"
 
@@ -243,12 +241,6 @@ contains
         text = replace_top(source, "type(box_t), intent(in) :: models(2)", &
             "type(box_t), allocatable, intent(in) :: models(:)", "")
     end function allocatable_source
-
-    function polymorphic_source() result(text)
-        character(len=:), allocatable :: text
-        text = replace_top(source, "type(box_t), intent(in) :: models(2)", &
-            "class(box_t), intent(in) :: models(2)", "")
-    end function polymorphic_source
 
     function alias_source() result(text)
         character(len=:), allocatable :: text

@@ -975,17 +975,30 @@ contains
         logical, intent(in) :: vector
         character(len=:), allocatable :: text, base, shadow
         type(fad_expr_t) :: e
-        integer :: i
+        integer :: i, cut, open
 
         out = 0
         text = emit_expr(primal, idx)
-        if (index(text, "%") <= 0) return
-        base = fad_base_name(text)
+        cut = len_trim(text) + 1
+        open = index(text, "(")
+        if (open > 0) cut = min(cut, open)
+        open = index(text, "%")
+        if (open > 0) cut = min(cut, open)
+        if (cut > 1) then
+            base = trim(text(:cut - 1))
+        else
+            base = trim(text)
+        end if
         shadow = tangent_name(base, suffix, vector)
+        if (len_trim(base) == 0 .or. len_trim(text) <= len_trim(base)) return
         if (.not. decl_active(primal, primal%decl_index(base), active)) return
         if (idx <= 0 .or. idx > primal%n_exprs) return
         e%kind = primal%exprs(idx)%kind
-        e%text = shadow//text(len_trim(base) + 1:)
+        if (e%kind == FAD_INDEX) then
+            e%text = shadow
+        else
+            e%text = shadow//text(len_trim(base) + 1:)
+        end if
         e%rank = primal%exprs(idx)%rank
         if (allocated(primal%exprs(idx)%args)) then
             allocate(e%args(size(primal%exprs(idx)%args)))
@@ -1451,11 +1464,13 @@ contains
         character(len=*), intent(in) :: text
         logical, intent(in) :: active(:)
         character(len=*), intent(in), optional :: paths(:)
+        character(len=:), allocatable :: mapped_text
         integer :: i, di
         logical :: component
 
         component = .false.
         yes = .false.
+        mapped_text = resolve_component_alias(primal, text)
         do i = 1, primal%n_exprs
             if (.not. primal%exprs(i)%is_component_path) cycle
             if (.not. same_component_name(primal%exprs(i)%text, text)) cycle
@@ -1464,7 +1479,7 @@ contains
                 yes = .true.
             else
                 do di = 1, size(paths)
-                    if (same_component_name(paths(di), text)) then
+                    if (same_component_name(paths(di), mapped_text)) then
                         yes = .true.
                         exit
                     end if
@@ -1476,6 +1491,23 @@ contains
         di = primal%decl_index_of(text)
         if (di > 0) yes = decl_active(primal, di, active)
     end function component_path_is_active
+
+    function resolve_component_alias(primal, text) result(mapped)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: mapped, base
+        integer :: di
+
+        mapped = trim(text)
+        base = fad_base_name(text)
+        di = primal%decl_index(base)
+        if (di <= 0) return
+        if (.not. primal%decls(di)%is_select_alias) return
+        if (.not. allocated(primal%decls(di)%alias_target)) return
+        if (len_trim(text) <= len_trim(base)) return
+        mapped = trim(primal%decls(di)%alias_target)// &
+            text(len_trim(base) + 1:)
+    end function resolve_component_alias
 
     logical function target_path_active(primal, text, di, active, paths) &
             result(yes)

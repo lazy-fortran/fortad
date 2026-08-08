@@ -2977,22 +2977,19 @@ contains
             status%message = "the indexed receiver is not an array"
             return
         end if
-        if (proc%decls(receiver_decl)%is_polymorphic) then
-            status%ok = .false.
-            status%message = "polymorphic receivers are unsupported"
-            return
-        end if
         if (.not. allocated(proc%decls(receiver_decl)%type_name)) then
             status%ok = .false.
             status%message = "the receiver has no statically declared type"
             return
         end if
-        if (is_polymorphic_type(proc%decls(receiver_decl)%type_name)) then
-            status%ok = .false.
-            status%message = "polymorphic receivers are unsupported"
-            return
-        end if
-        if (.not. proc%decls(receiver_decl)%is_allocatable) then
+        if (proc%decls(receiver_decl)%is_polymorphic) then
+            if (.not. allocated(proc%decls(receiver_decl)%dims) .or. &
+                index(trim(proc%decls(receiver_decl)%dims), ",") > 0) then
+                status%ok = .false.
+                status%message = "only one-dimensional polymorphic array receivers are supported"
+                return
+            end if
+        else if (.not. proc%decls(receiver_decl)%is_allocatable) then
             if (.not. allocated(proc%decls(receiver_decl)%dims)) then
                 status%ok = .false.
                 status%message = "array receiver shape is not fixed"
@@ -3010,6 +3007,50 @@ contains
             return
         end if
     end subroutine validate_indexed_receiver_decl
+
+    subroutine validate_indexed_receiver_storage(arena, dispatch, proc, &
+            receiver_decl, status)
+        !! Keep P8.3e receivers borrowed and storage-stable.  A fixed
+        !! dispatch target does not make pointer, TARGET/alias, or
+        !! allocatable ownership replayable.
+        type(ast_arena_t), intent(in) :: arena
+        type(type_bound_call_query_t), intent(in) :: dispatch
+        type(fad_proc_t), intent(in) :: proc
+        integer, intent(in) :: receiver_decl
+        type(lower_status_t), intent(inout) :: status
+        type(storage_query_t) :: storage
+
+        status%ok = .true.
+        if (receiver_decl > 0) then
+            if (proc%decls(receiver_decl)%is_associate_alias) then
+                status%ok = .false.
+                status%message = "aliases and computed receivers are unsupported"
+                return
+            end if
+        end if
+        if (dispatch%receiver_declaration_index <= 0) return
+        storage = query_storage(arena, dispatch%receiver_declaration_index)
+        if (.not. storage%found) return
+        if (storage%is_pointer) then
+            status%ok = .false.
+            status%message = "pointer receiver storage identity is not tracked"
+            return
+        end if
+        if (storage%is_target) then
+            status%ok = .false.
+            status%message = "TARGET alias receiver storage identity is not tracked"
+            return
+        end if
+        if (receiver_decl > 0) then
+            if (proc%decls(receiver_decl)%is_polymorphic) then
+                if (storage%is_allocatable) then
+                    status%ok = .false.
+                    status%message = "ownership-changing polymorphic receivers are unsupported"
+                    return
+                end if
+            end if
+        end if
+    end subroutine validate_indexed_receiver_storage
 
     subroutine parse_static_integer_node(arena, idx, value, status)
         type(ast_arena_t), intent(in) :: arena
@@ -3209,7 +3250,7 @@ contains
         type(program_unit_query_t) :: unit
         type(program_unit_query_t) :: candidate_unit
         character(len=:), allocatable :: object_type, type_name, method, impl
-        character(len=:), allocatable :: receiver_name
+        character(len=:), allocatable :: receiver_name, receiver_alias
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
         integer :: receiver, receiver_decl, receiver_index, i, j
@@ -3217,7 +3258,6 @@ contains
         logical :: found_type, found_function, indexed_receiver
         logical :: named_pass
         type(type_bound_call_query_t) :: dispatch
-        type(storage_query_t) :: receiver_storage
 
         out = 0
         access = query_component_access(arena, node%base_expr_index)
@@ -3270,24 +3310,11 @@ contains
                 object_type = proc%decls(receiver_decl)%type_name
             end if
             dispatch = query_type_bound_call(arena, call_index)
-            if (dispatch%receiver_path%found) then
-                if (dispatch%receiver_path%is_polymorphic) then
-                    call refuse_type_bound(status, node%name, &
-                        "polymorphic receivers are unsupported")
-                    return
-                end if
-            end if
-            if (dispatch%receiver_declaration_index > 0) then
-                receiver_storage = query_storage(arena, &
-                    dispatch%receiver_declaration_index)
-                if (receiver_storage%found) then
-                    if (receiver_storage%is_polymorphic .or. &
-                        receiver_storage%is_unlimited_polymorphic) then
-                        call refuse_type_bound(status, node%name, &
-                            "polymorphic receivers are unsupported")
-                        return
-                    end if
-                end if
+            call validate_indexed_receiver_storage(arena, dispatch, proc, &
+                receiver_decl, status)
+            if (.not. status%ok) then
+                call refuse_type_bound(status, node%name, trim(status%message))
+                return
             end if
         else
             call static_object_type(arena, access%base_node_index, proc, object_type)
@@ -3299,8 +3326,19 @@ contains
         end if
         if (is_polymorphic_type(object_type)) then
             dispatch = query_type_bound_call(arena, call_index)
+            if (indexed_receiver) then
+                call validate_fixed_polymorphic_array_dispatch(dispatch, node%name, &
+                    status)
+                if (.not. status%ok) return
+                receiver = static_array_receiver_expr(proc, receiver_name, &
+                    receiver_index)
+                receiver_alias = fresh_dispatch_alias(proc)
+            else
+                receiver = proc%add_expr(expr_var(trim(receiver_name)))
+                receiver_alias = trim(receiver_name)
+            end if
             call lower_polymorphic_function_dispatch(arena, node, proc, dispatch, &
-                status, out)
+                status, out, receiver, receiver_alias)
             return
         end if
         type_name = canonical_type_name(object_type)
@@ -3437,7 +3475,7 @@ contains
     end function lower_type_bound_call
 
     subroutine lower_polymorphic_function_dispatch(arena, node, proc, query, &
-            status, result_expr)
+            status, result_expr, receiver_expr, receiver_alias)
         !! Materialize a direct CLASS receiver function call as a structural
         !! SELECT TYPE.  The selector is passive; each concrete same-file
         !! target remains visible to inlining and to both derivative modes.
@@ -3447,14 +3485,17 @@ contains
         type(type_bound_call_query_t), intent(in) :: query
         type(lower_status_t), intent(inout) :: status
         integer, intent(out) :: result_expr
+        integer, intent(in) :: receiver_expr
+        character(len=*), intent(in) :: receiver_alias
         type(derived_type_query_t) :: dtype
         type(binding_hierarchy_query_t) :: target_binding
         type(program_unit_query_t) :: unit
         type(fad_stmt_t) :: s
         type(fad_decl_t) :: d
+        type(fad_decl_t) :: alias_decl
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
-        character(len=:), allocatable :: receiver, method, implementation
+        character(len=:), allocatable :: method, implementation
         character(len=:), allocatable :: result_type, temp
         integer :: i, ignored
         logical :: found_function
@@ -3462,9 +3503,8 @@ contains
         result_expr = 0
         call validate_dispatch_query(query, status)
         if (.not. status%ok) return
-        receiver = trim(query%receiver_name)
         method = trim(query%binding_name)
-        if (len_trim(receiver) == 0) then
+        if (len_trim(receiver_alias) == 0) then
             call refuse_type_bound(status, method, "the dispatch receiver is unresolved")
             return
         end if
@@ -3505,9 +3545,17 @@ contains
         d%type_name = result_type
         ignored = proc%add_decl(d)
 
+        if (proc%decl_index(receiver_alias) == 0) then
+            alias_decl%name = receiver_alias
+            alias_decl%type_name = "class(*)"
+            alias_decl%is_select_alias = .true.
+            alias_decl%alias_target = emit_expr(proc, receiver_expr)
+            ignored = proc%add_decl(alias_decl)
+        end if
+
         s%kind = FAD_SELECT_TYPE
-        s%value = proc%add_expr(expr_var(receiver))
-        s%target = receiver
+        s%value = receiver_expr
+        s%target = receiver_alias
         ignored = proc%add_stmt(s)
         do i = 1, size(query%dispatch_target_type_indices)
             dtype = query_derived_type(arena, query%dispatch_target_type_indices(i))
@@ -3520,7 +3568,8 @@ contains
                 return
             end if
             call lower_dispatch_pass_arguments(arena, node%arg_indices, method, &
-                proc, unit, target_binding, receiver, args, arg_names, status)
+                proc, unit, target_binding, proc%add_expr(expr_var( &
+                receiver_alias)), args, arg_names, status)
             if (.not. status%ok) return
             s%kind = FAD_TYPE_IS
             s%value = 0
@@ -3547,13 +3596,14 @@ contains
     end subroutine lower_polymorphic_function_dispatch
 
     subroutine lower_dispatch_pass_arguments(arena, actual_indices, method, proc, &
-            unit, binding, receiver, args, names, status)
+            unit, binding, receiver_expr, args, names, status)
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: actual_indices(:)
-        character(len=*), intent(in) :: method, receiver
+        character(len=*), intent(in) :: method
         type(fad_proc_t), intent(inout) :: proc
         type(program_unit_query_t), intent(in) :: unit
         type(binding_hierarchy_query_t), intent(in) :: binding
+        integer, intent(in) :: receiver_expr
         integer, allocatable, intent(out) :: args(:)
         character(len=64), allocatable, intent(out) :: names(:)
         type(lower_status_t), intent(inout) :: status
@@ -3564,13 +3614,13 @@ contains
         if (named_pass) named_pass = len_trim(binding%pass_name) > 0
         if (named_pass) then
             call lower_named_pass_arguments(arena, actual_indices, method, proc, &
-                unit, binding%pass_name, proc%add_expr(expr_var(receiver)), &
+                unit, binding%pass_name, receiver_expr, &
                 args, names, status)
             return
         end if
         if (binding%pass_arg) then
             allocate (args(size(actual_indices) + 1), names(size(actual_indices) + 1))
-            args(1) = proc%add_expr(expr_var(receiver))
+            args(1) = receiver_expr
             names(1) = ""
             do i = 1, size(actual_indices)
                 args(i + 1) = lower_actual(arena, actual_indices(i), proc, &
@@ -3583,7 +3633,7 @@ contains
     end subroutine lower_dispatch_pass_arguments
 
     subroutine lower_polymorphic_subroutine_dispatch(arena, actual_indices, &
-            proc, query, status)
+            proc, query, status, receiver_expr, receiver_alias)
         !! Materialize a direct CLASS receiver subroutine call as a structural
         !! SELECT TYPE.  The caller's normal statement list then contains one
         !! concrete same-file call per arm, ready for ordinary inlining.
@@ -3592,23 +3642,32 @@ contains
         type(fad_proc_t), intent(inout) :: proc
         type(type_bound_call_query_t), intent(in) :: query
         type(lower_status_t), intent(inout) :: status
+        integer, intent(in) :: receiver_expr
+        character(len=*), intent(in) :: receiver_alias
         type(derived_type_query_t) :: dtype
         type(binding_hierarchy_query_t) :: target_binding
         type(program_unit_query_t) :: unit
         type(fad_stmt_t) :: s
+        type(fad_decl_t) :: alias_decl
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
-        character(len=:), allocatable :: receiver, method, implementation
+        character(len=:), allocatable :: method, implementation
         integer :: i, ignored
         logical :: found_subroutine
 
         call validate_dispatch_query(query, status)
         if (.not. status%ok) return
-        receiver = trim(query%receiver_name)
         method = trim(query%binding_name)
+        if (proc%decl_index(receiver_alias) == 0) then
+            alias_decl%name = receiver_alias
+            alias_decl%type_name = "class(*)"
+            alias_decl%is_select_alias = .true.
+            alias_decl%alias_target = emit_expr(proc, receiver_expr)
+            ignored = proc%add_decl(alias_decl)
+        end if
         s%kind = FAD_SELECT_TYPE
-        s%value = proc%add_expr(expr_var(receiver))
-        s%target = receiver
+        s%value = receiver_expr
+        s%target = receiver_alias
         ignored = proc%add_stmt(s)
         do i = 1, size(query%dispatch_target_type_indices)
             dtype = query_derived_type(arena, query%dispatch_target_type_indices(i))
@@ -3623,7 +3682,8 @@ contains
                 return
             end if
             call lower_dispatch_pass_arguments(arena, actual_indices, method, proc, &
-                unit, target_binding, receiver, args, arg_names, status)
+                unit, target_binding, proc%add_expr(expr_var(receiver_alias)), &
+                args, arg_names, status)
             if (.not. status%ok) return
             s%kind = FAD_TYPE_IS
             s%value = 0
@@ -3702,6 +3762,21 @@ contains
             call refuse_type_bound(status, method, "dispatch target set is unknown")
         end if
     end subroutine validate_dispatch_query
+
+    subroutine validate_fixed_polymorphic_array_dispatch(query, method, status)
+        !! P8.3e accepts one proven concrete runtime path only.  A known
+        !! multi-child set still requires runtime dispatch replay.
+        type(type_bound_call_query_t), intent(in) :: query
+        character(len=*), intent(in) :: method
+        type(lower_status_t), intent(inout) :: status
+
+        call validate_dispatch_query(query, status)
+        if (.not. status%ok) return
+        if (size(query%dispatch_target_type_indices) /= 1) then
+            call refuse_type_bound(status, method, &
+                "polymorphic array receiver requires one fixed concrete runtime path")
+        end if
+    end subroutine validate_fixed_polymorphic_array_dispatch
 
     subroutine validate_dispatch_target(arena, query, binding, implementation, &
             method, unit, found_function, status)
@@ -3846,6 +3921,18 @@ contains
         name = "fad_dispatch_result"
     end function fresh_dispatch_name
 
+    function fresh_dispatch_alias(proc) result(name)
+        type(fad_proc_t), intent(in) :: proc
+        character(len=:), allocatable :: name
+        integer :: i
+
+        do i = 1, 10000
+            name = "fad_dispatch_receiver_"//itoa(i)
+            if (proc%decl_index(name) == 0) return
+        end do
+        name = "fad_dispatch_receiver"
+    end function fresh_dispatch_alias
+
     subroutine lower_type_bound_subroutine(arena, idx, proc, s, status)
         !! Lower one concrete same-file type-bound subroutine call.  Explicit
         !! CALL nodes carry the receiver and binding as one designator name;
@@ -3861,7 +3948,8 @@ contains
         type(program_unit_query_t) :: unit
         type(program_unit_query_t) :: candidate_unit
         character(len=:), allocatable :: object_type, type_name, method, impl
-        character(len=:), allocatable :: receiver_name, receiver_designator
+        character(len=:), allocatable :: receiver_name, receiver_designator, &
+            receiver_alias
         integer, allocatable :: actual_indices(:), args(:)
         character(len=64), allocatable :: arg_names(:)
         integer :: receiver, receiver_decl, receiver_index, i, matches, separator
@@ -3927,8 +4015,25 @@ contains
         object_type = proc%decls(receiver_decl)%type_name
         if (is_polymorphic_type(object_type)) then
             dispatch = query_type_bound_call(arena, idx)
+            if (indexed_receiver) then
+                call validate_indexed_receiver_storage(arena, dispatch, proc, &
+                    receiver_decl, status)
+                if (.not. status%ok) then
+                    call refuse_type_bound(status, method, trim(status%message))
+                    return
+                end if
+                call validate_fixed_polymorphic_array_dispatch(dispatch, method, &
+                    status)
+                if (.not. status%ok) return
+                receiver = static_array_receiver_expr(proc, receiver_name, &
+                    receiver_index)
+                receiver_alias = fresh_dispatch_alias(proc)
+            else
+                receiver = proc%add_expr(expr_var(trim(receiver_name)))
+                receiver_alias = trim(receiver_name)
+            end if
             call lower_polymorphic_subroutine_dispatch(arena, actual_indices, &
-                proc, dispatch, status)
+                proc, dispatch, status, receiver, receiver_alias)
             if (status%ok) s%kind = 0
             return
         end if
