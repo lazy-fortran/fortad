@@ -11,7 +11,8 @@ program test_polymorphic_ownership_oracle
     character(len=:), allocatable :: source, tangent, driver, dir
     type(fad_result_t) :: generated, generated_star, refused
     type(fad_result_t) :: allocated_generated, allocated_star_generated
-    type(fad_result_t) :: allocated_reverse, reverse_refused, reverse_star_refused
+    type(fad_result_t) :: allocated_reverse, allocated_star_reverse, reverse_refused
+    type(fad_result_t) :: ambiguous_refused, alias_refused, global_refused
     integer :: stat, unit
 
     source = polymorphic_source("class(base_t)")
@@ -57,12 +58,23 @@ program test_polymorphic_ownership_oracle
         print *, "FAIL unbounded polymorphic reverse ownership was accepted"
         error stop 23
     end if
-    reverse_star_refused = fad_vjp(polymorphic_source("class(*)"), &
+    allocated_star_reverse = fad_vjp(polymorphic_source("class(*)"), &
         [character(len=1) :: "x"], dependent="y", from="allocate_star_evaluate")
-    if (reverse_star_refused%ok .or. allocated(reverse_star_refused%code)) then
-        print *, "FAIL class(*) polymorphic reverse ownership was accepted"
+    if (.not. allocated_star_reverse%ok) then
+        print *, "FAIL fixed-source unlimited polymorphic ownership VJP: ", &
+            allocated_star_reverse%message
         error stop 27
     end if
+    ambiguous_refused = fad_vjp(ambiguous_ownership_source(), &
+        [character(len=1) :: "x"], dependent="y", &
+        from="allocate_star_evaluate")
+    call require_named_refusal(ambiguous_refused, "one fixed concrete SELECT TYPE arm")
+    alias_refused = fad_vjp(alias_ownership_source(), [character(len=1) :: "x"], &
+        dependent="y", from="allocate_star_evaluate")
+    call require_named_refusal(alias_refused, "aliasing declaration")
+    global_refused = fad_vjp(global_ownership_source(), [character(len=1) :: "x"], &
+        dependent="y", from="allocate_star_evaluate")
+    call require_named_refusal(global_refused, "module-level allocatable mutable state")
 
     refused = fad_jvp(source, [character(len=11) :: "model%scale"], &
         from="evaluate")
@@ -89,6 +101,7 @@ program test_polymorphic_ownership_oracle
         allocated_generated%code// &
         allocated_star_generated%code// &
         allocated_reverse%code// &
+        allocated_star_reverse%code// &
         "end module polymorphic_generated"//nl
     open (newunit=unit, file=dir//"/tangent.f90", status="replace", &
         action="write")
@@ -101,7 +114,8 @@ program test_polymorphic_ownership_oracle
         "allocate_evaluate, allocate_star_evaluate"//nl// &
         "    use polymorphic_generated, only: evaluate_jvp, evaluate_star_jvp, "// &
         "allocate_evaluate_jvp, allocate_star_evaluate_jvp"//nl// &
-        "    use polymorphic_generated, only: allocate_evaluate_vjp"//nl// &
+        "    use polymorphic_generated, only: allocate_evaluate_vjp, "// &
+        "allocate_star_evaluate_vjp"//nl// &
         "    implicit none"//nl// &
         "    class(base_t), allocatable :: model"//nl// &
         "    class(*), allocatable :: universal"//nl// &
@@ -150,6 +164,13 @@ program test_polymorphic_ownership_oracle
         "    fm = allocate_evaluate(x - h)"//nl// &
         "    fd = (fp - fm)/(2.0d0*h)"//nl// &
         "    if (abs(x_b/y_b - fd) > 1.0d-7) error stop 26"//nl// &
+        "    call allocate_star_evaluate_vjp(x, y, y_b, x_b)"//nl// &
+        "    if (abs(x_b - y_b*4.0d0*x) > 1.0d-12) error stop 28"//nl// &
+        "    if (abs(x_b*x_d - y_b*(4.0d0*x*x_d)) > 1.0d-12) error stop 29"//nl// &
+        "    fp = allocate_star_evaluate(x + h)"//nl// &
+        "    fm = allocate_star_evaluate(x - h)"//nl// &
+        "    fd = (fp - fm)/(2.0d0*h)"//nl// &
+        "    if (abs(x_b/y_b - fd) > 1.0d-7) error stop 30"//nl// &
         "    print *, 'polymorphic ownership passive JVP oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", &
@@ -259,6 +280,108 @@ contains
             "    end function unbounded"//nl// &
             "end module unbounded_ownership_case"//nl
     end function unbounded_ownership_source
+
+    function ambiguous_ownership_source() result(text)
+        character(len=:), allocatable :: text
+
+        text = polymorphic_source("class(*)")
+        text = replace_text(text, &
+            "        type is (child_t)"//nl// &
+            "            y = holder%scale*x"//nl// &
+            "        class default", &
+            "        type is (child_t)"//nl// &
+            "            y = holder%scale*x"//nl// &
+            "        type is (base_t)"//nl// &
+            "            y = x"//nl// &
+            "        class default")
+        text = replace_text(text, &
+            "        type is (child_t)"//nl// &
+            "            y = holder%scale*x"//nl// &
+            "        class default", &
+            "        type is (child_t)"//nl// &
+            "            y = holder%scale*x"//nl// &
+            "        type is (base_t)"//nl// &
+            "            y = x"//nl// &
+            "        class default")
+        text = replace_text(text, "module polymorphic_ownership_case", &
+            "module ambiguous_ownership_case")
+        text = replace_text(text, "end module polymorphic_ownership_case", &
+            "end module ambiguous_ownership_case")
+    end function ambiguous_ownership_source
+
+    function alias_ownership_source() result(text)
+        character(len=:), allocatable :: text
+
+        text = polymorphic_source("class(*)")
+        text = replace_text(text, "class(*), allocatable :: holder", &
+            "class(*), allocatable, target :: holder")
+        text = replace_text(text, "module polymorphic_ownership_case", &
+            "module alias_ownership_case")
+        text = replace_text(text, "end module polymorphic_ownership_case", &
+            "end module alias_ownership_case")
+    end function alias_ownership_source
+
+    function global_ownership_source() result(text)
+        character(len=:), allocatable :: text
+
+        text = "module global_ownership_case"//nl// &
+            "    implicit none"//nl// &
+            "    type :: base_t"//nl// &
+            "    end type base_t"//nl// &
+            "    type, extends(base_t) :: child_t"//nl// &
+            "        real(8) :: scale"//nl// &
+            "    end type child_t"//nl// &
+            "    class(*), allocatable :: holder"//nl// &
+            "contains"//nl// &
+            "    function allocate_star_evaluate(x) result(y)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        real(8) :: y"//nl// &
+            "        type(child_t) :: child"//nl// &
+            "        child%scale = 2.0d0*x"//nl// &
+            "        allocate(holder, source=child)"//nl// &
+            "        select type (holder)"//nl// &
+            "        type is (child_t)"//nl// &
+            "            y = holder%scale*x"//nl// &
+            "        class default"//nl// &
+            "            y = x"//nl// &
+            "        end select"//nl// &
+            "        deallocate(holder)"//nl// &
+            "    end function allocate_star_evaluate"//nl// &
+            "end module global_ownership_case"//nl
+    end function global_ownership_source
+
+    function replace_text(text, old, new) result(out)
+        character(len=*), intent(in) :: text, old, new
+        character(len=:), allocatable :: out
+        integer :: at
+
+        at = index(text, old)
+        if (at == 0) then
+            out = text
+        else if (at == 1) then
+            out = new//text(len(old) + 1:)
+        else if (at + len(old) > len(text)) then
+            out = text(:at - 1)//new
+        else
+            out = text(:at - 1)//new//text(at + len(old):)
+        end if
+    end function replace_text
+
+    subroutine require_named_refusal(result, reason)
+        type(fad_result_t), intent(in) :: result
+        character(len=*), intent(in) :: reason
+
+        if (result%ok .or. .not. allocated(result%message)) then
+            print *, "FAIL expected refusal for ", trim(reason)
+            if (allocated(result%message)) print *, trim(result%message)
+            error stop 31
+        end if
+        if (index(result%message, trim(reason)) == 0) then
+            print *, "FAIL refusal for ", trim(reason), " was imprecise: ", &
+                trim(result%message)
+            error stop 32
+        end if
+    end subroutine require_named_refusal
 
     subroutine require_refusal(result, type_label)
         type(fad_result_t), intent(in) :: result

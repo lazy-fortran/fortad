@@ -28,6 +28,14 @@ independent oracle covers the hand derivative, central finite differences,
 VJP values, and the JVP/VJP adjoint identity; `x_b` remains caller-owned
 derivative storage.
 
+The same reverse replay contract now covers a scalar local or dummy
+`class(*), allocatable` owner acquired once with `SOURCE=child`, where
+`child` is a declared concrete object. The reverse emitter creates a concrete
+adjoint shadow with the source type, replays the one matching `SELECT TYPE`
+arm, and deallocates the shadow after propagation. The independent ownership
+oracle checks the hand derivative, central finite difference, and adjoint
+identity for `allocate_star_evaluate`.
+
 Inside that proven single `TYPE IS` or `CLASS IS` arm, a scalar concrete
 component may also receive one direct assignment such as
 `owner%scale = 3.0d0*x`. JVP and VJP route the assignment through the paired
@@ -57,9 +65,10 @@ inside the guard. The refusal therefore protects both derivative correctness
 and allocation safety.
 
 The bounded reverse slice deliberately refuses component array elements and
-sections, factories and polymorphic sources, `MOLD=`, repeated or
-path-dependent acquisition, aliases, `move_alloc`, whole-object assignment,
-finalization replay, and unresolved or multi-arm dispatch. It also does not
+sections, factories and polymorphic sources (the `class(*)` case still requires
+a concrete source), `MOLD=`, repeated or path-dependent acquisition, aliases,
+`move_alloc`, whole-object assignment, finalization replay, and unresolved or
+multi-arm dispatch. It also does not
 weaken the existing refusals for descriptor changes, reallocation, global
 mutable state, pointer/target aliases, or unsupported allocatable components.
 Negative cases verify that these boundaries return no derivative output.
