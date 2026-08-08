@@ -17,7 +17,8 @@ module fortad_lower_statements
         procedure_call_target_query_t, query_procedure_call_target, &
         procedure_target_query_t, query_procedure_target, &
         type_bound_call_query_t, query_type_bound_call, &
-        get_source_line
+        get_source_line, TREAL
+    use ast_nodes_control, only: associate_node
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, fad_base_name, copy_decl, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
@@ -33,15 +34,18 @@ module fortad_lower_statements
         array_slice_query_t, array_bounds_query_t, range_expression_query_t, &
         query_array_slice, query_array_bounds, query_range_expression, &
         nullify_query_t, query_nullify, STORAGE_POINTER, STORAGE_MODULE, &
-        STORAGE_SAVE, STORAGE_COMMON
+        STORAGE_SAVE, STORAGE_COMMON, associate_selector_query_t, &
+        query_associate_selectors, STORAGE_LOCAL, STORAGE_BORROWED
     use frontend_compiler_resolution, only: BINDING_DECLARATION, &
         BINDING_FUNCTION, BINDING_SUBROUTINE, BINDING_ASSOCIATE_NAME, &
+        BINDING_DUMMY_ARGUMENT, &
         declaration_binding_t, resolve_identifier_binding
     implicit none
     private
 
     public :: lower_body
     public :: inherit_module_uses
+    public :: rewrite_associate_aliases
 
 contains
 
@@ -127,6 +131,10 @@ contains
         if (.not. arena%has_node_at(idx)) return
         if (trim(arena%entries(idx)%node_type) == "select_type") then
             call lower_select_type(arena, idx, proc, status)
+            return
+        end if
+        if (trim(arena%entries(idx)%node_type) == "associate") then
+            call lower_associate(arena, idx, proc, status)
             return
         end if
         nullify_info = query_nullify(arena, idx)
@@ -352,6 +360,232 @@ contains
                 "' at line "//itoa(line)//": storage identity is not tracked"
         end if
     end subroutine refuse_alias_declaration
+
+    subroutine lower_associate(arena, idx, proc, status)
+        !! Lower the bounded concrete ASSOCIATE slice.
+        !!
+        !! A direct scalar association is an identity-preserving name for the
+        !! differentiated storage.  Keep it as a hidden alias while lowering
+        !! the body, then rewrite the finished IR to the proven selector.  The
+        !! generated procedure therefore contains no alias declaration, while
+        !! active paths remain ordinary reads and writes of the original name.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(out) :: status
+        type(associate_node) :: node
+        type(associate_selector_query_t), allocatable :: facts(:)
+        type(fad_decl_t) :: alias_decl
+        integer :: i, selector_expr, ignored
+
+        status%ok = .true.
+        select type (candidate => arena%entries(idx)%node)
+            type is (associate_node)
+            node = candidate
+        class default
+            status%ok = .false.
+            status%message = "unsupported ASSOCIATE at line "//itoa(node_line(arena, idx))
+            return
+        end select
+
+        facts = query_associate_selectors(arena, idx)
+        if (.not. allocated(node%associations) .or. size(node%associations) == 0) then
+            call refuse_associate(node_line(arena, idx), &
+                "the construct has no selector facts", status)
+            return
+        end if
+        if (size(facts) /= size(node%associations)) then
+            call refuse_associate(node_line(arena, idx), &
+                "selector facts are incomplete", status)
+            return
+        end if
+
+        do i = 1, size(facts)
+            call validate_associate_selector(arena, node_line(arena, idx), &
+                facts(i), status)
+            if (.not. status%ok) return
+            selector_expr = lower_expr(arena, facts(i)%selector_node_index, &
+                proc, status)
+            if (.not. status%ok) return
+
+            alias_decl%name = trim(facts(i)%associate_name)
+            alias_decl%type_name = trim(facts(i)%selector_storage%type_name)
+            alias_decl%line = node_line(arena, idx)
+            alias_decl%is_select_alias = .true.
+            alias_decl%is_associate_alias = .true.
+            alias_decl%alias_target = emit_expr(proc, selector_expr)
+            ignored = proc%add_decl(alias_decl)
+        end do
+
+        if (allocated(node%body_indices)) then
+            call lower_body(arena, node%body_indices, proc, status, &
+                allow_terminal_return=.false.)
+        end if
+    end subroutine lower_associate
+
+    subroutine validate_associate_selector(arena, associate_line, fact, status)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: associate_line
+        type(associate_selector_query_t), intent(in) :: fact
+        type(lower_status_t), intent(inout) :: status
+        type(declaration_binding_t) :: binding
+        type(declaration_query_t) :: declaration
+        type(storage_query_t) :: declaration_storage
+        character(len=:), allocatable :: error_message
+        integer :: selector_idx
+
+        selector_idx = fact%selector_node_index
+        if (.not. fact%found .or. .not. fact%is_resolved .or. &
+            .not. fact%is_storage_resolved) then
+            call refuse_associate(associate_line, &
+                "selector is not a resolved storage designator", status)
+            return
+        end if
+        if (fact%is_alias_boundary .or. fact%is_ambiguous .or. &
+            fact%has_ambiguous_access) then
+            call refuse_associate(associate_line, &
+                "selector or body access crosses an alias boundary", status)
+            return
+        end if
+        if (fact%is_pointer .or. fact%selector_storage%is_pointer) then
+            call refuse_associate(associate_line, &
+                "pointer selector storage identity is not tracked", status)
+            return
+        end if
+        if (fact%is_allocatable .or. fact%selector_storage%is_allocatable) then
+            call refuse_associate(associate_line, &
+                "allocatable selector lifetime is not tracked", status)
+            return
+        end if
+        if (fact%is_polymorphic .or. fact%is_unlimited_polymorphic .or. &
+            fact%selector_storage%is_polymorphic .or. &
+            fact%selector_storage%is_unlimited_polymorphic) then
+            call refuse_associate(associate_line, &
+                "polymorphic selector dynamic type is not tracked", status)
+            return
+        end if
+        if (fact%selector_storage%is_target) then
+            call refuse_associate(associate_line, &
+                "TARGET selector storage identity is not tracked", status)
+            return
+        end if
+        if (fact%selector_storage%is_module_state .or. &
+            fact%selector_storage%is_save_state .or. &
+            fact%selector_storage%is_common_state) then
+            call refuse_associate(associate_line, &
+                "global mutable selector state is not differentiated", status)
+            return
+        end if
+        if (fact%selector_storage%storage_class /= STORAGE_LOCAL .and. &
+            fact%selector_storage%storage_class /= STORAGE_BORROWED) then
+            call refuse_associate(associate_line, &
+                "selector is not local or dummy storage", status)
+            return
+        end if
+        if (fact%selector_storage%rank /= 0 .or. &
+            fact%selector_storage%is_array_element .or. &
+            fact%selector_storage%is_array_section) then
+            call refuse_associate(associate_line, &
+                "only scalar selectors are supported in this slice", status)
+            return
+        end if
+        if (fact%declared_type_kind /= TREAL) then
+            call refuse_associate(associate_line, &
+                "only real scalar selectors are supported in this slice", status)
+            return
+        end if
+        if (selector_idx <= 0 .or. selector_idx > arena%size .or. &
+            .not. arena%has_node_at(selector_idx)) then
+            call refuse_associate(associate_line, &
+                "selector is missing a direct identifier", status)
+            return
+        end if
+        select type (selector => arena%entries(selector_idx)%node)
+            type is (identifier_node)
+        class default
+            call refuse_associate(associate_line, &
+                "only a direct local or dummy identifier selector is supported", status)
+            return
+        end select
+        call resolve_identifier_binding(arena, selector_idx, binding, error_message)
+        if (.not. binding%found) then
+            call refuse_associate(associate_line, &
+                "selector binding is unresolved", status)
+            return
+        end if
+        if (binding%binding_kind /= BINDING_DECLARATION .and. &
+            binding%binding_kind /= BINDING_DUMMY_ARGUMENT) then
+            call refuse_associate(associate_line, &
+                "selector is not a local or dummy declaration", status)
+            return
+        end if
+        declaration = query_declaration(arena, binding%declaration_node_index)
+        declaration_storage = query_storage(arena, binding%declaration_node_index)
+        if (declaration%is_allocatable .or. declaration_storage%is_allocatable) then
+            call refuse_associate(associate_line, &
+                "allocatable selector lifetime is not tracked", status)
+            return
+        end if
+        if (declaration%is_pointer .or. declaration_storage%is_pointer) then
+            call refuse_associate(associate_line, &
+                "pointer selector storage identity is not tracked", status)
+            return
+        end if
+        if (declaration%is_target .or. declaration_storage%is_target) then
+            call refuse_associate(associate_line, &
+                "TARGET selector storage identity is not tracked", status)
+            return
+        end if
+        if (declaration%is_save .or. declaration_storage%is_module_state .or. &
+            declaration_storage%is_save_state .or. &
+            declaration_storage%is_common_state) then
+            call refuse_associate(associate_line, &
+                "global mutable selector state is not differentiated", status)
+            return
+        end if
+        if (allocated(declaration%type_name)) then
+            if (is_polymorphic_type(declaration%type_name)) then
+                call refuse_associate(associate_line, &
+                    "polymorphic selector dynamic type is not tracked", status)
+                return
+            end if
+        end if
+    end subroutine validate_associate_selector
+
+    subroutine refuse_associate(associate_idx, reason, status)
+        integer, intent(in) :: associate_idx
+        character(len=*), intent(in) :: reason
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .false.
+        status%message = "unsupported ASSOCIATE at line "//itoa(associate_idx)//": "// &
+            trim(reason)
+    end subroutine refuse_associate
+
+    subroutine rewrite_associate_aliases(proc)
+        !! Replace hidden concrete ASSOCIATE names after the whole body lowers.
+        type(fad_proc_t), intent(inout) :: proc
+        integer :: i, j
+        character(len=:), allocatable :: name, target
+
+        do i = 1, proc%n_decls
+            if (.not. proc%decls(i)%is_associate_alias) cycle
+            name = trim(proc%decls(i)%name)
+            if (.not. allocated(proc%decls(i)%alias_target)) cycle
+            target = trim(proc%decls(i)%alias_target)
+            do j = 1, proc%n_exprs
+                if (proc%exprs(j)%kind /= FAD_VAR) cycle
+                if (.not. same_name(proc%exprs(j)%text, name)) cycle
+                proc%exprs(j)%text = target
+            end do
+            do j = 1, proc%n_stmts
+                if (.not. allocated(proc%stmts(j)%target)) cycle
+                if (same_name(proc%stmts(j)%target, name)) then
+                    proc%stmts(j)%target = target
+                end if
+            end do
+        end do
+    end subroutine rewrite_associate_aliases
 
     subroutine lower_select_type(arena, idx, proc, status)
         !! Preserve a SELECT TYPE as structural IR. Its selector is discrete:
