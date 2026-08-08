@@ -41,19 +41,19 @@ program test_active_allocatable_component_rank2_oracle
         "        out = sum(box%values)"//nl// &
         "    end subroutine whole_read"//nl// &
         "end module whole_allocatable_component_rank2_case"//nl
-    character(len=*), parameter :: rank3_source = &
-        "module rank3_allocatable_component_case"//nl// &
+    character(len=*), parameter :: rank4_source = &
+        "module rank4_allocatable_component_case"//nl// &
         "    implicit none"//nl// &
         "    type :: box_t"//nl// &
-        "        real(8), allocatable :: values(:,:,:)"//nl// &
+        "        real(8), allocatable :: values(:,:,:,:)"//nl// &
         "    end type box_t"//nl// &
         "contains"//nl// &
         "    pure subroutine kernel(box, out)"//nl// &
         "        type(box_t), intent(in) :: box"//nl// &
         "        real(8), intent(out) :: out"//nl// &
-        "        out = box%values(1,1,1)"//nl// &
+        "        out = box%values(1,1,1,1)"//nl// &
         "    end subroutine kernel"//nl// &
-        "end module rank3_allocatable_component_case"//nl
+        "end module rank4_allocatable_component_case"//nl
     character(len=*), parameter :: integer_source = &
         "module integer_allocatable_component_case"//nl// &
         "    implicit none"//nl// &
@@ -190,9 +190,9 @@ program test_active_allocatable_component_rank2_oracle
     refused = fad_jvp(whole_source, [character(len=32) :: "box%values(1,1)"], &
         from="whole_read")
     call require_refusal(refused, "whole allocatable component")
-    refused = fad_jvp(rank3_source, [character(len=32) :: "box%values(1,1,1)"], &
+    refused = fad_jvp(rank4_source, [character(len=32) :: "box%values(1,1,1,1)"], &
         from="kernel")
-    call require_refusal(refused, "rank greater than two")
+    call require_refusal(refused, "rank greater than three")
     refused = fad_jvp(integer_source, [character(len=32) :: "box%values(1,1)"], &
         from="kernel")
     call require_refusal(refused, "only concrete REAL allocatable components")
