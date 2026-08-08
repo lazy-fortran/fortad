@@ -1028,8 +1028,9 @@ contains
         character(len=:), allocatable, intent(out) :: indep_list
         integer, intent(out) :: stat
         logical, intent(in), optional :: legacy_outputs
-        integer :: i, decl_index
+        integer :: i, decl_index, n_components
         character(len=:), allocatable :: name
+        logical :: derived_decl
         logical :: use_legacy_outputs
 
         indep_list = ""
@@ -1047,6 +1048,12 @@ contains
             if (decl_index == 0) cycle
             if (primal%decls(decl_index)%is_result) cycle
             if (primal%decls(decl_index)%intent == FAD_INTENT_OUT) cycle
+            derived_decl = is_derived_declaration(primal, decl_index)
+            if (derived_decl) then
+                n_components = append_read_component_paths(primal, name, &
+                    indep_list)
+                if (n_components > 0) cycle
+            end if
             if (use_legacy_outputs) then
                 if (legacy_output_candidate(primal, name)) cycle
             end if
@@ -1058,6 +1065,167 @@ contains
         end do
         if (len_trim(indep_list) == 0) stat = 1
     end subroutine infer_independent_names
+
+    integer function append_read_component_paths(primal, base_name, list) &
+            result(appended)
+        !! Prefer concrete REAL component paths over a whole derived dummy.
+        !! The latter would perturb the object's storage/type identity, while
+        !! the former is exactly the bounded component-derivative contract.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: base_name
+        character(len=:), allocatable, intent(inout) :: list
+        integer :: i
+        character(len=:), allocatable :: path
+
+        appended = 0
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (.not. primal%exprs(i)%component_is_real) cycle
+            path = trim(primal%exprs(i)%text)
+            if (allocated(primal%exprs(i)%component_original_path)) then
+                path = trim(primal%exprs(i)%component_original_path)
+            end if
+            if (fad_base_name(path) /= trim(base_name)) cycle
+            if (.not. component_path_is_read(primal, path)) cycle
+            if (independent_list_contains(list, path)) cycle
+            call append_independent_name(list, path)
+            appended = appended + 1
+        end do
+    end function append_read_component_paths
+
+    logical function component_path_is_read(primal, path) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: path
+        integer :: i, j
+
+        found = .false.
+        do i = 1, primal%n_stmts
+            select case (primal%stmts(i)%kind)
+            case (FAD_ASSIGN)
+                if (expression_has_component(primal, primal%stmts(i)%value, &
+                    path)) then
+                    found = .true.
+                    return
+                end if
+            case (FAD_CALL_STMT)
+                if (.not. allocated(primal%stmts(i)%call_args)) cycle
+                do j = 1, size(primal%stmts(i)%call_args)
+                    if (expression_has_component(primal, &
+                        primal%stmts(i)%call_args(j), path)) then
+                        found = .true.
+                        return
+                    end if
+                end do
+            end select
+        end do
+    end function component_path_is_read
+
+    recursive logical function expression_has_component(primal, index, path) &
+            result(found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: index
+        character(len=*), intent(in) :: path
+        integer :: i
+        character(len=:), allocatable :: text
+
+        found = .false.
+        if (index < 1 .or. index > primal%n_exprs) return
+        if (primal%exprs(index)%is_component_path) then
+            text = trim(primal%exprs(index)%text)
+            if (allocated(primal%exprs(index)%component_original_path)) then
+                text = trim(primal%exprs(index)%component_original_path)
+            end if
+            if (same_cli_name(text, path)) then
+                found = .true.
+                return
+            end if
+        end if
+        if (.not. allocated(primal%exprs(index)%args)) return
+        do i = 1, size(primal%exprs(index)%args)
+            if (expression_has_component(primal, primal%exprs(index)%args(i), &
+                path)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function expression_has_component
+
+    logical function is_derived_declaration(primal, decl_index) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: decl_index
+        character(len=:), allocatable :: compact
+        integer :: i
+
+        found = .false.
+        if (decl_index <= 0 .or. decl_index > primal%n_decls) return
+        if (.not. allocated(primal%decls(decl_index)%type_name)) return
+        compact = ""
+        do i = 1, len_trim(primal%decls(decl_index)%type_name)
+            if (primal%decls(decl_index)%type_name(i:i) == " " .or. &
+                primal%decls(decl_index)%type_name(i:i) == achar(9)) cycle
+            compact = compact//primal%decls(decl_index)%type_name(i:i)
+        end do
+        found = index(compact, "type(") == 1 .or. index(compact, "TYPE(") == 1 .or. &
+            index(compact, "class(") == 1 .or. index(compact, "CLASS(") == 1
+    end function is_derived_declaration
+
+    subroutine append_independent_name(list, name)
+        character(len=:), allocatable, intent(inout) :: list
+        character(len=*), intent(in) :: name
+
+        if (len_trim(list) == 0) then
+            list = trim(name)
+        else
+            list = trim(list)//","//trim(name)
+        end if
+    end subroutine append_independent_name
+
+    logical function independent_list_contains(list, name) result(found)
+        character(len=*), intent(in) :: list, name
+        character(len=:), allocatable :: remaining, item
+        integer :: comma
+
+        found = .false.
+        remaining = trim(list)
+        do while (len_trim(remaining) > 0)
+            comma = index(remaining, ",")
+            if (comma > 0) then
+                item = trim(remaining(:comma - 1))
+                remaining = adjustl(remaining(comma + 1:))
+            else
+                item = trim(remaining)
+                remaining = ""
+            end if
+            if (same_cli_name(item, name)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function independent_list_contains
+
+    logical function same_cli_name(lhs, rhs) result(equal)
+        character(len=*), intent(in) :: lhs, rhs
+        integer :: i
+
+        equal = len_trim(lhs) == len_trim(rhs)
+        if (.not. equal) return
+        do i = 1, len_trim(lhs)
+            if (lower_cli_char(lhs(i:i)) /= lower_cli_char(rhs(i:i))) then
+                equal = .false.
+                return
+            end if
+        end do
+    end function same_cli_name
+
+    character function lower_cli_char(value) result(lowered)
+        character, intent(in) :: value
+
+        if (iachar(value) >= iachar("A") .and. iachar(value) <= iachar("Z")) then
+            lowered = achar(iachar(value) + iachar("a") - iachar("A"))
+        else
+            lowered = value
+        end if
+    end function lower_cli_char
 
     subroutine infer_tapenade_dependent(source, from_name, dependent, stat)
         !! Infer a legacy subroutine's output from its first write.
