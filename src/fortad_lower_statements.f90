@@ -3138,9 +3138,9 @@ contains
                 end if
             end if
         end if
-        if (component_rank > 3) then
+        if (component_rank > 4) then
             call refuse_component(arena, idx, &
-                "allocatable component rank greater than three is not supported", status)
+                "allocatable component rank greater than four is not supported", status)
             return
         end if
         if (whole) then
