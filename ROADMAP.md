@@ -293,6 +293,11 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   `--indep` is omitted it selects only read concrete `REAL` component paths
   from derived dummies, including array-element paths, and never widens a
   whole derived object implicitly. The independent gfortran CLI oracle passes.
+  Legacy reverse mode also accepts one unique direct concrete `REAL` component
+  dependent through a separate shaped cotangent seed and one shadow per
+  independent base. The independent explicit/automatic VJP oracle passes;
+  whole-object, aliased, polymorphic, allocatable, pointer, global, and
+  multiply-written component dependents remain refusals.
   The exact legacy v290 spelling that uses old-style type declarations and
   compound component declarations remains a FortFront metadata boundary; it
   is not counted as modern runnable support.
@@ -1108,6 +1113,13 @@ of selected child ends the fixed-path derivative contract.
         are retained and revalidated on the integration worktree. This does
         not expand support to polymorphic ownership, allocatable components,
         procedure components, or arbitrary component aliasing.
+      - [x] **P7.1b bounded component-dependent reverse slice.** A unique
+        direct concrete `REAL` component target can be a VJP dependent without
+        duplicate shadow dummies or whole-object activity. The generated VJP
+        receives a rank-preserving component cotangent and keeps one shadow per
+        independent base, with an independent explicit/automatic oracle. Whole
+        object, aliasing, polymorphic, allocatable, pointer, global, and
+        multiply-written component dependents remain explicit refusals.
 - [ ] **P7.2 Allocation lifetime.** Cover allocatable components,
       `allocate`, `deallocate`, `source=`, `mold=`, automatic reallocation,
       deep assignment, and `move_alloc`. Reverse mode must reproduce the

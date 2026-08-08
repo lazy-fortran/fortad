@@ -187,7 +187,7 @@ contains
         type(reverse_spec_t), intent(in) :: spec
         type(fad_proc_t), intent(out) :: adjoint
         type(reverse_status_t), intent(out) :: status
-        character(len=:), allocatable :: suffix, dependent
+        character(len=:), allocatable :: suffix, dependent, dependent_seed
         logical, allocatable :: active(:)
         character(len=256), allocatable :: active_paths(:)
         type(ssa_map_t) :: ssa
@@ -216,6 +216,11 @@ contains
 
         call choose_dependent(primal, spec, dependent, status)
         if (.not. status%ok) return
+
+        dependent_seed = ""
+        if (is_component_dependent(primal, dependent)) then
+            dependent_seed = component_seed_name(dependent, suffix)
+        end if
 
         call check_supported(primal, status)
         if (.not. status%ok) return
@@ -283,7 +288,7 @@ contains
             calls, n_calls, &
             allocations, n_allocations, &
             order_kind, order_index, n_order, &
-            spec, dependent, suffix, active, active_paths, status)
+            spec, dependent, dependent_seed, suffix, active, active_paths, status)
     end subroutine differentiate_reverse
 
     subroutine choose_dependent(primal, spec, dependent, status)
@@ -296,10 +301,24 @@ contains
 
         if (allocated(spec%dependent)) then
             dependent = trim(spec%dependent)
-            if (primal%decl_index(dependent) == 0) then
-                status%ok = .false.
-                status%message = "dependent '"//dependent// &
-                    "' is not declared in "//primal%name
+            if (primal%decl_index(dependent) > 0) then
+                if (is_derived_decl(primal, primal%decl_index(dependent))) then
+                    status%ok = .false.
+                    status%message = "dependent '"//dependent// &
+                        "' is a derived object; it must name a concrete REAL component"
+                    return
+                end if
+            else
+                if (.not. supported_component_dependent(primal, dependent)) then
+                    status%ok = .false.
+                    if (index(trim(dependent), "%") > 0) then
+                        status%message = "dependent '"//dependent// &
+                            "' is not a supported concrete REAL component path"
+                    else
+                        status%message = "dependent '"//dependent// &
+                            "' is not declared in "//primal%name
+                    end if
+                end if
             end if
             return
         end if
@@ -331,6 +350,196 @@ contains
                 "; name the dependent explicitly"
         end if
     end subroutine choose_dependent
+
+    logical function supported_component_dependent(primal, dependent) result(ok)
+        !! The bounded component-dependent VJP contract.
+        !!
+        !! A component seed is a separate rank-preserving dummy. This is safe
+        !! only while the component has ordinary concrete REAL storage;
+        !! aliases, dynamic type, global state, and lifetime changes need a
+        !! storage-aware reverse representation of their own.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: dependent
+        integer :: i, target_count
+        character(len=:), allocatable :: path
+        logical :: found
+
+        ok = .false.
+        if (index(trim(dependent), "%") == 0) return
+        if (is_section_target(dependent)) return
+        found = .false.
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            path = component_path_text(primal%exprs(i))
+            if (.not. same_component_name(path, dependent)) cycle
+            found = .true.
+            if (.not. primal%exprs(i)%component_is_real) return
+            if (primal%exprs(i)%component_is_allocatable) return
+            if (primal%exprs(i)%component_is_pointer) return
+            if (primal%exprs(i)%component_is_target) return
+            if (primal%exprs(i)%component_is_polymorphic) return
+            if (primal%exprs(i)%component_is_global) return
+            if (primal%exprs(i)%component_rank > 4) return
+            exit
+        end do
+        if (.not. found) then
+            do i = 1, primal%n_stmts
+                if (.not. primal%stmts(i)%target_is_component_path) cycle
+                if (.not. allocated(primal%stmts(i)%target)) cycle
+                if (.not. same_component_name(primal%stmts(i)%target, &
+                    dependent)) cycle
+                found = .true.
+                if (.not. primal%stmts(i)%target_component_is_real) return
+                if (primal%stmts(i)%target_component_is_allocatable .or. &
+                    primal%stmts(i)%target_component_is_pointer .or. &
+                    primal%stmts(i)%target_component_is_target .or. &
+                    primal%stmts(i)%target_component_is_polymorphic .or. &
+                    primal%stmts(i)%target_component_is_global) return
+                if (primal%stmts(i)%target_component_rank > 4) return
+                exit
+            end do
+        end if
+        if (.not. found) return
+        target_count = 0
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (.not. allocated(primal%stmts(i)%target)) cycle
+            if (same_component_name(primal%stmts(i)%target, dependent)) then
+                target_count = target_count + 1
+            end if
+        end do
+        ok = target_count == 1
+    end function supported_component_dependent
+
+    logical function is_component_dependent(primal, dependent) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: dependent
+
+        found = .false.
+        if (index(trim(dependent), "%") == 0) return
+        found = supported_component_dependent(primal, dependent)
+    end function is_component_dependent
+
+    function component_path_text(expr) result(path)
+        type(fad_expr_t), intent(in) :: expr
+        character(len=:), allocatable :: path
+
+        path = ""
+        if (allocated(expr%text)) path = trim(expr%text)
+        if (allocated(expr%component_original_path)) then
+            path = trim(expr%component_original_path)
+        end if
+    end function component_path_text
+
+    function component_seed_name(path, suffix) result(name)
+        !! Make a valid, stable dummy name for a component cotangent.
+        character(len=*), intent(in) :: path, suffix
+        character(len=:), allocatable :: name
+        character :: c
+        integer :: i, code, limit
+
+        name = "fad_dep_"
+        do i = 1, len_trim(path)
+            c = path(i:i)
+            code = iachar(c)
+            if (code >= iachar("A") .and. code <= iachar("Z")) then
+                c = achar(code + iachar("a") - iachar("A"))
+            else if (.not. (code >= iachar("a") .and. code <= iachar("z")) .and. &
+                    .not. (code >= iachar("0") .and. code <= iachar("9")) .and. &
+                    c /= "_") then
+                c = "_"
+            end if
+            name = name//c
+        end do
+        limit = 63 - len_trim(suffix)
+        if (len_trim(name) > limit) name = name(:limit)
+        name = trim(name)//trim(suffix)
+    end function component_seed_name
+
+    subroutine component_seed_decl(primal, path, name, d)
+        !! Declare the incoming cotangent with the component's scalar type and
+        !! rank. Assumed-shape seed arrays are safe because the generated
+        !! routine is emitted in a module with an explicit interface.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: path, name
+        type(fad_decl_t), intent(out) :: d
+        integer :: i, rank, di
+        character(len=:), allocatable :: expr_path
+
+        di = primal%decl_index(fad_base_name(path))
+        if (di > 0) then
+            d = primal%decls(di)
+        end if
+        d%name = trim(name)
+        d%type_name = "real(8)"
+        d%is_value = .false.
+        d%is_optional = .false.
+        d%is_allocatable = .false.
+        d%is_contiguous = .false.
+        d%is_polymorphic = .false.
+        d%is_unlimited_polymorphic = .false.
+        d%is_result = .false.
+        d%intent = FAD_INTENT_IN
+        d%is_array = .false.
+        if (allocated(d%dims)) deallocate (d%dims)
+
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            expr_path = component_path_text(primal%exprs(i))
+            if (.not. same_component_name(expr_path, path)) cycle
+            if (allocated(primal%exprs(i)%component_type_name)) then
+                d%type_name = primal%exprs(i)%component_type_name
+            end if
+            rank = component_path_rank(primal%exprs(i), expr_path)
+            if (rank > 0) then
+                d%is_array = .true.
+                d%dims = component_seed_dims(rank)
+            end if
+            return
+        end do
+        do i = 1, primal%n_stmts
+            if (.not. primal%stmts(i)%target_is_component_path) cycle
+            if (.not. allocated(primal%stmts(i)%target)) cycle
+            if (.not. same_component_name(primal%stmts(i)%target, path)) cycle
+            if (allocated(primal%stmts(i)%target_component_type_name)) then
+                d%type_name = primal%stmts(i)%target_component_type_name
+            end if
+            rank = primal%stmts(i)%target_component_rank
+            if (rank > 0) then
+                d%is_array = .true.
+                d%dims = component_seed_dims(rank)
+            end if
+            return
+        end do
+    end subroutine component_seed_decl
+
+    integer function component_path_rank(expr, path) result(rank)
+        type(fad_expr_t), intent(in) :: expr
+        character(len=*), intent(in) :: path
+        integer :: percent, open
+        character(len=:), allocatable :: tail
+
+        rank = expr%component_rank
+        percent = index(trim(path), "%", back=.true.)
+        if (percent > 0) then
+            tail = trim(path(percent + 1:))
+            open = index(tail, "(")
+            if (open > 0) rank = 0
+        end if
+        if (rank < 0) rank = 0
+    end function component_path_rank
+
+    function component_seed_dims(rank) result(dims)
+        integer, intent(in) :: rank
+        character(len=:), allocatable :: dims
+        integer :: i
+
+        dims = ""
+        do i = 1, rank
+            if (i > 1) dims = dims//", "
+            dims = dims//":"
+        end do
+    end function component_seed_dims
 
     subroutine check_supported(primal, status)
         !! Refuse what this milestone cannot do correctly, by name.
@@ -799,7 +1008,7 @@ contains
             end do
         end do
 
-        di = primal%decl_index(dependent)
+        di = primal%decl_index_of(dependent)
         if (di > 0) useful(di) = .true.
         changed = .true.
         do while (changed)
@@ -1201,12 +1410,14 @@ contains
         logical, intent(in) :: active(:)
         character(len=64), allocatable :: names(:)
         type(fad_decl_t) :: d
-        character(len=:), allocatable :: base
+        character(len=:), allocatable :: base, dependent_base
         integer :: i, j, n, di, ignored
-        logical :: seen
+        logical :: seen, dependent_component
 
         allocate (names(2*(size(primal%params) + size(spec%independents) + 4)))
         n = 0
+        dependent_component = index(trim(dependent), "%") > 0
+        dependent_base = fad_base_name(dependent)
 
         do i = 1, size(primal%params)
             ! A dependent passed as an `intent(out)` dummy is the primal value.
@@ -1223,9 +1434,12 @@ contains
             ignored = adjoint%add_decl(d)
         end do
 
-        ! The dependent: value out, adjoint seed in.
-        di = primal%decl_index(dependent)
-        if (di > 0) then
+        ! The dependent: value out, adjoint seed in.  A component dependent
+        ! gets a separate rank-preserving seed dummy; a component cannot be a
+        ! dummy argument in Fortran, and adding `dependent//suffix` would emit
+        ! an invalid designator such as `soldat(1)%a_b`.
+        di = primal%decl_index(dependent_base)
+        if (di > 0 .and. .not. dependent_component) then
             if (.not. is_dummy(primal, dependent) .and. spec%with_primal) then
                 n = n + 1
                 names(n) = dependent
@@ -1241,6 +1455,13 @@ contains
             d%intent = FAD_INTENT_IN
             d%is_result = .false.
             d%is_optional = .false.
+            ignored = adjoint%add_decl(d)
+        end if
+
+        if (dependent_component) then
+            n = n + 1
+            names(n) = component_seed_name(dependent, suffix)
+            call component_seed_decl(primal, dependent, names(n), d)
             ignored = adjoint%add_decl(d)
         end if
 
@@ -1264,8 +1485,10 @@ contains
             ! VALUE belongs to the primal argument. An outgoing adjoint is
             ! written by this routine and must remain a normal dummy.
             d%is_value = .false.
-            if (is_derived_decl(primal, di) .and. component_independent_base( &
-                spec%independents, base)) then
+            if (is_derived_decl(primal, di) .and. &
+                (component_independent_base(spec%independents, base) .or. &
+                (dependent_component .and. same_component_name(base, &
+                dependent_base)))) then
                 ! An allocatable component of a derived adjoint must survive
                 ! procedure entry.  The bounded slice requires the caller to
                 ! allocate that concrete shadow before the VJP call.
@@ -2720,7 +2943,7 @@ contains
             calls, n_calls, &
             allocations, n_allocations, &
             order_kind, order_index, n_order, &
-            spec, dependent, suffix, active, active_paths, status)
+            spec, dependent, dependent_seed, suffix, active, active_paths, status)
         !! Walk backwards, accumulating adjoints.
         !!
         !! Straight-line statements are inverted directly against their SSA
@@ -2746,24 +2969,28 @@ contains
         integer, intent(in) :: n_allocations
         integer, intent(in) :: order_kind(:), order_index(:), n_order
         type(reverse_spec_t), intent(in) :: spec
-        character(len=*), intent(in) :: dependent, suffix
+        character(len=*), intent(in) :: dependent, dependent_seed, suffix
         logical, intent(in) :: active(:)
         character(len=*), intent(in) :: active_paths(:)
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
         character(len=:), allocatable :: final_name, shadow_name, target_name
         integer :: i, k, di, ignored, zero, n_tmp, seed_expr, seed_copy
-        logical :: component_target
+        logical :: component_target, dependent_component
+
+        dependent_component = index(trim(dependent), "%") > 0
 
         call retarget_move_reverse_records(adjoint, lhs_names, rhs_exprs, n_rec, &
             loops, n_loops, allocations, n_allocations)
 
-        call ssa_lookup(ssa, dependent, final_name)
-        if (final_name /= dependent) then
-            s%kind = FAD_ASSIGN
-            s%target = dependent
-            s%value = adjoint%add_expr(expr_var(final_name))
-            ignored = adjoint%add_stmt(s)
+        if (.not. dependent_component) then
+            call ssa_lookup(ssa, dependent, final_name)
+            if (final_name /= dependent) then
+                s%kind = FAD_ASSIGN
+                s%target = dependent
+                s%value = adjoint%add_expr(expr_var(final_name))
+                ignored = adjoint%add_stmt(s)
+            end if
         end if
 
         ! Zero every adjoint before anything accumulates into it.
@@ -2833,7 +3060,7 @@ contains
             call zero_call_adjoints(primal, adjoint, ssa, calls(k), suffix, zero)
         end do
         call zero_component_adjoints(primal, adjoint, active, suffix, zero, &
-            active_paths)
+            active_paths, dependent)
         do i = 1, size(spec%independents)
             if (index(trim(spec%independents(i)), "%") > 0) cycle
             di = primal%decl_index(trim(spec%independents(i)))
@@ -2846,11 +3073,13 @@ contains
             ignored = adjoint%add_stmt(s)
         end do
 
-        call ssa_lookup(ssa, dependent, final_name)
-        s%kind = FAD_ASSIGN
-        s%target = final_name//suffix
-        s%value = adjoint%add_expr(expr_var(dependent//suffix))
-        ignored = adjoint%add_stmt(s)
+        if (.not. dependent_component) then
+            call ssa_lookup(ssa, dependent, final_name)
+            s%kind = FAD_ASSIGN
+            s%target = final_name//suffix
+            s%value = adjoint%add_expr(expr_var(dependent//suffix))
+            ignored = adjoint%add_stmt(s)
+        end if
 
         n_tmp = 0
 
@@ -2883,9 +3112,14 @@ contains
                     ! The adjoint of `point(1) = e` is the same element of the
                     ! array's adjoint, propagated into `e` and then cleared:
                     ! the store killed whatever was there before it.
-                    call declare_seed_shadow(primal, adjoint, dependent, suffix)
-                    seed_expr = adjoint%add_expr(expr_var(shadow_element( &
-                        trim(lhs_names(i)), suffix, dependent)))
+                    if (dependent_component .and. same_component_name( &
+                        lhs_names(i), dependent)) then
+                        seed_expr = adjoint%add_expr(expr_var(dependent_seed))
+                    else
+                        call declare_seed_shadow(primal, adjoint, dependent, suffix)
+                        seed_expr = adjoint%add_expr(expr_var(shadow_element( &
+                            trim(lhs_names(i)), suffix, dependent)))
+                    end if
                     ! The target's adjoint currently holds the seed for the
                     ! *new* value.  Copy it before propagating the RHS: an
                     ! expression such as `x(1) = x(1) + 2*a` otherwise emits
@@ -2922,17 +3156,24 @@ contains
                             zignored = adjoint%add_stmt(zs)
                         end block
                     else if (component_target) then
-                        call materialise(primal, adjoint, seed_expr, ssa, n_tmp, &
-                            seed_copy, force=.true.)
-                        block
-                            type(fad_stmt_t) :: zs
-                            integer :: zignored
-                            zs%kind = FAD_ASSIGN
-                            zs%target = target_name
-                            zs%value = adjoint%add_expr( &
-                                expr_const("0.0"//adjoint%real_suffix))
-                            zignored = adjoint%add_stmt(zs)
-                        end block
+                        if (dependent_component) then
+                            ! The incoming component seed is an intent(in)
+                            ! dummy. It must not be routed through or cleared
+                            ! as a whole-object adjoint shadow.
+                            seed_copy = seed_expr
+                        else
+                            call materialise(primal, adjoint, seed_expr, ssa, &
+                                n_tmp, seed_copy, force=.true.)
+                            block
+                                type(fad_stmt_t) :: zs
+                                integer :: zignored
+                                zs%kind = FAD_ASSIGN
+                                zs%target = target_name
+                                zs%value = adjoint%add_expr( &
+                                    expr_const("0.0"//adjoint%real_suffix))
+                                zignored = adjoint%add_stmt(zs)
+                            end block
+                        end if
                     else
                         call materialise(primal, adjoint, seed_expr, ssa, n_tmp, &
                             seed_copy, force=.true.)
@@ -3077,7 +3318,7 @@ contains
     end function replace_move_owner
 
     subroutine zero_component_adjoints(primal, adjoint, active, suffix, zero, &
-            active_paths)
+            active_paths, dependent)
         !! Initialise component adjoints without assigning a scalar to the
         !! derived object itself.  A derived tangent is a shadow object; only
         !! the real components that occur on the active path are zeroed here.
@@ -3087,6 +3328,7 @@ contains
         character(len=*), intent(in) :: suffix
         integer, intent(in) :: zero
         character(len=*), intent(in) :: active_paths(:)
+        character(len=*), intent(in) :: dependent
         character(len=256) :: paths(256)
         character(len=:), allocatable :: path, base
         type(fad_stmt_t) :: s
@@ -3104,6 +3346,9 @@ contains
             if (di <= 0) cycle
             if (.not. component_path_is_active(primal, primal%exprs(i)%text, &
                 active, active_paths)) cycle
+            if (index(trim(dependent), "%") > 0) then
+                if (same_component_name(primal%exprs(i)%text, dependent)) cycle
+            end if
             path = fad_suffix_name(primal%exprs(i)%text, suffix)
             seen = .false.
             do j = 1, n
@@ -3122,6 +3367,9 @@ contains
             base = fad_base_name(primal%stmts(i)%target)
             di = primal%decl_index(base)
             if (di <= 0) cycle
+            if (index(trim(dependent), "%") > 0) then
+                if (same_component_name(primal%stmts(i)%target, dependent)) cycle
+            end if
             if (.not. component_path_is_active(primal, primal%stmts(i)%target, &
                 active, active_paths)) cycle
             path = fad_suffix_name(primal%stmts(i)%target, suffix)
@@ -3507,7 +3755,8 @@ contains
         pos = index(target, "(")
         base = target
         if (pos > 0) base = target(1:pos - 1)
-        if (trim(base) == trim(dependent)) then
+        if (index(trim(dependent), "%") == 0 .and. &
+            trim(base) == trim(dependent)) then
             name = trim(base)//suffix//"_in"
             if (pos > 0) name = name//target(pos:)
         else
@@ -3536,6 +3785,9 @@ contains
         type(fad_stmt_t) :: s
         integer :: di, ignored
 
+        ! A component designator cannot be declared as a standalone dummy;
+        ! component dependents use the separate shaped seed instead.
+        if (index(trim(dependent), "%") > 0) return
         if (adjoint%decl_index(dependent//suffix//"_in") > 0) return
         di = primal%decl_index(dependent)
         if (di == 0) return

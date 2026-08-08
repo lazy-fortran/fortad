@@ -90,6 +90,18 @@ module fortad_ir
         !! explicit end markers so the list stays flat and reversible.
         integer :: kind = 0
         character(len=:), allocatable :: target
+        !! Resolved facts for a component assignment target.  These stay on
+        !! the statement so reverse-mode dependent inference does not add a
+        !! synthetic expression to the shared primal arena.
+        logical :: target_is_component_path = .false.
+        logical :: target_component_is_allocatable = .false.
+        logical :: target_component_is_pointer = .false.
+        logical :: target_component_is_target = .false.
+        logical :: target_component_is_polymorphic = .false.
+        logical :: target_component_is_global = .false.
+        logical :: target_component_is_real = .false.
+        integer :: target_component_rank = -1
+        character(len=:), allocatable :: target_component_type_name
         integer :: value = 0
         !! FortFront proved this whole assignment targets a concrete
         !! allocatable owner and may perform automatic reallocation.
@@ -694,6 +706,16 @@ contains
 
         destination%kind = source%kind
         destination%value = source%value
+        destination%target_is_component_path = source%target_is_component_path
+        destination%target_component_is_allocatable = &
+            source%target_component_is_allocatable
+        destination%target_component_is_pointer = source%target_component_is_pointer
+        destination%target_component_is_target = source%target_component_is_target
+        destination%target_component_is_polymorphic = &
+            source%target_component_is_polymorphic
+        destination%target_component_is_global = source%target_component_is_global
+        destination%target_component_is_real = source%target_component_is_real
+        destination%target_component_rank = source%target_component_rank
         destination%is_automatic_reallocation = source%is_automatic_reallocation
         destination%lo = source%lo
         destination%hi = source%hi
@@ -706,6 +728,10 @@ contains
         destination%allocation_target_unlimited_polymorphic = &
             source%allocation_target_unlimited_polymorphic
         if (allocated(source%target)) destination%target = source%target
+        if (allocated(source%target_component_type_name)) then
+            destination%target_component_type_name = &
+                source%target_component_type_name
+        end if
         if (allocated(source%call_args)) &
             destination%call_args = source%call_args
         if (allocated(source%call_arg_names)) &

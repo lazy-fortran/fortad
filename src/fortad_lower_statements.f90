@@ -2030,6 +2030,7 @@ contains
                     s%target = component_reference_text(arena, &
                         n%base_expr_index, n%name, proc, status)
                     if (.not. status%ok) return
+                    call annotate_component_target(arena, idx, s)
                     return
                 end if
                 e%kind = FAD_INDEX
@@ -2050,7 +2051,33 @@ contains
                 status%message = "unsupported assignment target"
             end if
         end select
+        if (.not. status%ok) return
+        if (index(trim(s%target), "%") > 0) then
+            call annotate_component_target(arena, idx, s)
+        end if
     end subroutine lower_target
+
+    subroutine annotate_component_target(arena, idx, stmt)
+        !! Preserve target storage facts without adding a synthetic expression.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_stmt_t), intent(inout) :: stmt
+        type(fad_expr_t) :: expr
+
+        call annotate_component_expr(arena, idx, expr)
+        if (.not. expr%is_component_path) return
+        stmt%target_is_component_path = .true.
+        stmt%target_component_is_allocatable = expr%component_is_allocatable
+        stmt%target_component_is_pointer = expr%component_is_pointer
+        stmt%target_component_is_target = expr%component_is_target
+        stmt%target_component_is_polymorphic = expr%component_is_polymorphic
+        stmt%target_component_is_global = expr%component_is_global
+        stmt%target_component_is_real = expr%component_is_real
+        stmt%target_component_rank = expr%component_rank
+        if (allocated(expr%component_type_name)) then
+            stmt%target_component_type_name = expr%component_type_name
+        end if
+    end subroutine annotate_component_target
 
     function render_index(proc, e) result(text)
         !! Array element reference as text, so a target stays a simple string.

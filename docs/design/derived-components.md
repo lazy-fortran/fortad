@@ -23,6 +23,27 @@ with PASS or NOPASS.  Receiver arrays, allocatables, pointers/targets,
 polymorphic receivers, and unresolved or generic/deferred bindings remain
 named refusal cases.
 
+## Component dependents in reverse mode
+
+A bounded reverse slice also accepts one direct concrete `REAL` component write
+as the dependent, including an array component of a concrete derived array:
+
+```fortran
+vjp = fad_vjp(source, [character(len=32) :: "soldat(2)%b", "soldat(2)%c"], &
+    dependent="soldat(1)%a", from="function")
+```
+
+The generated routine has a separate, component-shaped incoming cotangent
+dummy (for example `fad_dep_soldat_1__a_b`) and a single `soldat_b` shadow for
+the requested independent components. The dependent seed is never represented
+as a second `soldat_b` dummy and the whole derived object is never selected as
+active. The contract is deliberately narrow: the component must be concrete
+and intrinsic `REAL`, non-allocatable, non-pointer, non-`TARGET`,
+non-polymorphic, non-global, and written exactly once. The independent
+[`test_component_dependent_vjp_oracle.f90`](../../test/test_component_dependent_vjp_oracle.f90)
+compiles and runs both explicit API and automatic CLI VJPs, checks the hand
+derivative and adjoint identity, and verifies whole-object refusal.
+
 The executable contract is
 [`test_derived_component_oracle.f90`](../../test/test_derived_component_oracle.f90).
 It checks generated JVP and VJP code against a hand derivative, central finite
