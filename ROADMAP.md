@@ -133,10 +133,10 @@ FortFront query test, a FortAD transformation oracle, and an application case.
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
 candidate files: 63 runnable pure-Fortran cases, 133 expected refusals, 34
 invalid-upstream closures, 99 other bounded FortAD feature/dependency
-classifications, and 508 non-Fortran or source-absent cases. Thus 329 of
-1,432 strict pure-Fortran candidates are classified (23.0%), while 1,103
-remain in the pure-Fortran queue. Across the whole corpus, 837 of 2,014
-candidates are accounted for (41.6%). The 74 mixed-language rows remain a
+classifications, and 508 non-Fortran or source-absent cases. Thus 337 of
+1,432 strict pure-Fortran candidates are classified (23.5%), while 1,095
+remain in the pure-Fortran queue. Across the whole corpus, 845 of 2,014
+candidates are accounted for (41.9%). The 74 mixed-language rows remain a
 separate dependency lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -317,7 +317,7 @@ remains open below.
 
 The 2026-08-09 integration wave is recorded at these repository heads:
 
-- FortFront `c39b7ede`, including abstract/deferred hierarchy, concrete-only
+- FortFront `cd01fe6d`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
@@ -343,7 +343,10 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   Its narrowed generic-dispatch query now resolves unique integer/real
   overloads to exact candidates, implementations, and signatures, while
   ambiguous, deferred, dynamic, pointer, and allocatable calls remain refused.
-- FFC `b426ae3`, including rank-three and rank-four intrinsic
+  One bounded passed-procedure pointer actual now resolves to its assigned
+  target identity and complete signature; reassignment, `NULL()`, unresolved,
+  generic, and procedure-dummy cases remain refusals.
+- FFC `cc276a2`, including rank-three and rank-four intrinsic
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
@@ -373,6 +376,9 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   independent gfortran differential oracle. Ambiguous, noncontiguous, and
   unsupported whole-array I/O forms remain explicit boundaries. Runtime rank-
   two whole-array `print *` now preserves both dimensions and matches gfortran;
+  runtime rank-one and rank-two `PRODUCT` reductions now lower for automatic
+  and assumed-shape integer, `REAL`, and `REAL(8)` arrays with an independent
+  gfortran differential oracle; rank-three and higher remain precise refusals.
   array-valued RHS expressions for multi-retained runtime sections remain a
   named boundary until the direct-session expression contract proves them.
 - FortAD includes the automatic derived-component CLI inference slice: when
@@ -415,12 +421,19 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   exact actual/formal storage facts; aliases, callbacks, globals, pointers,
   allocatables, mismatches, and ambiguous mappings are refused. Function
   expression calls retain the existing keyword/optional forwarding path. The
-  full `fo` gate is green: 410 build targets, 409 derivative targets, 84/84
+  full `fo` gate is green: 410 build targets, 409 derivative targets, 85/85
   tests, and lint.
   A fixed-source scalar `class(*)` component assignment inside one proven
   `TYPE IS` or `CLASS IS` arm now differentiates through concrete shadows in
   JVP and VJP. Unresolved multi-arm dispatch and all unsafe ownership forms
   remain precise refusals.
+  P8.5j adds reverse JVP/VJP replay for one literal-indexed scalar polymorphic
+  component in a fixed-shape one-dimensional holder array, including nested
+  paths such as `holders(2)%field%payload`; dynamic indices, sections, rank-two
+  holders, aliases, pointers, factories, and changing lifetimes remain refused.
+  The CLI now infers the procedure root from a derivative output name when the
+  output stem is unique, preserving explicit `--root`/`--head` forms and
+  passing an independent compiled CLI oracle.
   Reverse mode also replays one scalar local or dummy `class(*)`, allocatable
   owner acquired from a declared concrete `SOURCE=` object, with one concrete
   `SELECT TYPE` arm and final deallocation. Ambiguous dispatch, polymorphic or
