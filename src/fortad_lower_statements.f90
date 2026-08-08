@@ -16,6 +16,7 @@ module fortad_lower_statements
         query_resolved_type, &
         procedure_call_target_query_t, query_procedure_call_target, &
         procedure_target_query_t, query_procedure_target, &
+        type_bound_call_query_t, query_type_bound_call, &
         get_source_line
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, fad_base_name, copy_decl, &
@@ -113,6 +114,7 @@ contains
         type(lower_status_t), intent(out) :: status
         type(fad_stmt_t) :: s
         type(fad_decl_t) :: d
+        type(type_bound_call_query_t) :: type_bound
         type(procedure_target_query_t) :: callback_target
         type(nullify_query_t) :: nullify_info
         integer :: ignored, k
@@ -237,17 +239,25 @@ contains
 
             type is (subroutine_call_node)
             s%line = n%line
-            block
-                integer, allocatable :: cargs(:)
-                character(len=64), allocatable :: cnames(:)
-                call lower_call_arguments(arena, n%arg_indices, proc, cargs, &
-                    cnames, status)
+            type_bound = query_type_bound_call(arena, idx)
+            if (type_bound%found .or. type_bound%is_unresolved .or. &
+                index(n%name, "%") > 0) then
+                call lower_type_bound_subroutine(arena, idx, proc, s, status)
                 if (.not. status%ok) return
-                s%call_args = cargs
-                s%call_arg_names = cnames
-            end block
+            else
+                block
+                    integer, allocatable :: cargs(:)
+                    character(len=64), allocatable :: cnames(:)
+                    call lower_call_arguments(arena, n%arg_indices, proc, cargs, &
+                        cnames, status)
+                    if (.not. status%ok) return
+                    s%call_args = cargs
+                    s%call_arg_names = cnames
+                end block
+            end if
             if (same_name(n%name, "move_alloc") .and. &
-                size(n%arg_indices) == 2) then
+                size(n%arg_indices) == 2 .and. .not. &
+                (type_bound%found .or. type_bound%is_unresolved)) then
                 s%kind = FAD_MOVE_ALLOC
                 if (.not. allocation_object_declared(proc, s%call_args(1)) .or. &
                     .not. allocation_object_declared(proc, s%call_args(2))) then
@@ -255,7 +265,8 @@ contains
                         "objects", status)
                     return
                 end if
-            else
+            else if (.not. (type_bound%found .or. type_bound%is_unresolved .or. &
+                    index(n%name, "%") > 0)) then
                 s%kind = FAD_CALL_STMT
                 call resolve_generic_call(arena, idx, n%name, s%target, status)
                 if (.not. status%ok) return
@@ -1713,9 +1724,10 @@ contains
         type(program_unit_query_t) :: unit
         type(program_unit_query_t) :: candidate_unit
         character(len=:), allocatable :: object_type, type_name, method, impl
+        character(len=:), allocatable :: receiver_name
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
-        integer :: receiver, i, j
+        integer :: receiver, receiver_decl, i, j
         integer :: type_matches, function_matches
         logical :: found_type, found_function
         logical :: named_pass
@@ -1730,6 +1742,30 @@ contains
         if (trim(arena%entries(access%base_node_index)%node_type) /= "identifier") then
             call refuse_type_bound(status, node%name, &
                 "only a simple concrete receiver is supported")
+            return
+        end if
+        select type (receiver_node => arena%entries(access%base_node_index)%node)
+            type is (identifier_node)
+            receiver_name = trim(receiver_node%name)
+        class default
+            call refuse_type_bound(status, node%name, &
+                "only a simple concrete receiver is supported")
+            return
+        end select
+        receiver_decl = proc%decl_index(receiver_name)
+        if (receiver_decl <= 0) then
+            call refuse_type_bound(status, node%name, &
+                "the receiver is not a declared object")
+            return
+        end if
+        if (proc%decls(receiver_decl)%is_array) then
+            call refuse_type_bound(status, node%name, &
+                "array receivers are unsupported")
+            return
+        end if
+        if (proc%decls(receiver_decl)%is_allocatable) then
+            call refuse_type_bound(status, node%name, &
+                "allocatable receivers are unsupported")
             return
         end if
         call static_object_type(arena, access%base_node_index, proc, object_type)
@@ -1841,7 +1877,8 @@ contains
             receiver = lower_expr(arena, access%base_node_index, proc, status)
             if (.not. status%ok) return
             if (named_pass) then
-                call lower_named_pass_arguments(arena, node, proc, unit, &
+                call lower_named_pass_arguments(arena, node%arg_indices, node%name, &
+                    proc, unit, &
                     hierarchy%pass_name, receiver, args, arg_names, status)
                 if (.not. status%ok) return
             else
@@ -1870,14 +1907,189 @@ contains
         out = proc%add_expr(expr_call(impl, args, arg_names))
     end function lower_type_bound_call
 
-    subroutine lower_named_pass_arguments(arena, node, proc, unit, pass_name, &
+    subroutine lower_type_bound_subroutine(arena, idx, proc, s, status)
+        !! Lower one concrete same-file type-bound subroutine call.  Explicit
+        !! CALL nodes carry the receiver and binding as one designator name;
+        !! FortFront's resolved query supplies the same PASS/NOPASS facts that
+        !! function-call lowering obtains from the component-access node.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(inout) :: proc
+        type(fad_stmt_t), intent(inout) :: s
+        type(lower_status_t), intent(inout) :: status
+        type(derived_type_query_t) :: dtype, candidate_dtype
+        type(binding_hierarchy_query_t) :: hierarchy
+        type(program_unit_query_t) :: unit
+        type(program_unit_query_t) :: candidate_unit
+        character(len=:), allocatable :: object_type, type_name, method, impl
+        character(len=:), allocatable :: receiver_name
+        integer, allocatable :: actual_indices(:), args(:)
+        character(len=64), allocatable :: arg_names(:)
+        integer :: receiver, receiver_decl, i, matches, separator
+        integer :: type_matches
+        logical :: named_pass, found_subroutine
+
+        select type (node => arena%entries(idx)%node)
+            type is (subroutine_call_node)
+            separator = index(trim(node%name), "%")
+            if (separator <= 1 .or. separator >= len_trim(node%name)) then
+                call refuse_type_bound(status, node%name, &
+                    "the receiver or binding is unresolved")
+                return
+            end if
+            receiver_name = trim(node%name(:separator - 1))
+            method = trim(node%name(separator + 1:))
+            if (allocated(node%arg_indices)) then
+                actual_indices = node%arg_indices
+            else
+                allocate (actual_indices(0))
+            end if
+        class default
+            call refuse_type_bound(status, "<unknown>", &
+                "the call node is not a subroutine")
+            return
+        end select
+        receiver_decl = proc%decl_index(receiver_name)
+        if (receiver_decl <= 0) then
+            call refuse_type_bound(status, method, &
+                "the receiver is not a declared object")
+            return
+        end if
+        if (proc%decls(receiver_decl)%is_array) then
+            call refuse_type_bound(status, method, &
+                "array receivers are unsupported")
+            return
+        end if
+        if (proc%decls(receiver_decl)%is_allocatable) then
+            call refuse_type_bound(status, method, &
+                "allocatable receivers are unsupported")
+            return
+        end if
+        if (.not. allocated(proc%decls(receiver_decl)%type_name)) then
+            call refuse_type_bound(status, method, &
+                "the receiver has no statically declared type")
+            return
+        end if
+        object_type = proc%decls(receiver_decl)%type_name
+        if (is_polymorphic_type(object_type)) then
+            call refuse_type_bound(status, method, &
+                "the receiver must be a concrete type(t) object")
+            return
+        end if
+        type_name = canonical_type_name(object_type)
+        if (.not. allocated(type_name)) then
+            call refuse_type_bound(status, method, &
+                "the receiver must be a concrete type(t) object")
+            return
+        end if
+
+        type_matches = 0
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) /= "derived_type") cycle
+            candidate_dtype = query_derived_type(arena, i)
+            if (.not. candidate_dtype%found) cycle
+            if (.not. same_name(candidate_dtype%name, type_name)) cycle
+            type_matches = type_matches + 1
+            if (type_matches == 1) dtype = candidate_dtype
+        end do
+        if (type_matches == 0) then
+            call refuse_type_bound(status, method, &
+                "the concrete type is not defined in this source")
+            return
+        end if
+        if (type_matches > 1) then
+            call refuse_type_bound(status, method, &
+                "the concrete type name is ambiguous in this source")
+            return
+        end if
+        hierarchy = query_type_binding_hierarchy(arena, dtype%node_index, method)
+        if (.not. hierarchy%found) then
+            call refuse_type_bound(status, method, "no type-bound binding")
+            return
+        end if
+        if (hierarchy%is_ambiguous) then
+            call refuse_type_bound(status, method, "ambiguous type-bound binding")
+            return
+        end if
+        if (hierarchy%is_generic) then
+            call refuse_type_bound(status, method, "generic bindings are unsupported")
+            return
+        end if
+        if (hierarchy%is_deferred) then
+            call refuse_type_bound(status, method, "deferred bindings are unsupported")
+            return
+        end if
+        impl = trim(hierarchy%implementation)
+        if (len_trim(impl) == 0) impl = trim(hierarchy%binding_name)
+        found_subroutine = .false.
+        matches = 0
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) /= "subroutine_def") cycle
+            candidate_unit = query_program_unit(arena, i)
+            if (.not. candidate_unit%found) cycle
+            if (.not. same_name(candidate_unit%name, impl)) cycle
+            matches = matches + 1
+            if (found_subroutine) cycle
+            unit = candidate_unit
+            found_subroutine = .true.
+        end do
+        if (.not. found_subroutine) then
+            call refuse_type_bound(status, method, &
+                "the binding implementation is not a same-file subroutine")
+            return
+        end if
+        if (matches > 1) then
+            call refuse_type_bound(status, method, &
+                "the binding implementation name is ambiguous in this source")
+            return
+        end if
+
+        receiver = proc%add_expr(expr_var(receiver_name))
+        named_pass = hierarchy%pass_arg .and. allocated(hierarchy%pass_name)
+        if (named_pass) named_pass = len_trim(hierarchy%pass_name) > 0
+        if (hierarchy%pass_arg) then
+            if (named_pass) then
+                call lower_named_pass_arguments(arena, actual_indices, method, proc, &
+                    unit, hierarchy%pass_name, receiver, args, arg_names, status)
+                if (.not. status%ok) return
+            else
+                allocate (args(size(actual_indices) + 1))
+                allocate (arg_names(size(actual_indices) + 1))
+                args(1) = receiver
+                arg_names(1) = ""
+                do i = 1, size(actual_indices)
+                    args(i + 1) = lower_actual(arena, actual_indices(i), proc, &
+                        arg_names(i + 1), status)
+                    if (.not. status%ok) return
+                end do
+            end if
+        else
+            allocate (args(size(actual_indices)))
+            allocate (arg_names(size(actual_indices)))
+            do i = 1, size(actual_indices)
+                args(i) = lower_actual(arena, actual_indices(i), proc, &
+                    arg_names(i), status)
+                if (.not. status%ok) return
+            end do
+        end if
+        s%kind = FAD_CALL_STMT
+        s%target = impl
+        s%call_args = args
+        s%call_arg_names = arg_names
+    end subroutine lower_type_bound_subroutine
+
+    subroutine lower_named_pass_arguments(arena, actual_indices, call_name, &
+            proc, unit, pass_name, &
             receiver, args, arg_names, status)
         !! Normalize a named-PASS call to keyword actuals in implementation
         !! dummy order. This keeps positional actuals legal when the passed
         !! object dummy is not first, and gives the inliner the same formal
         !! mapping as the Fortran call.
         type(ast_arena_t), intent(in) :: arena
-        type(call_or_subscript_node), intent(in) :: node
+        integer, intent(in) :: actual_indices(:)
+        character(len=*), intent(in) :: call_name
         type(fad_proc_t), intent(inout) :: proc
         type(program_unit_query_t), intent(in) :: unit
         character(len=*), intent(in) :: pass_name
@@ -1895,7 +2107,7 @@ contains
 
         n_formal = 0
         if (allocated(unit%parameter_indices)) n_formal = size(unit%parameter_indices)
-        n_actual = size(node%arg_indices)
+        n_actual = size(actual_indices)
         allocate (formal_names(n_formal))
         formal_names = ""
         pass_formal = 0
@@ -1907,12 +2119,12 @@ contains
             if (same_name(formal_names(i), pass_name)) pass_formal = i
         end do
         if (pass_formal == 0) then
-            call refuse_type_bound(status, node%name, &
+            call refuse_type_bound(status, call_name, &
                 "named PASS dummy is not present in the implementation")
             return
         end if
         if (n_actual > n_formal - 1) then
-            call refuse_type_bound(status, node%name, &
+            call refuse_type_bound(status, call_name, &
                 "named PASS call has too many explicit actuals")
             return
         end if
@@ -1921,7 +2133,7 @@ contains
         formal_actual = 0
         next_formal = 1
         do i = 1, n_actual
-            actuals(i) = lower_actual(arena, node%arg_indices(i), proc, keyword, status)
+            actuals(i) = lower_actual(arena, actual_indices(i), proc, keyword, status)
             if (.not. status%ok) return
             named = len_trim(keyword) > 0
             if (named) then
@@ -1933,7 +2145,7 @@ contains
                     end if
                 end do
                 if (formal == pass_formal .or. formal == 0) then
-                    call refuse_type_bound(status, node%name, &
+                    call refuse_type_bound(status, call_name, &
                         "named PASS call has an invalid keyword actual")
                     return
                 end if
@@ -1947,12 +2159,12 @@ contains
                 next_formal = next_formal + 1
             end if
             if (formal <= 0 .or. formal > n_formal) then
-                call refuse_type_bound(status, node%name, &
+                call refuse_type_bound(status, call_name, &
                     "named PASS call has an unknown actual")
                 return
             end if
             if (formal_actual(formal) /= 0) then
-                call refuse_type_bound(status, node%name, &
+                call refuse_type_bound(status, call_name, &
                     "named PASS call has a duplicate actual")
                 return
             end if
