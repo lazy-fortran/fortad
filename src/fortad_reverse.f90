@@ -171,6 +171,10 @@ module fortad_reverse
         character(len=64), allocatable :: base(:)
         character(len=64), allocatable :: current(:)
         integer, allocatable :: version(:)
+        character(len=256), allocatable :: active_paths(:)
+        character(len=256), allocatable :: component_targets(:)
+        character(len=256), allocatable :: component_snapshots(:)
+        integer :: n_components = 0
         integer :: n = 0
     end type ssa_map_t
 
@@ -184,6 +188,7 @@ contains
         type(reverse_status_t), intent(out) :: status
         character(len=:), allocatable :: suffix, dependent
         logical, allocatable :: active(:)
+        character(len=256), allocatable :: active_paths(:)
         type(ssa_map_t) :: ssa
         integer :: i, di
         character(len=64), allocatable :: lhs_names(:)
@@ -216,6 +221,7 @@ contains
 
         call seed_activity(primal, spec, dependent, active, status)
         if (.not. status%ok) return
+        call independent_component_paths(spec%independents, active_paths)
         call check_reverse_allocation_sources(primal, active, status)
         if (.not. status%ok) return
         if (complex_reverse_path(primal, dependent, active) .and. &
@@ -267,6 +273,8 @@ contains
             order_kind, order_index, n_order, active, suffix, &
             status)
         if (.not. status%ok) return
+        allocate (ssa%active_paths(size(active_paths)))
+        ssa%active_paths = active_paths
         call build_reverse_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
             is_element, &
             n_rec, loops, n_loops, branches, n_branches, &
@@ -274,7 +282,7 @@ contains
             calls, n_calls, &
             allocations, n_allocations, &
             order_kind, order_index, n_order, &
-            spec, dependent, suffix, active, status)
+            spec, dependent, suffix, active, active_paths, status)
     end subroutine differentiate_reverse
 
     subroutine choose_dependent(primal, spec, dependent, status)
@@ -1106,8 +1114,6 @@ contains
         integer :: i, j, n, di, ignored
         logical :: seen
 
-        associate (unused => active)
-        end associate
         allocate (names(2*(size(primal%params) + size(spec%independents) + 4)))
         n = 0
 
@@ -1167,7 +1173,15 @@ contains
             ! VALUE belongs to the primal argument. An outgoing adjoint is
             ! written by this routine and must remain a normal dummy.
             d%is_value = .false.
-            d%intent = FAD_INTENT_OUT
+            if (is_derived_decl(primal, di) .and. component_independent_base( &
+                spec%independents, base)) then
+                ! An allocatable component of a derived adjoint must survive
+                ! procedure entry.  The bounded slice requires the caller to
+                ! allocate that concrete shadow before the VJP call.
+                d%intent = FAD_INTENT_INOUT
+            else
+                d%intent = FAD_INTENT_OUT
+            end if
             d%is_result = .false.
             d%is_optional = .false.
             ignored = adjoint%add_decl(d)
@@ -1178,6 +1192,21 @@ contains
             adjoint%params(i) = names(i)
         end do
     end subroutine build_signature
+
+    logical function component_independent_base(independents, base) result(found)
+        character(len=*), intent(in) :: independents(:)
+        character(len=*), intent(in) :: base
+        integer :: i
+
+        found = .false.
+        do i = 1, size(independents)
+            if (index(trim(independents(i)), "%") == 0) cycle
+            if (fad_base_name(trim(independents(i))) == trim(base)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function component_independent_base
 
     subroutine build_forward_sweep(primal, adjoint, ssa, lhs_names, rhs_exprs, &
             is_element, &
@@ -1223,13 +1252,16 @@ contains
         character(len=*), intent(in) :: suffix
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
+        type(fad_stmt_t) :: snap
         character(len=:), allocatable :: actual
         type(fad_decl_t) :: d
-        character(len=:), allocatable :: fresh, current
+        character(len=:), allocatable :: fresh, current, snapshot
+        logical :: component_target
         type(loop_shape_t) :: shape
         integer :: i, k, di, ignored, after
 
         call ssa_init(primal, ssa)
+        call emit_initial_component_snapshots(primal, adjoint, ssa)
         allocate (lhs_names(max(1, primal%n_stmts)))
         allocate (rhs_exprs(max(1, primal%n_stmts)))
         allocate (is_element(max(1, primal%n_stmts)))
@@ -1274,7 +1306,32 @@ contains
                     return
                 end if
                 s%kind = FAD_ASSIGN
+                component_target = is_element(n_rec + 1) .and. &
+                    index(trim(primal%stmts(i)%target), "%") > 0
+                if (component_target) then
+                    call component_snapshot_lookup(ssa, primal%stmts(i)%target, &
+                        snapshot)
+                    if (len_trim(snapshot) == 0) then
+                        call add_component_snapshot(ssa, primal%stmts(i)%target, &
+                            snapshot)
+                        d%name = snapshot
+                        d%type_name = "real(8)"
+                        d%is_array = .false.
+                        d%is_allocatable = .false.
+                        d%is_result = .false.
+                        d%is_optional = .false.
+                        d%intent = FAD_INTENT_NONE
+                        ignored = adjoint%add_decl(d)
+                        snap%kind = FAD_ASSIGN
+                        snap%target = snapshot
+                        snap%value = adjoint%add_expr(expr_var( &
+                            primal%stmts(i)%target))
+                        ignored = adjoint%add_stmt(snap)
+                    end if
+                end if
                 s%value = copy_renamed(primal, adjoint, primal%stmts(i)%value, ssa)
+                if (component_target) call remove_component_snapshot(ssa, &
+                    primal%stmts(i)%target)
                 if (is_element(n_rec + 1)) then
                     fresh = primal%stmts(i)%target
                     d = primal%decls(di)
@@ -2517,7 +2574,7 @@ contains
             calls, n_calls, &
             allocations, n_allocations, &
             order_kind, order_index, n_order, &
-            spec, dependent, suffix, active, status)
+            spec, dependent, suffix, active, active_paths, status)
         !! Walk backwards, accumulating adjoints.
         !!
         !! Straight-line statements are inverted directly against their SSA
@@ -2545,10 +2602,12 @@ contains
         type(reverse_spec_t), intent(in) :: spec
         character(len=*), intent(in) :: dependent, suffix
         logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: active_paths(:)
         type(reverse_status_t), intent(inout) :: status
         type(fad_stmt_t) :: s
         character(len=:), allocatable :: final_name, shadow_name, target_name
         integer :: i, k, di, ignored, zero, n_tmp, seed_expr, seed_copy
+        logical :: component_target
 
         call retarget_move_reverse_records(adjoint, lhs_names, rhs_exprs, n_rec, &
             loops, n_loops, allocations, n_allocations)
@@ -2626,7 +2685,8 @@ contains
         do k = 1, n_calls
             call zero_call_adjoints(primal, adjoint, ssa, calls(k), suffix, zero)
         end do
-        call zero_component_adjoints(primal, adjoint, active, suffix, zero)
+        call zero_component_adjoints(primal, adjoint, active, suffix, zero, &
+            active_paths)
         do i = 1, size(spec%independents)
             if (index(trim(spec%independents(i)), "%") > 0) cycle
             di = primal%decl_index(trim(spec%independents(i)))
@@ -2683,7 +2743,9 @@ contains
                     ! `x_b(1) = x_b(1) + x_b(1)`, double-counting the same
                     ! storage location instead of replacing its seed.
                     target_name = trim(adjoint_element(trim(lhs_names(i)), suffix))
-                    if (index(trim(lhs_names(i)), "(") > 0 .and. &
+                    component_target = index(trim(lhs_names(i)), "%") > 0
+                    if (.not. component_target .and. &
+                        index(trim(lhs_names(i)), "(") > 0 .and. &
                         trim(shadow_element(trim(lhs_names(i)), suffix, dependent)) == &
                         target_name) then
                         shadow_name = array_seed_shadow_element( &
@@ -2710,6 +2772,18 @@ contains
                                 expr_const("0.0"//adjoint%real_suffix))
                             zignored = adjoint%add_stmt(zs)
                         end block
+                    else if (component_target) then
+                        call materialise(primal, adjoint, seed_expr, ssa, n_tmp, &
+                            seed_copy, force=.true.)
+                        block
+                            type(fad_stmt_t) :: zs
+                            integer :: zignored
+                            zs%kind = FAD_ASSIGN
+                            zs%target = target_name
+                            zs%value = adjoint%add_expr( &
+                                expr_const("0.0"//adjoint%real_suffix))
+                            zignored = adjoint%add_stmt(zs)
+                        end block
                     else
                         call materialise(primal, adjoint, seed_expr, ssa, n_tmp, &
                             seed_copy, force=.true.)
@@ -2717,16 +2791,18 @@ contains
                     call accumulate(primal, adjoint, rhs_exprs(i), seed_copy, &
                         ssa, suffix, active, n_tmp, status)
                     if (.not. status%ok) return
-                    block
-                        type(fad_stmt_t) :: zs
-                        integer :: zignored
-                        zs%kind = FAD_ASSIGN
-                        zs%target = shadow_element(trim(lhs_names(i)), suffix, &
-                            dependent)
-                        zs%value = adjoint%add_expr( &
-                            expr_const("0.0"//adjoint%real_suffix))
-                        zignored = adjoint%add_stmt(zs)
-                    end block
+                    if (.not. component_target) then
+                        block
+                            type(fad_stmt_t) :: zs
+                            integer :: zignored
+                            zs%kind = FAD_ASSIGN
+                            zs%target = shadow_element(trim(lhs_names(i)), suffix, &
+                                dependent)
+                            zs%value = adjoint%add_expr( &
+                                expr_const("0.0"//adjoint%real_suffix))
+                            zignored = adjoint%add_stmt(zs)
+                        end block
+                    end if
                     cycle
                 end if
                 if (.not. adjoint_is_live(primal, ssa, lhs_names(i), active)) cycle
@@ -2851,7 +2927,8 @@ contains
         end if
     end function replace_move_owner
 
-    subroutine zero_component_adjoints(primal, adjoint, active, suffix, zero)
+    subroutine zero_component_adjoints(primal, adjoint, active, suffix, zero, &
+            active_paths)
         !! Initialise component adjoints without assigning a scalar to the
         !! derived object itself.  A derived tangent is a shadow object; only
         !! the real components that occur on the active path are zeroed here.
@@ -2860,6 +2937,7 @@ contains
         logical, intent(in) :: active(:)
         character(len=*), intent(in) :: suffix
         integer, intent(in) :: zero
+        character(len=*), intent(in) :: active_paths(:)
         character(len=256) :: paths(256)
         character(len=:), allocatable :: path, base
         type(fad_stmt_t) :: s
@@ -2875,7 +2953,8 @@ contains
             base = fad_base_name(primal%exprs(i)%text)
             di = primal%decl_index(base)
             if (di <= 0) cycle
-            if (.not. active(di)) cycle
+            if (.not. component_path_is_active(primal, primal%exprs(i)%text, &
+                active, active_paths)) cycle
             path = fad_suffix_name(primal%exprs(i)%text, suffix)
             seen = .false.
             do j = 1, n
@@ -2894,7 +2973,8 @@ contains
             base = fad_base_name(primal%stmts(i)%target)
             di = primal%decl_index(base)
             if (di <= 0) cycle
-            if (.not. active(di)) cycle
+            if (.not. component_path_is_active(primal, primal%stmts(i)%target, &
+                active, active_paths)) cycle
             path = fad_suffix_name(primal%stmts(i)%target, suffix)
             seen = .false.
             do j = 1, n
@@ -3777,7 +3857,7 @@ contains
         integer, allocatable :: dargs(:), node_args(:)
         integer :: i, j, one, partial, contrib, child_seed, ignored, di
         integer :: node_kind, lhs, two
-        character(len=:), allocatable :: base, node_text
+        character(len=:), allocatable :: base, node_text, leaf_text
 
         if (idx <= 0 .or. idx > adjoint%n_exprs) return
         if (seed == 0) return
@@ -3797,9 +3877,18 @@ contains
         case (FAD_VAR)
             call ssa_base_of(ssa, node_text, base)
             base = fad_base_name(base)
+            if (allocated(adjoint%exprs(idx)%component_original_path)) then
+                node_text = adjoint%exprs(idx)%component_original_path
+                base = fad_base_name(node_text)
+            end if
             di = primal%decl_index(base)
             if (di > 0) then
-                if (.not. active(di)) return
+                if (index(trim(node_text), "%") > 0) then
+                    if (.not. component_path_is_active(primal, node_text, active, &
+                        ssa%active_paths)) return
+                else if (.not. active(di)) then
+                    return
+                end if
             end if
             s%kind = FAD_ASSIGN
             s%target = fad_suffix_name(node_text, suffix)
@@ -3892,7 +3981,12 @@ contains
             base = fad_base_name(base)
             di = primal%decl_index(base)
             if (di > 0) then
-                if (.not. active(di)) return
+                if (index(trim(emit_expr(adjoint, idx)), "%") > 0) then
+                    if (.not. component_path_is_active(primal, emit_expr(adjoint, idx), &
+                        active, ssa%active_paths)) return
+                else if (.not. active(di)) then
+                    return
+                end if
             end if
             block
                 type(fad_expr_t) :: target_expr
@@ -3928,7 +4022,7 @@ contains
         integer, intent(in) :: idx
         type(ssa_map_t), intent(in) :: ssa
         logical, intent(in) :: active(:)
-        character(len=:), allocatable :: base
+        character(len=:), allocatable :: base, leaf_text
         integer :: i, di
 
         yes = .false.
@@ -3937,9 +4031,21 @@ contains
         case (FAD_VAR, FAD_INDEX)
             call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
             base = fad_base_name(base)
+            leaf_text = emit_expr(adjoint, idx)
+            if (adjoint%exprs(idx)%kind == FAD_VAR .and. &
+                allocated(adjoint%exprs(idx)%component_original_path)) then
+                leaf_text = adjoint%exprs(idx)%component_original_path
+                base = fad_base_name(leaf_text)
+            end if
             di = primal%decl_index(base)
             if (di > 0) then
-                if (active(di)) then
+                if (index(trim(leaf_text), "%") > 0) then
+                    yes = component_path_is_active(primal, leaf_text, active, &
+                        ssa%active_paths)
+                else
+                    yes = active(di)
+                end if
+                if (yes) then
                     yes = .true.
                     return
                 end if
@@ -4104,6 +4210,18 @@ contains
         out = 0
         if (idx <= 0 .or. idx > src%n_exprs) return
         e%kind = src%exprs(idx)%kind
+        if (e%kind == FAD_VAR .or. e%kind == FAD_INDEX) then
+            call component_snapshot_lookup(ssa, emit_expr(src, idx), name)
+            if (len_trim(name) > 0) then
+                e%kind = FAD_VAR
+                e%text = name
+                e%component_original_path = emit_expr(src, idx)
+                allocate (args(0))
+                e%args = args
+                out = dst%add_expr(e)
+                return
+            end if
+        end if
         if (e%kind == FAD_VAR) then
             call ssa_lookup(ssa, src%exprs(idx)%text, name)
             e%text = name
@@ -4118,6 +4236,148 @@ contains
         out = dst%add_expr(e)
     end function copy_renamed
 
+    subroutine add_component_snapshot(ssa, target, snapshot)
+        type(ssa_map_t), intent(inout) :: ssa
+        character(len=*), intent(in) :: target
+        character(len=:), allocatable, intent(out) :: snapshot
+        character(len=32) :: number
+
+        write (number, '(i0)') ssa%n_components + 1
+        snapshot = "fad_component_in_"//trim(number)
+        ssa%n_components = ssa%n_components + 1
+        if (ssa%n_components > size(ssa%component_targets)) then
+            ssa%n_components = size(ssa%component_targets)
+            snapshot = "fad_component_in_"//trim(number)
+        end if
+        ssa%component_targets(ssa%n_components) = trim(target)
+        ssa%component_snapshots(ssa%n_components) = snapshot
+    end subroutine add_component_snapshot
+
+    subroutine emit_initial_component_snapshots(primal, adjoint, ssa)
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(inout) :: ssa
+        type(fad_decl_t) :: d
+        type(fad_stmt_t) :: snap
+        character(len=:), allocatable :: snapshot
+        integer :: i, di, ignored
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (index(trim(primal%stmts(i)%target), "%") == 0) cycle
+            if (index(trim(primal%stmts(i)%target), "(") == 0) cycle
+            di = primal%decl_index(fad_base_name(primal%stmts(i)%target))
+            if (di == 0) cycle
+            call add_component_snapshot(ssa, primal%stmts(i)%target, snapshot)
+            d = primal%decls(di)
+            d%name = snapshot
+            d%type_name = "real(8)"
+            d%is_array = .false.
+            d%is_allocatable = .false.
+            d%is_result = .false.
+            d%is_optional = .false.
+            d%intent = FAD_INTENT_NONE
+            ignored = adjoint%add_decl(d)
+            snap%kind = FAD_ASSIGN
+            snap%target = snapshot
+            snap%value = adjoint%add_expr(expr_var(primal%stmts(i)%target))
+            ignored = adjoint%add_stmt(snap)
+        end do
+    end subroutine emit_initial_component_snapshots
+
+    subroutine remove_component_snapshot(ssa, target)
+        type(ssa_map_t), intent(inout) :: ssa
+        character(len=*), intent(in) :: target
+        integer :: i
+
+        do i = 1, ssa%n_components
+            if (trim(ssa%component_targets(i)) /= trim(target)) cycle
+            ssa%component_targets(i:ssa%n_components - 1) = &
+                ssa%component_targets(i + 1:ssa%n_components)
+            ssa%component_snapshots(i:ssa%n_components - 1) = &
+                ssa%component_snapshots(i + 1:ssa%n_components)
+            ssa%n_components = ssa%n_components - 1
+            return
+        end do
+    end subroutine remove_component_snapshot
+
+    subroutine component_snapshot_lookup(ssa, target, snapshot)
+        type(ssa_map_t), intent(in) :: ssa
+        character(len=*), intent(in) :: target
+        character(len=:), allocatable, intent(out) :: snapshot
+        integer :: i
+
+        snapshot = ""
+        do i = ssa%n_components, 1, -1
+            if (trim(ssa%component_targets(i)) == trim(target)) then
+                snapshot = trim(ssa%component_snapshots(i))
+                return
+            end if
+        end do
+    end subroutine component_snapshot_lookup
+
+    subroutine independent_component_paths(independents, paths)
+        character(len=*), intent(in) :: independents(:)
+        character(len=256), allocatable, intent(out) :: paths(:)
+        integer :: i, n
+
+        n = 0
+        do i = 1, size(independents)
+            if (index(trim(independents(i)), "%") > 0) n = n + 1
+        end do
+        allocate (paths(n))
+        n = 0
+        do i = 1, size(independents)
+            if (index(trim(independents(i)), "%") == 0) cycle
+            n = n + 1
+            paths(n) = trim(independents(i))
+        end do
+    end subroutine independent_component_paths
+
+    logical function component_path_is_active(primal, text, active, paths) &
+            result(yes)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: paths(:)
+        integer :: i, di
+        logical :: component
+
+        component = .false.
+        yes = .false.
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (.not. same_component_name(primal%exprs(i)%text, text)) cycle
+            component = .true.
+            do di = 1, size(paths)
+                if (same_component_name(paths(di), text)) then
+                    yes = .true.
+                    exit
+                end if
+            end do
+            exit
+        end do
+        if (component) return
+        di = primal%decl_index(fad_base_name(text))
+        if (di > 0) then
+            yes = active(di)
+        end if
+    end function component_path_is_active
+
+    logical function same_component_name(a, b) result(equal)
+        character(len=*), intent(in) :: a, b
+        integer :: i
+
+        equal = len_trim(a) == len_trim(b)
+        if (.not. equal) return
+        do i = 1, len_trim(a)
+            if (lower_name_char(a(i:i)) /= lower_name_char(b(i:i))) then
+                equal = .false.
+                return
+            end if
+        end do
+    end function same_component_name
+
     ! ------------------------------------------------------------ the SSA map
 
     subroutine ssa_init(primal, ssa)
@@ -4130,9 +4390,14 @@ contains
         allocate (ssa%base(max(1, ssa%n)))
         allocate (ssa%current(max(1, ssa%n)))
         allocate (ssa%version(max(1, ssa%n)))
+        allocate (ssa%component_targets(max(1, ssa%n)))
+        allocate (ssa%component_snapshots(max(1, ssa%n)))
         ssa%base = ""
         ssa%current = ""
         ssa%version = 0
+        ssa%component_targets = ""
+        ssa%component_snapshots = ""
+        ssa%n_components = 0
         do i = 1, primal%n_decls
             ssa%base(i) = primal%decls(i)%name
             ssa%current(i) = primal%decls(i)%name

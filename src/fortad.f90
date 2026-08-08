@@ -267,6 +267,7 @@ contains
         type(reverse_status_t) :: rstat
         type(reverse_spec_t) :: spec
         integer :: i, width
+        logical :: preserve_component_snapshots
 
         call lower_source(source, primal, lstat, from)
         if (.not. lstat%ok) then
@@ -295,13 +296,22 @@ contains
             return
         end if
 
+        preserve_component_snapshots = .false.
+        do i = 1, primal%n_exprs
+            if (primal%exprs(i)%is_component_path .and. &
+                primal%exprs(i)%component_is_allocatable) then
+                preserve_component_snapshots = .true.
+                exit
+            end if
+        end do
+
         call fold_zero_accumulations(adjoint)
         call eliminate_dead_stores(adjoint)
         call eliminate_dead_loops(adjoint)
         call eliminate_dead_stores(adjoint)
         ! Substitution and factoring leave their inputs behind, so dead-store
         ! elimination runs again after them.
-        call optimise(adjoint)
+        if (.not. preserve_component_snapshots) call optimise(adjoint)
         call eliminate_dead_stores(adjoint)
         call eliminate_dead_arrays(adjoint)
 

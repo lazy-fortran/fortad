@@ -29,9 +29,11 @@ module fortad_lower_statements
     use fortad_use_store, only: ensure_use_capacity
     use fortad_emit, only: emit_expr
     use frontend_compiler_queries, only: storage_query_t, query_storage, &
+        component_path_query_t, query_component_path, &
         array_slice_query_t, array_bounds_query_t, range_expression_query_t, &
         query_array_slice, query_array_bounds, query_range_expression, &
-        nullify_query_t, query_nullify
+        nullify_query_t, query_nullify, STORAGE_POINTER, STORAGE_MODULE, &
+        STORAGE_SAVE, STORAGE_COMMON
     use frontend_compiler_resolution, only: BINDING_DECLARATION, &
         BINDING_FUNCTION, BINDING_SUBROUTINE, BINDING_ASSOCIATE_NAME, &
         declaration_binding_t, resolve_identifier_binding
@@ -1057,6 +1059,9 @@ contains
         integer, allocatable :: subs(:)
         integer :: section_expr
 
+        call validate_component_reference(arena, idx, status)
+        if (.not. status%ok) return
+
         if (idx <= 0 .or. idx > arena%size) then
             status%ok = .false.
             status%message = "empty assignment target"
@@ -1152,6 +1157,9 @@ contains
             return
         end if
 
+        call validate_component_reference(arena, idx, status)
+        if (.not. status%ok) return
+
         if (is_section_node(arena, idx)) then
             out = lower_array_section(arena, idx, proc, status)
             return
@@ -1163,6 +1171,7 @@ contains
                 component = render_component_access(arena, idx, proc, status)
                 if (.not. status%ok) return
                 out = proc%add_expr(expr_var(component))
+                call annotate_component_expr(arena, idx, proc%exprs(out))
             end block
             return
         end if
@@ -1216,6 +1225,8 @@ contains
                             n%base_expr_index, n%name, proc, status)
                         if (.not. status%ok) return
                         out = proc%add_expr(e)
+                        call annotate_component_expr(arena, n%base_expr_index, &
+                            proc%exprs(out))
                     else
                         e%kind = FAD_INDEX
                         e%text = component_reference_text(arena, &
@@ -1223,6 +1234,8 @@ contains
                         if (.not. status%ok) return
                         e%args = args
                         out = proc%add_expr(e)
+                        call annotate_component_expr(arena, n%base_expr_index, &
+                            proc%exprs(out))
                     end if
                 else
                     out = lower_type_bound_call(arena, idx, n, proc, status)
@@ -1748,6 +1761,7 @@ contains
         end if
         e%kind = FAD_VAR
         e%text = lower_text//":"//upper_text
+        allocate (e%args(0))
         out = proc%add_expr(e)
     end function lower_section_bound
 
@@ -1776,6 +1790,7 @@ contains
         end if
         e%kind = FAD_VAR
         e%text = start_text//":"//finish_text
+        allocate (e%args(0))
         out = proc%add_expr(e)
     end function lower_range_bound
 
@@ -3023,6 +3038,204 @@ contains
         end if
         text = base//tail
     end function component_reference_text
+
+    subroutine validate_component_reference(arena, idx, status)
+        !! Validate a component designator using FortFront's resolved path and
+        !! storage facts.  The bounded allocatable-component slice accepts only
+        !! one scalar REAL component element of a concrete, non-aliased object;
+        !! its descriptor must already be allocated by the caller.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(lower_status_t), intent(inout) :: status
+        type(component_path_query_t) :: path
+        type(storage_query_t) :: storage, base_storage
+        type(declaration_query_t) :: component_declaration
+        integer :: path_idx, terminal_idx, component_rank
+        logical :: is_component, whole
+
+        call component_reference_parts(arena, idx, path_idx, whole, is_component)
+        if (.not. is_component) return
+
+        path = query_component_path(arena, path_idx)
+        ! The bounded allocatable-component slice is opt-in: older or
+        ! intentionally opaque component paths continue through the existing
+        ! lowering rules, while a resolved path gets the stronger ownership
+        ! checks below.
+        if (.not. path%found) return
+        storage = query_storage(arena, path_idx)
+        if (.not. storage%found) return
+        if (.not. storage%is_allocatable) return
+        if (storage%is_polymorphic .or. storage%is_unlimited_polymorphic) return
+        base_storage = query_storage(arena, path%base_node_index)
+        if (base_storage%found .and. (base_storage%is_polymorphic .or. &
+            base_storage%is_unlimited_polymorphic)) return
+        if (.not. component_type_is_real(storage%type_name)) return
+        ! The public component-path result carries the base storage class;
+        ! the base AST node itself is not necessarily a storage-query node
+        ! (for example, a resolved dummy designator).  Use detailed base
+        ! facts when query_storage has them, and the resolved path class for
+        ! the ownership boundary.
+        if (path%base_storage_class == STORAGE_POINTER .or. &
+            (base_storage%found .and. base_storage%is_pointer)) then
+            call refuse_component(arena, idx, &
+                "pointer base storage identity is not tracked", status)
+            return
+        end if
+        if (base_storage%found .and. base_storage%is_target) then
+            call refuse_component(arena, idx, &
+                "TARGET alias storage identity is not tracked", status)
+            return
+        end if
+        if (base_storage%found .and. (base_storage%is_polymorphic .or. &
+            base_storage%is_unlimited_polymorphic)) then
+            call refuse_component(arena, idx, &
+                "polymorphic component bases are not supported", status)
+            return
+        end if
+        if (path%base_storage_class == STORAGE_MODULE .or. &
+            path%base_storage_class == STORAGE_SAVE .or. &
+            path%base_storage_class == STORAGE_COMMON .or. &
+            (base_storage%found .and. &
+            (base_storage%is_module_state .or. base_storage%is_save_state .or. &
+            base_storage%is_common_state))) then
+            call refuse_component(arena, idx, &
+                "global mutable component storage is not supported", status)
+            return
+        end if
+        if (storage%is_pointer) then
+            call refuse_component(arena, idx, &
+                "pointer component storage identity is not tracked", status)
+            return
+        end if
+        if (storage%is_target) then
+            call refuse_component(arena, idx, &
+                "TARGET component alias storage identity is not tracked", status)
+            return
+        end if
+        if (storage%is_polymorphic .or. storage%is_unlimited_polymorphic) then
+            call refuse_component(arena, idx, &
+                "polymorphic components are not supported", status)
+            return
+        end if
+        component_rank = storage%rank
+        if (allocated(path%component_declaration_indices)) then
+            if (size(path%component_declaration_indices) > 0) then
+                terminal_idx = path%component_declaration_indices( &
+                    size(path%component_declaration_indices))
+                component_declaration = query_declaration(arena, terminal_idx)
+                if (component_declaration%found) then
+                    if (component_declaration%is_array) then
+                        if (allocated(component_declaration%dimension_indices)) then
+                            component_rank = size(component_declaration%dimension_indices)
+                        end if
+                    else
+                        component_rank = 0
+                    end if
+                end if
+            end if
+        end if
+        if (component_rank > 1) then
+            call refuse_component(arena, idx, &
+                "allocatable component rank greater than one is not supported", status)
+            return
+        end if
+        if (whole) then
+            call refuse_component(arena, idx, &
+                "whole allocatable component assignment/read is not supported; use one element", &
+                status)
+            return
+        end if
+    end subroutine validate_component_reference
+
+    subroutine component_reference_parts(arena, idx, path_idx, whole, found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        integer, intent(out) :: path_idx
+        logical, intent(out) :: whole, found
+
+        path_idx = 0
+        whole = .false.
+        found = .false.
+        if (idx <= 0 .or. idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        if (trim(arena%entries(idx)%node_type) == "component_access") then
+            path_idx = idx
+            whole = .true.
+            found = .true.
+            return
+        end if
+        select type (node => arena%entries(idx)%node)
+            type is (call_or_subscript_node)
+            if (node%base_expr_index <= 0) return
+            if (.not. is_component_base(arena, node%base_expr_index)) return
+            path_idx = node%base_expr_index
+            if (allocated(node%arg_indices)) then
+                whole = size(node%arg_indices) == 0
+            else
+                whole = .true.
+            end if
+            found = .true.
+        class default
+        end select
+    end subroutine component_reference_parts
+
+    subroutine annotate_component_expr(arena, idx, expr)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_expr_t), intent(inout) :: expr
+        type(component_path_query_t) :: path
+        type(storage_query_t) :: storage, base_storage
+        integer :: path_idx
+        logical :: whole, found
+
+        call component_reference_parts(arena, idx, path_idx, whole, found)
+        if (.not. found) return
+        path = query_component_path(arena, path_idx)
+        if (.not. path%found) return
+        storage = query_storage(arena, path_idx)
+        if (.not. storage%found) return
+        expr%is_component_path = .true.
+        expr%component_is_allocatable = storage%is_allocatable
+        expr%component_is_pointer = storage%is_pointer
+        expr%component_is_target = storage%is_target
+        expr%component_is_polymorphic = storage%is_polymorphic .or. &
+            storage%is_unlimited_polymorphic
+        expr%component_is_global = storage%is_module_state .or. &
+            storage%is_save_state .or. storage%is_common_state
+        expr%component_rank = storage%rank
+        expr%component_type_name = storage%type_name
+        base_storage = query_storage(arena, path%base_node_index)
+        if (base_storage%found) then
+            expr%component_is_global = expr%component_is_global .or. &
+                base_storage%is_module_state .or. base_storage%is_save_state .or. &
+                base_storage%is_common_state
+        end if
+        expr%component_is_real = component_type_is_real(storage%type_name)
+    end subroutine annotate_component_expr
+
+    logical function component_type_is_real(type_name) result(found)
+        character(len=*), intent(in) :: type_name
+        character(len=:), allocatable :: compact
+        integer :: i
+
+        compact = ""
+        do i = 1, len_trim(type_name)
+            if (type_name(i:i) == " " .or. type_name(i:i) == achar(9)) cycle
+            compact = compact//lower_char(type_name(i:i))
+        end do
+        found = index(compact, "real") == 1
+    end function component_type_is_real
+
+    subroutine refuse_component(arena, idx, reason, status)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: reason
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .false.
+        status%message = "unsupported component path at line "// &
+            itoa(node_line(arena, idx))//": "//trim(reason)
+    end subroutine refuse_component
 
     logical function is_component_base(arena, idx) result(yes)
         type(ast_arena_t), intent(in) :: arena
