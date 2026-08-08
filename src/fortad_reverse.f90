@@ -3503,13 +3503,24 @@ contains
         base = fad_base_name(text)
         di = primal%decl_index(base)
         if (di <= 0) return
+        selector = base
+        if (primal%decls(di)%is_select_alias) then
+            ! A SELECT TYPE associate name is not itself marked polymorphic:
+            ! it has the concrete arm type.  For a fixed scalar receiver,
+            ! however, its alias target still identifies the polymorphic
+            ! object whose cotangent is emitted by emit_select_reverse.
+            if (.not. allocated(primal%decls(di)%alias_target)) return
+            selector = trim(primal%decls(di)%alias_target)
+            di = primal%decl_index(fad_base_name(selector))
+            if (di <= 0) return
+        end if
         if (.not. primal%decls(di)%is_polymorphic) return
         if (primal%decls(di)%is_array) return
         if (primal%decls(di)%is_allocatable) return
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
-            selector = emit_expr(primal, primal%stmts(i)%value)
-            if (fad_base_name(selector) == trim(base)) then
+            if (fad_base_name(emit_expr(primal, primal%stmts(i)%value)) == &
+                fad_base_name(selector)) then
                 found = .true.
                 return
             end if
@@ -3546,7 +3557,7 @@ contains
         type(fad_proc_t), intent(in) :: primal
         character(len=*), intent(in) :: active_paths(:)
         type(reverse_status_t), intent(inout) :: status
-        character(len=:), allocatable :: selector, base
+        character(len=:), allocatable :: selector, base, path
         integer :: i, j, k, depth, concrete, di
         logical :: active_receiver
 
@@ -3562,11 +3573,11 @@ contains
             do j = 1, primal%n_exprs
                 if (primal%exprs(j)%kind /= FAD_VAR .and. &
                     primal%exprs(j)%kind /= FAD_INDEX) cycle
-                if (fad_base_name(primal%exprs(j)%text) /= trim(base)) cycle
                 if (index(trim(primal%exprs(j)%text), "%") == 0) cycle
+                path = resolve_component_path(primal, primal%exprs(j)%text)
+                if (fad_base_name(path) /= trim(base)) cycle
                 do k = 1, size(active_paths)
-                    if (same_component_name(primal%exprs(j)%text, &
-                        active_paths(k))) then
+                    if (same_component_name(path, active_paths(k))) then
                         active_receiver = .true.
                         exit
                     end if

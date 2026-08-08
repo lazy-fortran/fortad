@@ -289,7 +289,7 @@ contains
         type(fad_proc_t), intent(in) :: primal
         character(len=*), intent(in) :: active_paths(:)
         type(forward_status_t), intent(inout) :: status
-        character(len=:), allocatable :: selector, base
+        character(len=:), allocatable :: selector, base, path
         integer :: i, j, k, depth, concrete, di
         logical :: active_receiver
 
@@ -305,11 +305,11 @@ contains
             do j = 1, primal%n_exprs
                 if (primal%exprs(j)%kind /= FAD_VAR .and. &
                     primal%exprs(j)%kind /= FAD_INDEX) cycle
-                if (fad_base_name(primal%exprs(j)%text) /= trim(base)) cycle
                 if (index(trim(primal%exprs(j)%text), "%") == 0) cycle
+                path = resolve_component_alias(primal, primal%exprs(j)%text)
+                if (fad_base_name(path) /= trim(base)) cycle
                 do k = 1, size(active_paths)
-                    if (same_component_name(primal%exprs(j)%text, &
-                        active_paths(k))) then
+                    if (same_component_name(path, active_paths(k))) then
                         active_receiver = .true.
                         exit
                     end if
