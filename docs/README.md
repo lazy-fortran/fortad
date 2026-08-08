@@ -20,7 +20,7 @@ defaults.
 | [Abstract hierarchy](design/abstract-hierarchy.md) | fixed-dispatch overrides across an abstract/deferred hierarchy |
 | [Complex values](design/complex-values.md) | real-coordinate JVP contract and bounded real-objective VJP |
 | [Allocation lifetime](design/allocation-lifetime.md) | bounded forward ownership slice and reverse replay boundary |
-| [Aliasing and sections](design/aliasing.md) | explicit pointer, target, and noncontiguous-section refusal boundary |
+| [Aliasing and sections](design/aliasing.md) | bounded rank-one/rank-two contiguous sections plus explicit pointer, target, vector, and noncontiguous-section refusals |
 
 The worked gradient, Jacobian, and linear-UQ constructions in the product guide
 are executed by
