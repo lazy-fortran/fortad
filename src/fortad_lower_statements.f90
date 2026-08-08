@@ -19,6 +19,8 @@ module fortad_lower_statements
         type_bound_call_query_t, query_type_bound_call, &
         get_source_line, TREAL
     use ast_nodes_control, only: associate_node
+    use frontend_compiler_control_queries, only: control_statement_query_t, &
+        query_control_statement, CONTROL_SELECT_RANK, select_rank_arm_query_t
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, fad_base_name, copy_decl, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
@@ -131,6 +133,10 @@ contains
         if (.not. arena%has_node_at(idx)) return
         if (trim(arena%entries(idx)%node_type) == "select_type") then
             call lower_select_type(arena, idx, proc, status)
+            return
+        end if
+        if (trim(arena%entries(idx)%node_type) == "select_rank") then
+            call lower_select_rank(arena, idx, proc, status)
             return
         end if
         if (trim(arena%entries(idx)%node_type) == "associate") then
@@ -715,6 +721,134 @@ contains
         s%value = 0
         ignored = proc%add_stmt(s)
     end subroutine lower_select_type
+
+    subroutine lower_select_rank(arena, idx, proc, status)
+        !! Lower the deliberately narrow assumed-rank boundary.
+        !!
+        !! FortFront proves the selector and arm facts.  Once exactly one
+        !! explicit RANK (1) arm is proven, the body has the ordinary rank-one
+        !! IR contract and the generated derivative has an assumed-shape
+        !! rank-one dummy.  Other dispatch choices must not be guessed.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(out) :: status
+        type(control_statement_query_t) :: control
+        type(select_rank_arm_query_t) :: arm
+        type(declaration_query_t) :: declaration
+        integer :: selector_di
+        character(len=:), allocatable :: selector_name
+
+        status%ok = .true.
+        control = query_control_statement(arena, idx)
+        if (.not. control%found .or. control%statement_kind /= &
+            CONTROL_SELECT_RANK) then
+            call refuse_select_rank(idx, arena, "SELECT RANK facts are unresolved", &
+                status)
+            return
+        end if
+        if (.not. control%has_selector) then
+            call refuse_select_rank(idx, arena, "selector identity is unresolved", &
+                status)
+            return
+        end if
+        if (size(control%rank_arms) /= 1 .or. control%has_default) then
+            call refuse_select_rank(idx, arena, &
+                "exactly one explicit RANK (1) arm is required", status)
+            return
+        end if
+        arm = control%rank_arms(1)
+        if (.not. arm%found .or. arm%is_refusal_boundary .or. &
+            arm%is_unresolved_selector .or. arm%is_unsupported_selector) then
+            call refuse_select_rank(idx, arena, "rank arm facts are unresolved", &
+                status)
+            return
+        end if
+        if (.not. arm%has_rank .or. arm%selected_rank /= 1) then
+            if (arm%is_assumed_size) then
+                call refuse_select_rank(idx, arena, &
+                    "RANK (*) or assumed-size dispatch is unsupported", status)
+            else
+                call refuse_select_rank(idx, arena, &
+                    "only rank-one dispatch is supported", status)
+            end if
+            return
+        end if
+        if (arm%is_pointer_selector .or. arm%selector_storage%is_pointer) then
+            call refuse_select_rank(idx, arena, &
+                "pointer selector storage identity is not tracked", status)
+            return
+        end if
+        if (arm%selector_storage%is_allocatable) then
+            call refuse_select_rank(idx, arena, &
+                "allocatable selector lifetime is not tracked", status)
+            return
+        end if
+        if (arm%selector_storage%is_module_state .or. &
+            arm%selector_storage%is_save_state .or. &
+            arm%selector_storage%is_common_state) then
+            call refuse_select_rank(idx, arena, &
+                "global mutable selector state is not differentiated", status)
+            return
+        end if
+        if (.not. allocated(arm%selector_name)) then
+            call refuse_select_rank(idx, arena, "selector name is unresolved", status)
+            return
+        end if
+        selector_name = trim(arm%selector_name)
+        selector_di = proc%decl_index(selector_name)
+        if (selector_di <= 0) then
+            call refuse_select_rank(idx, arena, "selector declaration is unresolved", &
+                status)
+            return
+        end if
+        declaration = query_declaration(arena, arm%selector_declaration_index)
+        if (.not. declaration%found .or. .not. declaration%is_array .or. &
+            .not. allocated(declaration%dimension_indices)) then
+            call refuse_select_rank(idx, arena, &
+                "selector is not a genuine assumed-rank array dummy", status)
+            return
+        end if
+        if (size(declaration%dimension_indices) /= 1) then
+            call refuse_select_rank(idx, arena, &
+                "selector must have one assumed-rank dimension", status)
+            return
+        end if
+        if (.not. ((trim(declaration%type_name) == "real" .and. &
+            declaration%kind_value == 8) .or. &
+            lower_ascii(trim(declaration%type_name)) == "real(8)")) then
+            call refuse_select_rank(idx, arena, &
+                "only real(8) assumed-rank selectors are supported", status)
+            return
+        end if
+        if (proc%decls(selector_di)%is_allocatable .or. &
+            proc%decls(selector_di)%is_polymorphic) then
+            call refuse_select_rank(idx, arena, &
+                "selector ownership or dynamic type is unsupported", status)
+            return
+        end if
+
+        ! The arm facts make this declaration rank one for all subsequent IR
+        ! consumers.  Keep the source selector itself out of the IR boundary.
+        if (allocated(proc%decls(selector_di)%dims)) then
+            deallocate (proc%decls(selector_di)%dims)
+        end if
+        proc%decls(selector_di)%dims = ":"
+        if (allocated(arm%body_node_indices)) then
+            call lower_body(arena, arm%body_node_indices, proc, status)
+        end if
+    end subroutine lower_select_rank
+
+    subroutine refuse_select_rank(idx, arena, reason, status)
+        integer, intent(in) :: idx
+        type(ast_arena_t), intent(in) :: arena
+        character(len=*), intent(in) :: reason
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .false.
+        status%message = "unsupported SELECT RANK at line "// &
+            itoa(node_line(arena, idx))//": "//trim(reason)
+    end subroutine refuse_select_rank
 
     subroutine select_type_selector_info(arena, selector, expression, name)
         type(ast_arena_t), intent(in) :: arena
