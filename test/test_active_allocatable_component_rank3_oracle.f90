@@ -70,10 +70,10 @@ program test_active_allocatable_component_rank3_oracle
         "out", "only concrete REAL allocatable components", .false.)
     call check_refusal(integer_source(), "box%values(1,1,1)", "kernel", &
         "out", "only concrete REAL allocatable components", .true.)
-    call check_refusal(rank4_source(), "box%values(1,1,1,1)", "kernel", &
-        "out", "rank greater than three", .false.)
-    call check_refusal(rank4_source(), "box%values(1,1,1,1)", "kernel", &
-        "out", "rank greater than three", .true.)
+    call check_refusal(rank4_source(), "box%values(1,1,1,1,1)", "kernel", &
+        "out", "rank greater than four", .false.)
+    call check_refusal(rank4_source(), "box%values(1,1,1,1,1)", "kernel", &
+        "out", "rank greater than four", .true.)
 
     print *, "test_active_allocatable_component_rank3_oracle: all cases passed"
 
@@ -146,13 +146,13 @@ contains
         source = "module rank4_allocatable_component_case"//nl// &
             "    implicit none"//nl// &
             "    type :: box_t"//nl// &
-            "        real(8), allocatable :: values(:,:,:,:)"//nl// &
+            "        real(8), allocatable :: values(:,:,:,:,:)"//nl// &
             "    end type box_t"//nl// &
             "contains"//nl// &
             "    pure subroutine kernel(box, out)"//nl// &
             "        type(box_t), intent(in) :: box"//nl// &
             "        real(8), intent(out) :: out"//nl// &
-            "        out = box%values(1,1,1,1)"//nl// &
+            "        out = box%values(1,1,1,1,1)"//nl// &
             "    end subroutine kernel"//nl// &
             "end module rank4_allocatable_component_case"//nl
     end function rank4_source
