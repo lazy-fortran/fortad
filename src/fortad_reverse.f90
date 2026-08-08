@@ -231,6 +231,8 @@ contains
         call independent_component_paths(spec%independents, active_paths)
         call refuse_active_polymorphic_dispatch(primal, active_paths, status)
         if (.not. status%ok) return
+        call refuse_active_nested_polymorphic_component(primal, active_paths, status)
+        if (.not. status%ok) return
         call check_reverse_allocation_sources(primal, active, status)
         if (.not. status%ok) return
         if (complex_reverse_path(primal, dependent, active) .and. &
@@ -3398,6 +3400,8 @@ contains
             ! sweep. Its cotangent is selected in parallel there; emitting a
             ! bare receiver-alias shadow here would be invalid.
             if (is_select_alias_path(primal, primal%exprs(i)%text)) cycle
+            if (is_nested_polymorphic_receiver_path(primal, &
+                primal%exprs(i)%text)) cycle
             if (is_scalar_polymorphic_receiver_path(primal, &
                 primal%exprs(i)%text)) cycle
             base = fad_base_name(primal%exprs(i)%text)
@@ -3425,6 +3429,8 @@ contains
             if (index(primal%stmts(i)%target, "%") == 0) cycle
             if (is_select_alias_path(primal, primal%stmts(i)%target)) cycle
             if (is_scalar_polymorphic_receiver_path(primal, &
+                primal%stmts(i)%target)) cycle
+            if (is_nested_polymorphic_receiver_path(primal, &
                 primal%stmts(i)%target)) cycle
             base = fad_base_name(primal%stmts(i)%target)
             di = primal%decl_index(base)
@@ -3510,6 +3516,28 @@ contains
         end do
     end function is_scalar_polymorphic_receiver_path
 
+    logical function is_nested_polymorphic_receiver_path(primal, text) &
+            result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: base, target
+        integer :: di, i
+
+        found = .false.
+        base = fad_base_name(text)
+        di = primal%decl_index(base)
+        if (di <= 0 .or. .not. primal%decls(di)%is_select_alias) return
+        if (.not. allocated(primal%decls(di)%alias_target)) return
+        target = trim(primal%decls(di)%alias_target)
+        if (index(target, "%") <= 0) return
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (trim(emit_expr(primal, i)) /= target) cycle
+            found = primal%exprs(i)%component_is_polymorphic
+            return
+        end do
+    end function is_nested_polymorphic_receiver_path
+
     subroutine refuse_active_polymorphic_dispatch(primal, active_paths, status)
         !! A scalar CLASS cotangent can be paired with the primal selector
         !! only on one proven concrete path. Multiple runtime arms would
@@ -3569,6 +3597,96 @@ contains
             end if
         end do
     end subroutine refuse_active_polymorphic_dispatch
+
+    subroutine refuse_active_nested_polymorphic_component(primal, active_paths, status)
+        !! The reverse shadow for a nested polymorphic component is a paired
+        !! selector in a caller-owned concrete holder.  Do not infer that
+        !! pairing through aliases, dynamic indexing, ownership changes, or a
+        !! dispatch with more than one concrete arm.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: active_paths(:)
+        type(reverse_status_t), intent(inout) :: status
+        character(len=:), allocatable :: selector, path
+        integer :: i, j, k, depth, concrete, base_di
+        logical :: active_component, found
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            selector = emit_expr(primal, primal%stmts(i)%value)
+            if (index(trim(selector), "%") <= 0) cycle
+            found = .false.
+            active_component = .false.
+            do j = 1, primal%n_exprs
+                if (.not. primal%exprs(j)%is_component_path) cycle
+                if (trim(emit_expr(primal, j)) /= trim(selector)) cycle
+                found = .true.
+                if (.not. primal%exprs(j)%component_is_polymorphic) exit
+                do k = 1, size(active_paths)
+                    path = trim(active_paths(k))
+                    if (index(path, trim(selector)//"%") == 1) then
+                        active_component = .true.
+                        exit
+                    end if
+                end do
+                if (.not. active_component) exit
+                if (primal%exprs(j)%component_is_pointer .or. &
+                    primal%exprs(j)%component_is_target) then
+                    status%ok = .false.
+                    status%message = "reverse mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' uses pointer or TARGET storage"
+                    return
+                end if
+                if (index(trim(selector), "(") > 0) then
+                    status%ok = .false.
+                    status%message = "reverse mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' has dynamic bounds or indexing"
+                    return
+                end if
+                base_di = primal%decl_index(fad_base_name(selector))
+                if (base_di <= 0 .or. primal%decls(base_di)%is_polymorphic .or. &
+                    primal%decls(base_di)%is_allocatable .or. &
+                    primal%decls(base_di)%is_associate_alias .or. &
+                    primal%decls(base_di)%is_select_alias) then
+                    status%ok = .false.
+                    status%message = "reverse mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' has unresolved owner alias or ownership"
+                    return
+                end if
+                concrete = 0
+                depth = 1
+                do k = i + 1, primal%n_stmts
+                    select case (primal%stmts(k)%kind)
+                    case (FAD_SELECT_TYPE)
+                        depth = depth + 1
+                    case (FAD_END_SELECT)
+                        depth = depth - 1
+                        if (depth == 0) exit
+                    case (FAD_TYPE_IS, FAD_CLASS_IS)
+                        if (depth == 1) concrete = concrete + 1
+                    end select
+                end do
+                if (concrete /= 1) then
+                    status%ok = .false.
+                    status%message = "reverse mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' requires one fixed concrete "// &
+                        "runtime path; unresolved dispatch is unsupported"
+                    return
+                end if
+                do k = 1, primal%n_stmts
+                    if (primal%stmts(k)%kind /= FAD_ALLOCATE .and. &
+                        primal%stmts(k)%kind /= FAD_DEALLOCATE .and. &
+                        primal%stmts(k)%kind /= FAD_MOVE_ALLOC) cycle
+                    status%ok = .false.
+                    status%message = "reverse mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' crosses ownership/lifetime "// &
+                        "operations; caller-owned borrowed components only"
+                    return
+                end do
+                exit
+            end do
+            if (found .and. .not. active_component) cycle
+        end do
+    end subroutine refuse_active_nested_polymorphic_component
 
     subroutine zero_call_adjoints(primal, adjoint, ssa, rec, suffix, zero)
         !! Declare and clear adjoints for the arguments of an opaque call.
@@ -3866,6 +3984,7 @@ contains
         character(len=:), allocatable, intent(out) :: cotangent_selector
         character(len=:), allocatable :: selector
         integer :: alias_di, receiver_di, concrete_targets, i
+        logical :: nested_receiver, component_found
 
         enabled = .false.
         receiver_alias = ""
@@ -3888,16 +4007,33 @@ contains
             if (.not. primal%decls(alias_di)%is_polymorphic) return
             selector = receiver_alias
         end if
+        nested_receiver = .false.
+        component_found = .false.
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (trim(emit_expr(primal, i)) /= trim(selector)) cycle
+            component_found = .true.
+            nested_receiver = primal%exprs(i)%component_is_polymorphic
+            exit
+        end do
         receiver_di = primal%decl_index(fad_base_name(selector))
         if (receiver_di <= 0) return
-        if (.not. primal%decls(receiver_di)%is_polymorphic) return
-        if (primal%decls(receiver_di)%is_allocatable .or. &
-            primal%decls(receiver_di)%is_associate_alias .or. &
-            primal%decls(receiver_di)%is_select_alias) return
-        if (primal%decls(receiver_di)%is_array) then
+        if (nested_receiver) then
+            if (primal%decls(receiver_di)%is_polymorphic .or. &
+                primal%decls(receiver_di)%is_allocatable .or. &
+                primal%decls(receiver_di)%is_associate_alias .or. &
+                primal%decls(receiver_di)%is_select_alias) return
+            if (.not. component_found .or. index(selector, "(") > 0) return
+        else
+            if (.not. primal%decls(receiver_di)%is_polymorphic) return
+            if (primal%decls(receiver_di)%is_allocatable .or. &
+                primal%decls(receiver_di)%is_associate_alias .or. &
+                primal%decls(receiver_di)%is_select_alias) return
+        end if
+        if (.not. nested_receiver .and. primal%decls(receiver_di)%is_array) then
             if (index(selector, "(") <= 0) return
             if (index(selector, ",") > 0) return
-        else
+        else if (.not. nested_receiver) then
             if (index(selector, "(") > 0) return
         end if
         if (.not. receiver_context_has_active(primal, receiver_alias, &

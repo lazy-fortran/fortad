@@ -85,6 +85,8 @@ contains
         call independent_component_paths(spec%independents, active_paths)
         call refuse_active_polymorphic_dispatch(primal, active_paths, status)
         if (.not. status%ok) return
+        call refuse_active_nested_polymorphic_component(primal, active_paths, status)
+        if (.not. status%ok) return
         call refuse_active_polymorphic_ownership(primal, active, status)
         if (.not. status%ok) return
         if (spec%vector) then
@@ -338,6 +340,97 @@ contains
             end if
         end do
     end subroutine refuse_active_polymorphic_dispatch
+
+    subroutine refuse_active_nested_polymorphic_component(primal, active_paths, status)
+        !! A borrowed polymorphic component can be paired with its tangent
+        !! only when its owner and dynamic path are fixed.  The tangent carries
+        !! a caller-owned shadow of the concrete holder; it never owns or
+        !! replays the component descriptor.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: active_paths(:)
+        type(forward_status_t), intent(inout) :: status
+        character(len=:), allocatable :: selector, path
+        integer :: i, j, k, depth, concrete, base_di
+        logical :: active_component, found
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            selector = emit_expr(primal, primal%stmts(i)%value)
+            if (index(trim(selector), "%") <= 0) cycle
+            found = .false.
+            active_component = .false.
+            do j = 1, primal%n_exprs
+                if (.not. primal%exprs(j)%is_component_path) cycle
+                if (trim(emit_expr(primal, j)) /= trim(selector)) cycle
+                found = .true.
+                if (.not. primal%exprs(j)%component_is_polymorphic) exit
+                active_component = .false.
+                do k = 1, size(active_paths)
+                    path = trim(active_paths(k))
+                    if (index(path, trim(selector)//"%") == 1) then
+                        active_component = .true.
+                        exit
+                    end if
+                end do
+                if (.not. active_component) exit
+                if (primal%exprs(j)%component_is_pointer .or. &
+                    primal%exprs(j)%component_is_target) then
+                    status%ok = .false.
+                    status%message = "forward mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' uses pointer or TARGET storage"
+                    return
+                end if
+                if (index(trim(selector), "(") > 0) then
+                    status%ok = .false.
+                    status%message = "forward mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' has dynamic bounds or indexing"
+                    return
+                end if
+                base_di = primal%decl_index(fad_base_name(selector))
+                if (base_di <= 0 .or. primal%decls(base_di)%is_polymorphic .or. &
+                    primal%decls(base_di)%is_allocatable .or. &
+                    primal%decls(base_di)%is_associate_alias .or. &
+                    primal%decls(base_di)%is_select_alias) then
+                    status%ok = .false.
+                    status%message = "forward mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' has unresolved owner alias or ownership"
+                    return
+                end if
+                concrete = 0
+                depth = 1
+                do k = i + 1, primal%n_stmts
+                    select case (primal%stmts(k)%kind)
+                    case (FAD_SELECT_TYPE)
+                        depth = depth + 1
+                    case (FAD_END_SELECT)
+                        depth = depth - 1
+                        if (depth == 0) exit
+                    case (FAD_TYPE_IS, FAD_CLASS_IS)
+                        if (depth == 1) concrete = concrete + 1
+                    end select
+                end do
+                if (concrete /= 1) then
+                    status%ok = .false.
+                    status%message = "forward mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' requires one fixed concrete "// &
+                        "runtime path; unresolved dispatch is unsupported"
+                    return
+                end if
+                do k = 1, primal%n_stmts
+                    if (primal%stmts(k)%kind /= FAD_ALLOCATE .and. &
+                        primal%stmts(k)%kind /= FAD_DEALLOCATE .and. &
+                        primal%stmts(k)%kind /= FAD_MOVE_ALLOC) cycle
+                    status%ok = .false.
+                    status%message = "forward mode: active nested polymorphic "// &
+                        "component path '"//trim(selector)//"' crosses ownership/lifetime "// &
+                        "operations; caller-owned borrowed components only"
+                    return
+                end do
+                exit
+            end do
+            if (found .and. .not. active_component) cycle
+        end do
+    end subroutine refuse_active_nested_polymorphic_component
 
     subroutine refuse_active_polymorphic_ownership(primal, active, status)
         !! A polymorphic allocatable needs a tangent descriptor with the same
