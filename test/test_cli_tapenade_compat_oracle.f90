@@ -55,13 +55,13 @@ program test_cli_tapenade_compat_oracle
     if (stat /= 0) call fail('Tapenade reverse flags failed')
     call require_file(reverse_path, 'Tapenade reverse output')
 
-    command = quote(cli)//' -d -root square -multi -O '//quote(directory)// &
+    command = quote(cli)//' -d -root square -vector -O '//quote(directory)// &
         ' -o fortad-tapenade-compat-vector '//quote(input_path)
     call execute_command_line(command, wait=.true., exitstat=stat)
-    if (stat /= 0) call fail('Tapenade multidirectional flags failed')
+    if (stat /= 0) call fail('Tapenade -vector multidirectional flags failed')
     call require_file(vector_path, 'Tapenade multidirectional output')
 
-    command = quote(cli) // ' -b -root square -multi -O ' // quote(directory) // &
+    command = quote(cli) // ' -b -root square -vector -O ' // quote(directory) // &
         ' -o fortad-tapenade-compat-reverse-vector ' // quote(input_path)
     call execute_command_line(command, wait=.true., exitstat=stat)
     if (stat == 0) call fail('Tapenade reverse multidirectional mode was accepted')

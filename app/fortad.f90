@@ -52,7 +52,7 @@ program fortad_cli
     end if
     if (tapenade_multi .and. mode == "reverse") then
         write (error_unit_or_output(), '(a)') &
-            "fortad: Tapenade -multi is supported for forward mode only"
+            "fortad: Tapenade -vector/-multi is supported for forward mode only"
         stop 2, quiet=.true.
     end if
 
@@ -644,7 +644,10 @@ contains
                     stat = 1
                     return
                 end if
-            case ("-multi")
+            case ("-multi", "-vector")
+                ! Tapenade calls multidirectional mode `-vector`; keep
+                ! FortAD's historical `-multi` spelling as an alias. The
+                ! direction-count dummy is inferred as `nd`.
                 tapenade_compat = .true.
                 tapenade_multi = .true.
                 if (len_trim(directions) == 0) directions = "nd"
@@ -1507,7 +1510,7 @@ contains
         write (*, '(a)') "      --call-rule SPEC  register tangent and adjoint "// &
             "statements"
         write (*, '(a)') "  Tapenade: -p/-d/-b -root NAME -O DIR -o STEM"
-        write (*, '(a)') "      -multi            forward vector mode (directions nd)"
+        write (*, '(a)') "      -vector/-multi   forward vector mode (directions nd)"
         write (*, '(a)') "      -context          whole-file context (already automatic)"
         write (*, '(a)') "      -fixinterface     checked interfaces (already automatic)"
         write (*, '(a)') "      -standalonediff   standalone source (already automatic)"

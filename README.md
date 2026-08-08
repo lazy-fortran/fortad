@@ -194,6 +194,12 @@ an existing output directory; `-o` is the Tapenade output stem, so FortAD adds
 | `fortad -d -root kernel -multi -O out -o kernel source.f` | accepted directly; forward vector directions use `nd` |
 | `-head 'kernel(x)'` | `--head 'kernel(x)'` or `-head 'kernel(x)'` |
 
+Tapenade's current multidirectional spelling, `-vector`, is accepted as an
+alias for FortAD's older `-multi` spelling. It automatically selects forward
+vector mode with the `nd` direction-count dummy, so a normal invocation can
+omit both `-root` (when `-o STEM` names the procedure) and `--directions`:
+`fortad -d -vector -o kernel source.f`.
+
 For a multi-procedure legacy file, `-root` can be omitted when `-o STEM`
 matches the desired procedure name: `fortad -b -O out -o kernel source.f` selects
 `kernel` automatically. If the stem does not match a procedure, the first
@@ -222,7 +228,8 @@ ambiguous procedures still need `--head` or `--dep`.
 `-ext FILE` is accepted as a migration aid, but it does not import Tapenade's
 external intrinsic-summary format. Register the needed operation with
 `--rule` or `--call-rule` instead. Tapenade's multidirectional reverse mode is
-not silently emulated: `-multi` currently has forward-mode semantics only.
+not silently emulated: `-vector` and `-multi` currently have forward-mode
+semantics only.
 
 The common `-context`, `-fixinterface`, and `-standalonediff` switches are
 also accepted. They are no-ops because FortAD always lowers with the complete
