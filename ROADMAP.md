@@ -288,7 +288,7 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
   oracles.
-- FortAD `931dac5`, including active concrete rank-four allocatable-component
+- FortAD `ba50964`, including active concrete rank-four allocatable-component
   JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded polymorphic reverse
   ownership replay, one-arm rank-one assumed-rank JVP/VJP, and branch-merged
   callback-flow JVP/VJP lowering with an independent oracle, plus fixed-shape
@@ -484,7 +484,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `931dac5`. Its GNU behavioral
+The implementation snapshot is FortAD code at `ba50964`. Its GNU behavioral
 gate is green (409 build targets, 408 derivative targets, 66/66 tests).
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
