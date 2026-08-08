@@ -1548,12 +1548,11 @@ contains
         !! Lower one concrete same-file type-bound function call.
         !!
         !! The bounded contract is deliberately narrow: the receiver is a
-        !! statically declared `type(t)` object, the binding uses either the
-        !! default implicit PASS or NOPASS, and the implementation is a local
-        !! function. A local override on an abstract/deferred parent and a
-        !! statically resolved inherited binding are also accepted. Runtime
-        !! dispatch, named PASS, generic, deferred, and ambiguous bindings
-        !! remain explicit refusals.
+        !! statically declared `type(t)` object, the binding uses PASS or
+        !! NOPASS, and the implementation is a local function. A local
+        !! override on an abstract/deferred parent and a statically resolved
+        !! inherited binding are also accepted. Runtime dispatch, generic,
+        !! deferred, and ambiguous bindings remain explicit refusals.
         type(ast_arena_t), intent(in) :: arena
         type(call_or_subscript_node), intent(in) :: node
         type(fad_proc_t), intent(inout) :: proc
@@ -1563,12 +1562,14 @@ contains
         type(derived_type_query_t) :: candidate_dtype
         type(binding_hierarchy_query_t) :: hierarchy
         type(program_unit_query_t) :: unit
+        type(program_unit_query_t) :: candidate_unit
         character(len=:), allocatable :: object_type, type_name, method, impl
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
         integer :: receiver, i, j
         integer :: type_matches, function_matches
         logical :: found_type, found_function
+        logical :: named_pass
 
         out = 0
         access = query_component_access(arena, node%base_expr_index)
@@ -1650,15 +1651,8 @@ contains
             call refuse_type_bound(status, method, "deferred bindings are unsupported")
             return
         end if
-        if (hierarchy%pass_arg) then
-            if (allocated(hierarchy%pass_name)) then
-                if (len_trim(hierarchy%pass_name) > 0) then
-                    call refuse_type_bound(status, method, &
-                        "named PASS bindings are unsupported")
-                    return
-                end if
-            end if
-        end if
+        named_pass = hierarchy%pass_arg .and. allocated(hierarchy%pass_name)
+        if (named_pass) named_pass = len_trim(hierarchy%pass_name) > 0
         impl = trim(hierarchy%implementation)
         if (len_trim(impl) == 0) then
             ! FortFront retains the effective binding name for implicit
@@ -1676,10 +1670,11 @@ contains
         do j = 1, arena%size
             if (.not. arena%has_node_at(j)) cycle
             if (trim(arena%entries(j)%node_type) /= "function_def") cycle
-            unit = query_program_unit(arena, j)
-            if (unit%found .and. same_name(unit%name, impl)) then
+            candidate_unit = query_program_unit(arena, j)
+            if (candidate_unit%found .and. same_name(candidate_unit%name, impl)) then
                 function_matches = function_matches + 1
                 if (found_function) cycle
+                unit = candidate_unit
                 found_function = .true.
             end if
         end do
@@ -1696,15 +1691,21 @@ contains
         if (hierarchy%pass_arg) then
             receiver = lower_expr(arena, access%base_node_index, proc, status)
             if (.not. status%ok) return
-            allocate (args(size(node%arg_indices) + 1))
-            allocate (arg_names(size(node%arg_indices) + 1))
-            args(1) = receiver
-            arg_names(1) = ""
-            do i = 1, size(node%arg_indices)
-                args(i + 1) = lower_actual(arena, node%arg_indices(i), proc, &
-                    arg_names(i + 1), status)
+            if (named_pass) then
+                call lower_named_pass_arguments(arena, node, proc, unit, &
+                    hierarchy%pass_name, receiver, args, arg_names, status)
                 if (.not. status%ok) return
-            end do
+            else
+                allocate (args(size(node%arg_indices) + 1))
+                allocate (arg_names(size(node%arg_indices) + 1))
+                args(1) = receiver
+                arg_names(1) = ""
+                do i = 1, size(node%arg_indices)
+                    args(i + 1) = lower_actual(arena, node%arg_indices(i), proc, &
+                        arg_names(i + 1), status)
+                    if (.not. status%ok) return
+                end do
+            end if
         else
             ! NOPASS bindings do not receive the object expression.  Keeping
             ! the receiver out of the ordinary call is essential: the
@@ -1720,12 +1721,116 @@ contains
         out = proc%add_expr(expr_call(impl, args, arg_names))
     end function lower_type_bound_call
 
+    subroutine lower_named_pass_arguments(arena, node, proc, unit, pass_name, &
+            receiver, args, arg_names, status)
+        !! Normalize a named-PASS call to keyword actuals in implementation
+        !! dummy order. This keeps positional actuals legal when the passed
+        !! object dummy is not first, and gives the inliner the same formal
+        !! mapping as the Fortran call.
+        type(ast_arena_t), intent(in) :: arena
+        type(call_or_subscript_node), intent(in) :: node
+        type(fad_proc_t), intent(inout) :: proc
+        type(program_unit_query_t), intent(in) :: unit
+        character(len=*), intent(in) :: pass_name
+        integer, intent(in) :: receiver
+        integer, allocatable, intent(out) :: args(:)
+        character(len=64), allocatable, intent(out) :: arg_names(:)
+        type(lower_status_t), intent(inout) :: status
+        type(declaration_query_t) :: decl
+        integer, allocatable :: actuals(:), formal_actual(:)
+        character(len=64), allocatable :: formal_names(:)
+        character(len=64) :: keyword
+        integer :: n_formal, n_actual, pass_formal
+        integer :: i, j, formal, next_formal
+        logical :: named
+
+        n_formal = 0
+        if (allocated(unit%parameter_indices)) n_formal = size(unit%parameter_indices)
+        n_actual = size(node%arg_indices)
+        allocate (formal_names(n_formal))
+        formal_names = ""
+        pass_formal = 0
+        do i = 1, n_formal
+            decl = query_declaration(arena, unit%parameter_indices(i))
+            if (decl%found) then
+                if (allocated(decl%name)) formal_names(i) = trim(decl%name)
+            end if
+            if (same_name(formal_names(i), pass_name)) pass_formal = i
+        end do
+        if (pass_formal == 0) then
+            call refuse_type_bound(status, node%name, &
+                "named PASS dummy is not present in the implementation")
+            return
+        end if
+        if (n_actual > n_formal - 1) then
+            call refuse_type_bound(status, node%name, &
+                "named PASS call has too many explicit actuals")
+            return
+        end if
+
+        allocate (actuals(n_actual), formal_actual(n_formal))
+        formal_actual = 0
+        next_formal = 1
+        do i = 1, n_actual
+            actuals(i) = lower_actual(arena, node%arg_indices(i), proc, keyword, status)
+            if (.not. status%ok) return
+            named = len_trim(keyword) > 0
+            if (named) then
+                formal = 0
+                do j = 1, n_formal
+                    if (same_name(keyword, formal_names(j))) then
+                        formal = j
+                        exit
+                    end if
+                end do
+                if (formal == pass_formal .or. formal == 0) then
+                    call refuse_type_bound(status, node%name, &
+                        "named PASS call has an invalid keyword actual")
+                    return
+                end if
+            else
+                do while (next_formal <= n_formal)
+                    if (next_formal /= pass_formal .and. &
+                        formal_actual(next_formal) == 0) exit
+                    next_formal = next_formal + 1
+                end do
+                formal = next_formal
+                next_formal = next_formal + 1
+            end if
+            if (formal <= 0 .or. formal > n_formal) then
+                call refuse_type_bound(status, node%name, &
+                    "named PASS call has an unknown actual")
+                return
+            end if
+            if (formal_actual(formal) /= 0) then
+                call refuse_type_bound(status, node%name, &
+                    "named PASS call has a duplicate actual")
+                return
+            end if
+            formal_actual(formal) = i
+        end do
+
+        allocate (args(n_actual + 1), arg_names(n_actual + 1))
+        j = 0
+        do formal = 1, n_formal
+            if (formal == pass_formal) then
+                j = j + 1
+                args(j) = receiver
+                arg_names(j) = formal_names(formal)
+            else if (formal_actual(formal) > 0) then
+                j = j + 1
+                args(j) = actuals(formal_actual(formal))
+                arg_names(j) = formal_names(formal)
+            end if
+        end do
+    end subroutine lower_named_pass_arguments
+
     logical function is_type_bound_reference(arena, base_idx, proc) result(found)
         !! Distinguish ``object%binding(args)`` from an array component
         !! ``object%values(i)`` before lowering either one.  A local binding is
         !! enough to route the former through the type-bound lowering and its
-        !! explicit refusal diagnostics (named PASS, generic, deferred, and
-        !! ambiguous bindings).
+        !! explicit refusal diagnostics (runtime dispatch, generic, deferred,
+        !! and ambiguous bindings).
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: base_idx
         type(fad_proc_t), intent(in) :: proc
