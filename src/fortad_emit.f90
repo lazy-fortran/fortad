@@ -129,8 +129,10 @@ contains
         character(len=:), allocatable :: text
         type(buffer_t) :: b
         type(fad_stmt_t) :: pending_directive
-        logical :: has_pending_directive
-        integer :: i, indent, limit
+        logical :: has_pending_directive, directive_for_loop, buffered
+        integer :: i, indent, limit, loop_number, end_stmt
+        character(len=128), allocatable :: accumulator_names(:)
+        integer, allocatable :: accumulator_terms(:)
 
         limit = DEFAULT_LINE_LIMIT
         if (present(nested)) limit = limit - nested
@@ -145,19 +147,37 @@ contains
             if (p%decls(i)%is_select_alias) cycle
             call b%line(indent_of(1)//emit_decl_line(p%decls(i)))
         end do
+        call write_buffer_decls(b, p)
         call b%line("")
 
         indent = 1
-        do i = 1, p%n_stmts
+        loop_number = 0
+        i = 1
+        do while (i <= p%n_stmts)
+            directive_for_loop = .false.
             if (p%stmts(i)%kind == FAD_DIRECTIVE) then
                 pending_directive = p%stmts(i)
                 has_pending_directive = .true.
+                i = i + 1
                 cycle
             end if
+            if (p%stmts(i)%kind == FAD_DO) loop_number = loop_number + 1
             if (has_pending_directive .and. p%stmts(i)%kind == FAD_DO) then
                 call write_omp_directive(b, p, pending_directive, i, &
                     indent_of(indent), limit)
+                directive_for_loop = .true.
                 has_pending_directive = .false.
+            end if
+            if (p%stmts(i)%kind == FAD_DO .and. .not. directive_for_loop) then
+                end_stmt = matching_end_do(p, i)
+                call analyze_buffered_loop(p, i, end_stmt, buffered, &
+                    accumulator_names, accumulator_terms)
+                if (buffered) then
+                    call write_buffered_loop(b, p, i, end_stmt, indent, limit, &
+                        loop_number, accumulator_names)
+                    i = end_stmt + 1
+                    cycle
+                end if
             end if
             select case (p%stmts(i)%kind)
             case (FAD_END_DO, FAD_END_IF, FAD_ELSE, FAD_TYPE_IS, &
@@ -174,6 +194,7 @@ contains
                     FAD_CLASS_IS, FAD_CLASS_DEFAULT)
                 indent = indent + 1
             end select
+            i = i + 1
         end do
 
         if (p%is_function) then
@@ -183,6 +204,466 @@ contains
         end if
         text = b%str()
     end function emit_proc
+
+    subroutine write_buffer_decls(b, p)
+        !! Declare automatic arrays for loops whose reduction body is pure.
+        !!
+        !! The arrays preserve the loop's iteration order.  The first loop is
+        !! therefore free of a loop-carried dependency, while the second loop
+        !! performs the original ordered accumulation.  This is deliberately
+        !! a narrow emitter optimization: an unproved dependency stays in the
+        !! ordinary one-loop form.
+        type(buffer_t), intent(inout) :: b
+        type(fad_proc_t), intent(in) :: p
+        logical :: buffered
+        integer :: i, end_stmt, loop_number, k, di
+        character(len=128), allocatable :: names(:), accumulators(:)
+        integer, allocatable :: terms(:)
+        character(len=:), allocatable :: bounds
+
+        loop_number = 0
+        do i = 1, p%n_stmts
+            if (p%stmts(i)%kind /= FAD_DO) cycle
+            loop_number = loop_number + 1
+            end_stmt = matching_end_do(p, i)
+            call analyze_buffered_loop(p, i, end_stmt, buffered, accumulators, terms)
+            if (.not. buffered) cycle
+            do k = 1, size(accumulators)
+                di = p%decl_index(trim(accumulators(k)))
+                bounds = emit_expr(p, p%stmts(i)%lo)//":"// &
+                    emit_expr(p, p%stmts(i)%hi)
+                call b%line(indent_of(1)//trim(p%decls(di)%type_name)//" :: "// &
+                    trim(buffer_name(p, loop_number, k))//"("//trim(bounds)//")")
+            end do
+        end do
+    end subroutine write_buffer_decls
+
+    integer function matching_end_do(p, first) result(last)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first
+        integer :: i, depth
+
+        last = first
+        depth = 0
+        do i = first, p%n_stmts
+            select case (p%stmts(i)%kind)
+            case (FAD_DO)
+                depth = depth + 1
+            case (FAD_END_DO)
+                depth = depth - 1
+                if (depth == 0) then
+                    last = i
+                    return
+                end if
+            end select
+        end do
+    end function matching_end_do
+
+    subroutine analyze_buffered_loop(p, first, last, ok, accumulators, terms)
+        !! Prove that a loop can be split without changing its arithmetic.
+        !!
+        !! Only scalar real reductions with a direct ``acc + term`` shape are
+        !! accepted.  Every other body statement must be a scalar assignment,
+        !! and no contribution may read a reduction variable.  In particular,
+        !! array writes, calls, nested loops, and control flow are refused
+        !! here because their independence needs richer alias information than
+        !! the emitter has.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last
+        logical, intent(out) :: ok
+        character(len=128), allocatable, intent(out) :: accumulators(:)
+        integer, allocatable, intent(out) :: terms(:)
+        character(len=128), allocatable :: found_names(:)
+        integer, allocatable :: found_terms(:)
+        character(len=:), allocatable :: target
+        integer :: i, k, n, di
+        logical :: is_reduction
+
+        allocate (found_names(max(0, last - first - 1)))
+        allocate (found_terms(max(0, last - first - 1)))
+        n = 0
+        ok = .false.
+
+        if (last <= first + 1) then
+            allocate (accumulators(0), terms(0))
+            return
+        end if
+        if (.not. unit_stride(p, first)) then
+            allocate (accumulators(0), terms(0))
+            return
+        end if
+        if (.not. stable_loop_bounds(p, first)) then
+            allocate (accumulators(0), terms(0))
+            return
+        end if
+
+        do i = first + 1, last - 1
+            if (p%stmts(i)%kind /= FAD_ASSIGN) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+            target = trim(p%stmts(i)%target)
+            if (target == "!fad_raw" .or. index(target, "(") > 0 .or. &
+                index(target, "%") > 0) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+            di = p%decl_index(target)
+            if (di <= 0 .or. .not. scalar_safe_decl(p%decls(di))) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+            if (.not. safe_expression(p, p%stmts(i)%value)) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+            call reduction_term(p, p%stmts(i), target, is_reduction, k)
+            if (.not. is_reduction) cycle
+            if (name_in_list(found_names, n, target)) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+            n = n + 1
+            found_names(n) = target
+            found_terms(n) = k
+        end do
+
+        if (n == 0) then
+            allocate (accumulators(0), terms(0))
+            return
+        end if
+
+        do k = 1, n
+            di = p%decl_index(trim(found_names(k)))
+            if (di <= 0) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+            if (.not. scalar_real_decl(p%decls(di))) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+        end do
+
+        do i = first + 1, last - 1
+            target = trim(p%stmts(i)%target)
+            call reduction_term(p, p%stmts(i), target, is_reduction, k)
+            if (is_reduction) then
+                if (mentions_any(p, k, found_names, n)) then
+                    allocate (accumulators(0), terms(0))
+                    return
+                end if
+            else if (mentions_any(p, p%stmts(i)%value, found_names, n)) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+        end do
+
+        allocate (accumulators(n), terms(n))
+        accumulators = found_names(:n)
+        terms = found_terms(:n)
+        ok = .true.
+    end subroutine analyze_buffered_loop
+
+    logical function unit_stride(p, first) result(ok)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first
+
+        ok = p%stmts(first)%step == 0
+        if (.not. ok) then
+            ok = p%stmts(first)%step > 0 .and. is_one_expr(p, p%stmts(first)%step)
+        end if
+    end function unit_stride
+
+    logical function is_one_expr(p, idx) result(ok)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+
+        ok = idx > 0 .and. idx <= p%n_exprs
+        if (.not. ok) return
+        ok = p%exprs(idx)%kind == FAD_CONST .and. &
+            (trim(p%exprs(idx)%text) == "1" .or. trim(p%exprs(idx)%text) == "1_")
+    end function is_one_expr
+
+    logical function stable_loop_bounds(p, first) result(ok)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first
+        integer :: i
+        character(len=:), allocatable :: target
+
+        ok = .true.
+        do i = 1, first - 1
+            if (p%stmts(i)%kind /= FAD_ASSIGN) then
+                ok = .false.
+                return
+            end if
+            target = trim(p%stmts(i)%target)
+            if (target == "!fad_raw") then
+                ok = .false.
+                return
+            end if
+            if (expression_mentions_ci(p, p%stmts(first)%lo, target) .or. &
+                expression_mentions_ci(p, p%stmts(first)%hi, target)) then
+                ok = .false.
+                return
+            end if
+        end do
+        do i = first + 1, matching_end_do(p, first) - 1
+            if (p%stmts(i)%kind /= FAD_ASSIGN) cycle
+            target = trim(p%stmts(i)%target)
+            if (same_fortran_name(target, trim(p%stmts(first)%target))) then
+                ok = .false.
+                return
+            end if
+        end do
+    end function stable_loop_bounds
+
+    logical function scalar_real_decl(d) result(ok)
+        type(fad_decl_t), intent(in) :: d
+        character(len=:), allocatable :: type_name
+
+        ok = .false.
+        if (.not. allocated(d%type_name)) return
+        type_name = lower_string(trim(d%type_name))
+        ok = index(type_name, "real") == 1 .and. .not. d%is_array .and. &
+            .not. d%is_allocatable
+    end function scalar_real_decl
+
+    logical function scalar_safe_decl(d) result(ok)
+        !! Scalar intrinsic temporaries cannot carry storage or finalization.
+        type(fad_decl_t), intent(in) :: d
+        character(len=:), allocatable :: type_name
+
+        ok = .false.
+        if (d%is_array .or. d%is_allocatable) return
+        if (.not. allocated(d%type_name)) return
+        type_name = lower_string(trim(d%type_name))
+        ok = index(type_name, "integer") == 1 .or. &
+            index(type_name, "real") == 1 .or. &
+            index(type_name, "logical") == 1
+    end function scalar_safe_decl
+
+    recursive logical function safe_expression(p, idx) result(ok)
+        !! Permit only side-effect-free intrinsic arithmetic in the first pass.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer :: i
+
+        ok = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_CONST, FAD_VAR)
+            ok = .true.
+        case (FAD_BINOP, FAD_UNOP, FAD_INDEX)
+            ok = .true.
+        case (FAD_CALL)
+            ok = intrinsic_name(p, p%exprs(idx)%text)
+        case default
+            return
+        end select
+        if (.not. ok) return
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            if (.not. safe_expression(p, p%exprs(idx)%args(i))) then
+                ok = .false.
+                return
+            end if
+        end do
+    end function safe_expression
+
+    logical function intrinsic_name(p, raw) result(ok)
+        type(fad_proc_t), intent(in) :: p
+        character(len=*), intent(in) :: raw
+        character(len=:), allocatable :: name
+
+        name = lower_string(trim(raw))
+        if (p%decl_index(name) > 0) then
+            ok = .false.
+            return
+        end if
+        select case (name)
+        case ("abs", "acos", "asin", "atan", "atan2", "cos", "cosh", &
+                "exp", "log", "log10", "sin", "sinh", "sqrt", "tan", "tanh")
+            ok = .true.
+        case default
+            ok = .false.
+        end select
+    end function intrinsic_name
+
+    subroutine reduction_term(p, s, target, found, term)
+        type(fad_proc_t), intent(in) :: p
+        type(fad_stmt_t), intent(in) :: s
+        character(len=*), intent(in) :: target
+        logical, intent(out) :: found
+        integer, intent(out) :: term
+        integer :: left, right
+
+        found = .false.
+        term = 0
+        if (s%kind /= FAD_ASSIGN .or. index(target, "(") > 0) return
+        if (s%value <= 0 .or. s%value > p%n_exprs) return
+        if (p%exprs(s%value)%kind /= FAD_BINOP) return
+        if (trim(p%exprs(s%value)%text) /= "+") return
+        if (.not. allocated(p%exprs(s%value)%args)) return
+        if (size(p%exprs(s%value)%args) /= 2) return
+        left = p%exprs(s%value)%args(1)
+        right = p%exprs(s%value)%args(2)
+        if (is_named_expr(p, left, target)) then
+            if (.not. expression_mentions_ci(p, right, target)) then
+                found = .true.
+                term = right
+            end if
+        else if (is_named_expr(p, right, target)) then
+            if (.not. expression_mentions_ci(p, left, target)) then
+                found = .true.
+                term = left
+            end if
+        end if
+    end subroutine reduction_term
+
+    logical function is_named_expr(p, idx, name) result(found)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: name
+
+        found = idx > 0 .and. idx <= p%n_exprs
+        if (.not. found) return
+        found = p%exprs(idx)%kind == FAD_VAR .and. &
+            same_fortran_name(trim(p%exprs(idx)%text), trim(name))
+    end function is_named_expr
+
+    logical function name_in_list(names, count, name) result(found)
+        character(len=128), intent(in) :: names(:)
+        integer, intent(in) :: count
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        found = .false.
+        do i = 1, count
+            if (same_fortran_name(trim(names(i)), trim(name))) then
+                found = .true.
+                return
+            end if
+        end do
+    end function name_in_list
+
+    recursive logical function expression_mentions_ci(p, idx, name) result(found)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        found = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        if (same_fortran_name(trim(p%exprs(idx)%text), trim(name))) then
+            found = .true.
+            return
+        end if
+        if (.not. allocated(p%exprs(idx)%args)) return
+        do i = 1, size(p%exprs(idx)%args)
+            if (expression_mentions_ci(p, p%exprs(idx)%args(i), name)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function expression_mentions_ci
+
+    logical function mentions_any(p, idx, names, count) result(found)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx, count
+        character(len=128), intent(in) :: names(:)
+        integer :: i
+
+        found = .false.
+        do i = 1, count
+            if (expression_mentions_ci(p, idx, names(i))) then
+                found = .true.
+                return
+            end if
+        end do
+    end function mentions_any
+
+    function lower_string(text) result(out)
+        character(len=*), intent(in) :: text
+        character(len=len(text)) :: out
+        integer :: i
+
+        do i = 1, len(text)
+            out(i:i) = lower_ascii(text(i:i))
+        end do
+    end function lower_string
+
+    function buffer_name(p, loop_number, accumulator_number) result(name)
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: loop_number, accumulator_number
+        character(len=128) :: name
+        character(len=32) :: suffix
+
+        write (suffix, '(i0,"_",i0)') loop_number, accumulator_number
+        name = "fad_buffer_"//trim(suffix)
+        if (p%decl_index(trim(name)) > 0) name = trim(name)//"_x"
+    end function buffer_name
+
+    subroutine write_buffered_loop(b, p, first, last, indent, limit, loop_number, &
+            accumulators)
+        type(buffer_t), intent(inout) :: b
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: first, last, indent, limit, loop_number
+        character(len=128), intent(in) :: accumulators(:)
+        type(buffer_t) :: line
+        character(len=128) :: target
+        integer :: pass, i, k
+        logical :: is_reduction
+        integer :: term
+
+        do pass = 1, 2
+            call line%reset()
+            call write_stmt(line, p, p%stmts(first))
+            call put_wrapped(b, indent_of(indent), line%str(), limit)
+            do i = first + 1, last - 1
+                target = trim(p%stmts(i)%target)
+                call reduction_term(p, p%stmts(i), target, is_reduction, term)
+                if (pass == 1 .and. is_reduction) then
+                    k = accumulator_number(accumulators, target)
+                    call line%reset()
+                    call line%put(trim(buffer_name(p, loop_number, k))//"("// &
+                        trim(p%stmts(first)%target)//") = ")
+                    call write_expr(line, p, term)
+                else if (pass == 1) then
+                    call line%reset()
+                    call write_stmt(line, p, p%stmts(i))
+                else
+                    cycle
+                end if
+                call put_wrapped(b, indent_of(indent + 1), line%str(), limit)
+            end do
+            if (pass == 2) then
+                do k = 1, size(accumulators)
+                    call line%reset()
+                    call line%put(trim(accumulators(k))//" = "// &
+                        trim(accumulators(k))//" + "// &
+                        trim(buffer_name(p, loop_number, k))//"("// &
+                        trim(p%stmts(first)%target)//")")
+                    call put_wrapped(b, indent_of(indent + 1), line%str(), limit)
+                end do
+            end if
+            call b%line(indent_of(indent)//"end do")
+        end do
+    end subroutine write_buffered_loop
+
+    integer function accumulator_number(names, name) result(number)
+        character(len=128), intent(in) :: names(:)
+        character(len=*), intent(in) :: name
+        integer :: i
+
+        number = 0
+        do i = 1, size(names)
+            if (same_fortran_name(trim(names(i)), trim(name))) then
+                number = i
+                return
+            end if
+        end do
+    end function accumulator_number
 
     subroutine write_header(b, p, limit)
         !! The `function`/`subroutine` statement with its dummy argument list.
