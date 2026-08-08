@@ -308,15 +308,9 @@ contains
                 call lower_type_bound_subroutine(arena, idx, proc, s, status)
                 if (.not. status%ok) return
             else
-                block
-                    integer, allocatable :: cargs(:)
-                    character(len=64), allocatable :: cnames(:)
-                    call lower_call_arguments(arena, n%arg_indices, proc, cargs, &
-                        cnames, status)
-                    if (.not. status%ok) return
-                    s%call_args = cargs
-                    s%call_arg_names = cnames
-                end block
+                call lower_call_arguments_into(arena, n%arg_indices, proc, s, &
+                    status)
+                if (.not. status%ok) return
             end if
             if (same_name(n%name, "move_alloc") .and. &
                 size(n%arg_indices) == 2 .and. .not. &
@@ -2221,6 +2215,31 @@ contains
             if (len_trim(keyword) > 0) names(i) = keyword
         end do
     end subroutine lower_call_arguments
+
+    subroutine lower_call_arguments_into(arena, arg_indices, proc, stmt, status)
+        !! Lower ordinary call actuals directly into the statement record.
+        !! Avoiding an allocatable-array assignment here works around an
+        !! nvfortran descriptor bug in the regular call lowering path.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: arg_indices(:)
+        type(fad_proc_t), intent(inout) :: proc
+        type(fad_stmt_t), intent(inout) :: stmt
+        type(lower_status_t), intent(inout) :: status
+        integer :: i
+        character(len=64) :: keyword
+
+        if (allocated(stmt%call_args)) deallocate (stmt%call_args)
+        if (allocated(stmt%call_arg_names)) deallocate (stmt%call_arg_names)
+        allocate (stmt%call_args(size(arg_indices)))
+        allocate (character(len=64) :: stmt%call_arg_names(size(arg_indices)))
+        stmt%call_arg_names = ""
+        do i = 1, size(arg_indices)
+            stmt%call_args(i) = lower_actual(arena, arg_indices(i), proc, &
+                keyword, status)
+            if (.not. status%ok) return
+            if (len_trim(keyword) > 0) stmt%call_arg_names(i) = keyword
+        end do
+    end subroutine lower_call_arguments_into
 
     recursive integer function lower_actual(arena, idx, proc, keyword, status) &
             result(out)
