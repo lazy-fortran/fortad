@@ -283,7 +283,7 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded polymorphic reverse
   ownership replay, one-arm rank-one assumed-rank JVP/VJP, and the green
   408/407/63 GNU gate.
-- fortad-bench `0d87f02`, including the separate `next5` four-row
+- fortad-bench `6e22ac4`, including the separate `next5` four-row
   exact-source modern-feature queue shard and refreshed queue, batch,
   compiler, and ledger artifacts.
 
@@ -491,7 +491,7 @@ FortFront `main` (`1b19fcd0`), a branch-merged callback-flow query in
 FortFront `main` (`1b19fcd0`), a typed `real(8)` procedure-pointer result and
 rank-one/rank-two assumed-rank `SELECT RANK` slices in FFC `main`
 (`aec5a2b`), and 32 measured queue-shard boundaries in fortad-bench `main`
-(`0d87f02`).
+(`6e22ac4`).
 These are narrow support claims. General
 callback flow, repeated or rank-greater-than-two automatic reallocation,
 general allocatable-component lifetime, polymorphic ownership replay beyond
