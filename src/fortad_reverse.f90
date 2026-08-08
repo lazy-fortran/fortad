@@ -120,6 +120,7 @@ module fortad_reverse
         !! One explicitly allocated, simple allocatable owner.
         character(len=:), allocatable :: owner
         character(len=:), allocatable :: previous_owner
+        character(len=:), allocatable :: source
         logical :: active = .false.
         logical :: deallocated = .false.
     end type allocation_record_t
@@ -485,10 +486,12 @@ contains
                     return
                 end if
                 if (primal%decls(di)%is_polymorphic) then
-                    status%ok = .false.
-                    status%message = "reverse mode: polymorphic allocatable ownership '"// &
-                        trim(owner)//"' requires dynamic-type replay"
-                    return
+                    if (.not. has_fixed_source_owner(primal, di)) then
+                        status%ok = .false.
+                        status%message = "reverse mode: polymorphic allocatable ownership '"// &
+                            trim(owner)//"' requires dynamic-type replay"
+                        return
+                    end if
                 end if
                 if (primal%stmts(i)%kind == FAD_ALLOCATE) then
                     found = .false.
@@ -766,6 +769,21 @@ contains
                     end do
                     cycle
                 end if
+                if (primal%stmts(j)%kind == FAD_ALLOCATE) then
+                    if (primal%stmts(j)%allocation_source > 0 .and. &
+                        allocated(primal%stmts(j)%allocation_args)) then
+                        di = call_arg_decl_index(primal, &
+                            primal%stmts(j)%allocation_args(1))
+                        if (di > 0 .and. reads_any(primal, &
+                            primal%stmts(j)%allocation_source, varied)) then
+                            if (.not. varied(di)) then
+                                varied(di) = .true.
+                                changed = .true.
+                            end if
+                        end if
+                    end if
+                    cycle
+                end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 if (.not. reads_any(primal, primal%stmts(j)%value, varied)) cycle
                 ! An array-element target must resolve to its array, or the
@@ -815,6 +833,17 @@ contains
                     end do
                     cycle
                 end if
+                if (primal%stmts(j)%kind == FAD_ALLOCATE) then
+                    if (primal%stmts(j)%allocation_source > 0 .and. &
+                        allocated(primal%stmts(j)%allocation_args)) then
+                        di = call_arg_decl_index(primal, &
+                            primal%stmts(j)%allocation_args(1))
+                        if (di > 0 .and. useful(di) .and. &
+                            mark_reads(primal, primal%stmts(j)%allocation_source, &
+                            useful)) changed = .true.
+                    end if
+                    cycle
+                end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 di = primal%decl_index(fad_base_name(primal%stmts(j)%target))
                 if (di == 0) cycle
@@ -828,10 +857,10 @@ contains
     end subroutine seed_activity
 
     subroutine check_reverse_allocation_sources(primal, active, status)
-        !! Allocation SOURCE= is a value copy.  The bounded retention slice
-        !! does not yet record that copy as a differentiable statement, so an
-        !! active source must stop before emission rather than lose its
-        !! contribution silently.
+        !! The one supported active SOURCE= copy has a fixed concrete source
+        !! and a scalar polymorphic local or dummy owner.  Its dynamic type is
+        !! replayed by MOLD=owner in the adjoint shadow; all other copies still
+        !! require a value-copy replay tape.
         type(fad_proc_t), intent(in) :: primal
         logical, intent(in) :: active(:)
         type(reverse_status_t), intent(inout) :: status
@@ -842,6 +871,13 @@ contains
             if (primal%stmts(i)%allocation_source <= 0) cycle
             if (.not. reads_any(primal, primal%stmts(i)%allocation_source, &
                 active)) cycle
+            if (allocated(primal%stmts(i)%allocation_args)) then
+                if (size(primal%stmts(i)%allocation_args) >= 1) then
+                    if (has_fixed_source_owner(primal, &
+                        primal%decl_index(fad_base_name(emit_expr(primal, &
+                        primal%stmts(i)%allocation_args(1)))))) cycle
+                end if
+            end if
             status%ok = .false.
             status%message = "reverse mode: active ALLOCATE(SOURCE=) requires "// &
                 "a value-copy replay tape; this bounded slice only retains "// &
@@ -849,6 +885,61 @@ contains
             return
         end do
     end subroutine check_reverse_allocation_sources
+
+    logical function has_fixed_source_owner(primal, owner_di) result(supported)
+        !! The bounded reverse ownership case: one scalar polymorphic owner,
+        !! one ALLOCATE(owner,SOURCE=concrete_declared_type), and no move or
+        !! second acquisition.  The source may carry the active component.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: owner_di
+        integer :: i, target_di, source_di
+        character(len=:), allocatable :: target
+        logical :: found
+
+        supported = .false.
+        if (owner_di <= 0 .or. owner_di > primal%n_decls) return
+        if (.not. primal%decls(owner_di)%is_polymorphic) return
+        if (primal%decls(owner_di)%is_unlimited_polymorphic) return
+        if (primal%decls(owner_di)%is_array) return
+        found = .false.
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind == FAD_ALLOCATE) then
+                if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
+                target = emit_expr(primal, primal%stmts(i)%allocation_args(1))
+                if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) cycle
+                target_di = primal%decl_index(fad_base_name(target))
+                if (target_di /= owner_di) cycle
+                if (found) return
+                if (primal%stmts(i)%allocation_source <= 0 .or. &
+                    primal%stmts(i)%allocation_mold > 0) return
+                source_di = 0
+                if (primal%stmts(i)%allocation_source > 0) then
+                    if (primal%exprs(primal%stmts(i)%allocation_source)%kind == FAD_VAR) then
+                        source_di = primal%decl_index(fad_base_name( &
+                            primal%exprs(primal%stmts(i)%allocation_source)%text))
+                        if (source_di > 0) then
+                            if (primal%decls(source_di)%is_polymorphic) source_di = 0
+                        end if
+                    end if
+                end if
+                if (source_di <= 0) return
+                found = .true.
+            else if (primal%stmts(i)%kind == FAD_MOVE_ALLOC) then
+                if (.not. allocated(primal%stmts(i)%call_args)) cycle
+                if (size(primal%stmts(i)%call_args) >= 1) then
+                    if (fad_base_name(emit_expr(primal, &
+                        primal%stmts(i)%call_args(1))) == &
+                        primal%decls(owner_di)%name) return
+                end if
+                if (size(primal%stmts(i)%call_args) >= 2) then
+                    if (fad_base_name(emit_expr(primal, &
+                        primal%stmts(i)%call_args(2))) == &
+                        primal%decls(owner_di)%name) return
+                end if
+            end if
+        end do
+        supported = found
+    end function has_fixed_source_owner
 
     logical function complex_reverse_path(primal, dependent, active) result(yes)
         !! Reverse adjoints are currently real-only. Refuse a complex path
@@ -1486,12 +1577,15 @@ contains
         type(fad_decl_t) :: d
         type(fad_stmt_t) :: s
         character(len=:), allocatable :: owner
-        integer :: di, i, ignored
+        integer :: di, i, ignored, source_di
         logical :: indexed_owner
 
         status%ok = .true.
         owner = fad_base_name(emit_expr(primal, ps%allocation_args(1)))
         record%owner = trim(owner)
+        if (ps%allocation_source > 0) then
+            record%source = trim(emit_expr(primal, ps%allocation_source))
+        end if
         di = primal%decl_index(trim(owner))
         if (di <= 0) then
             status%ok = .false.
@@ -1542,6 +1636,18 @@ contains
         d%is_result = .false.
         d%is_optional = .false.
         d%is_value = .false.
+        if (d%is_polymorphic .and. ps%allocation_source > 0) then
+            source_di = 0
+            if (primal%exprs(ps%allocation_source)%kind == FAD_VAR) then
+                source_di = primal%decl_index(fad_base_name( &
+                    primal%exprs(ps%allocation_source)%text))
+            end if
+            if (source_di > 0) then
+                d%type_name = primal%decls(source_di)%type_name
+                d%is_polymorphic = .false.
+                d%is_unlimited_polymorphic = .false.
+            end if
+        end if
         if (adjoint%decl_index(d%name) == 0) then
             ignored = adjoint%add_decl(d)
         end if
@@ -1550,14 +1656,27 @@ contains
         s%kind = FAD_ALLOCATE
         allocate (s%allocation_args(1))
         s%allocation_args(1) = adjoint%add_expr(expr_var(d%name))
-        s%allocation_mold = adjoint%add_expr(expr_var(trim(owner)))
+        if (d%is_polymorphic) then
+            s%allocation_mold = adjoint%add_expr(expr_var(trim(owner)))
+        else if (ps%allocation_source > 0) then
+            s%allocation_source = copy_renamed(primal, adjoint, &
+                ps%allocation_source, ssa)
+        else
+            s%allocation_mold = adjoint%add_expr(expr_var(trim(owner)))
+        end if
         ignored = adjoint%add_stmt(s)
 
-        call reset_reverse_statement(s)
-        s%kind = FAD_ASSIGN
-        s%target = d%name
-        s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
-        ignored = adjoint%add_stmt(s)
+        ! A polymorphic shadow cannot be assigned a scalar zero.  Its fixed
+        ! SOURCE= dynamic type is retained by MOLD=owner; the active concrete
+        ! component is initialized by zero_component_adjoints below.
+        if (.not. d%is_polymorphic .and. &
+            index(trim(d%type_name), "type(") /= 1) then
+            call reset_reverse_statement(s)
+            s%kind = FAD_ASSIGN
+            s%target = d%name
+            s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
+            ignored = adjoint%add_stmt(s)
+        end if
     end subroutine emit_allocation_forward
 
     subroutine emit_move_alloc_forward(primal, adjoint, ssa, ps, active, &
@@ -1665,6 +1784,33 @@ contains
             ignored = adjoint%add_stmt(s)
         end do
     end subroutine append_allocation_cleanup
+
+    subroutine emit_source_component_adjoint_for_target(primal, adjoint, &
+            lhs, suffix, allocations, n_allocations)
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        character(len=*), intent(in) :: lhs, suffix
+        type(allocation_record_t), intent(in) :: allocations(:)
+        integer, intent(in) :: n_allocations
+        type(fad_stmt_t) :: s
+        character(len=:), allocatable :: source, payload, target
+        integer :: i, percent, ignored
+
+        percent = index(trim(lhs), "%")
+        if (percent <= 0) return
+        do i = 1, n_allocations
+            if (.not. allocated(allocations(i)%source)) cycle
+            source = trim(allocations(i)%source)
+            if (index(trim(lhs), source//"%") /= 1) cycle
+            payload = trim(lhs(percent:))
+            target = trim(allocations(i)%owner)//trim(suffix)//payload
+            s%kind = FAD_ASSIGN
+            s%target = fad_suffix_name(trim(lhs), suffix)
+            s%value = adjoint%add_expr(expr_var(target))
+            ignored = adjoint%add_stmt(s)
+            return
+        end do
+    end subroutine emit_source_component_adjoint_for_target
 
     subroutine reset_reverse_statement(s)
         type(fad_stmt_t), intent(out) :: s
@@ -2624,6 +2770,7 @@ contains
         zero = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
         do i = 1, n_rec
             if (.not. adjoint_is_live(primal, ssa, lhs_names(i), active)) cycle
+            if (index(trim(lhs_names(i)), "%") > 0) cycle
             ! An element write is a storage scatter, not an SSA scalar.  The
             ! forward sweep deliberately keeps its target as `x(1)` (rather
             ! than inventing an SSA name), so declaring `x(1)_b` here would
@@ -2731,6 +2878,8 @@ contains
                     cycle
                 end if
                 if (is_element(i)) then
+                    call emit_source_component_adjoint_for_target(primal, adjoint, &
+                        lhs_names(i), suffix, allocations, n_allocations)
                     ! The adjoint of `point(1) = e` is the same element of the
                     ! array's adjoint, propagated into `e` and then cleared:
                     ! the store killed whatever was there before it.
@@ -2941,7 +3090,7 @@ contains
         character(len=256) :: paths(256)
         character(len=:), allocatable :: path, base
         type(fad_stmt_t) :: s
-        integer :: i, j, n, di, ignored
+        integer :: i, j, n, di, ignored, suffix_pos, percent_pos
         logical :: seen
 
         paths = ""
@@ -2988,8 +3137,39 @@ contains
             paths(n) = path
         end do
         do i = 1, n
+            base = trim(paths(i))
+            suffix_pos = index(base, trim(suffix))
+            if (suffix_pos > 0) base = base(:suffix_pos - 1)//base(suffix_pos + &
+                len_trim(suffix):)
+            base = fad_base_name(base)
+            di = primal%decl_index(base)
+            if (di > 0 .and. adjoint%decl_index(trim(base)//trim(suffix)) == 0) then
+                block
+                    type(fad_decl_t) :: d
+                    integer :: dignored
+                    d = primal%decls(di)
+                    d%name = trim(base)//trim(suffix)
+                    d%intent = FAD_INTENT_NONE
+                    d%is_result = .false.
+                    d%is_optional = .false.
+                    d%is_value = .false.
+                    dignored = adjoint%add_decl(d)
+                end block
+            end if
+            path = trim(paths(i))
+            percent_pos = index(path, "%")
+            if (percent_pos > 0) then
+                suffix_pos = index(path(percent_pos:), trim(suffix))
+                if (suffix_pos > 0) then
+                    suffix_pos = percent_pos + suffix_pos - 1
+                    path = path(:suffix_pos - 1)//path(suffix_pos + &
+                        len_trim(suffix):)
+                    path = path(:percent_pos - 1)//trim(suffix)// &
+                        path(percent_pos:)
+                end if
+            end if
             s%kind = FAD_ASSIGN
-            s%target = trim(paths(i))
+            s%target = trim(path)
             s%value = zero
             ignored = adjoint%add_stmt(s)
         end do

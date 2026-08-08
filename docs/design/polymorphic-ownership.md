@@ -16,11 +16,16 @@ exactly once with `allocate(owner, source=child)`, where `child` is a concrete,
 declared `type(child_t)` object. The existing allocation IR carries the source
 expression, and activity lowering emits the paired
 `allocate(owner_d, source=child_d)` before the copied `select type` path. The
-independent oracle covers both declared polymorphic forms, hand values, and a
-central finite difference.
+`allocate(owner_d, source=child_d)` before the copied `select type` path. The
+bounded reverse case narrows this to scalar `class(base_t)` ownership:
+lowering materializes a concrete source-typed owner shadow, transposes the one
+value-copy component into the concrete source shadow, and then performs the
+matching cleanup. The independent oracle covers both forward declared
+polymorphic forms, plus the reverse hand values, central finite differences, and
+JVP/VJP adjoint identity for `class(base_t)`.
 
 An active component of a polymorphic allocatable outside that fixed-source
-shape is a named forward refusal. FortFront's `query_storage` facts (`is_polymorphic`,
+shape remains a named forward and reverse refusal. FortFront's `query_storage` facts (`is_polymorphic`,
 `is_unlimited_polymorphic`, and allocation classification) are copied into the
 FortAD declaration IR. After activity analysis, FortAD refuses only an active
 polymorphic allocatable and reports its declared `class(T)` or `class(*)` form
@@ -37,11 +42,14 @@ unallocated, select a different child, or fail to expose the active component
 inside the guard. The refusal therefore protects both derivative correctness
 and allocation safety.
 
-This slice does not alter reverse allocation handling. It also does not weaken
-the existing refusals for global mutable state, pointer/target aliases,
-implicit reallocation, or allocatable components.
+The bounded reverse slice deliberately refuses factories and polymorphic
+sources, repeated or path-dependent acquisition, aliases, `move_alloc`, whole
+object assignment, finalization replay, and `class(*)` sources. It also does not
+weaken the existing refusals for global mutable state, pointer/target aliases,
+implicit reallocation, or allocatable components. Negative cases verify that
+these boundaries return no derivative output.
 
 The next implementation boundary is a paired dynamic-type/ownership record:
 it must carry type identity through polymorphic factories, repeated
 `allocate(source=...)`, `select type`, assignment, destruction, and the active
-component shadow. Reverse allocation handling remains unchanged.
+component shadow beyond this one fixed concrete source copy.
