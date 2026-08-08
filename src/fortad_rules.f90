@@ -68,6 +68,14 @@ contains
                 t1 = fad_mul(p, a, da)
                 t2 = fad_real(p, "2.0")
                 out = fad_mul(p, t2, t1)
+            else if (scaled_square(p, a, b, da, db, t1)) then
+                ! (c*x)*x. The inner product rule has already proved that its
+                ! tangent is c*dx, so the two product-rule terms are again
+                ! identical. This catches the common left-associated source
+                ! spelling `c*x*x` without reassociating an unproved tree.
+                t2 = fad_mul(p, t1, b)
+                t2 = fad_mul(p, t2, db)
+                out = fad_mul(p, fad_real(p, "2.0"), t2)
             else
                 t1 = fad_mul(p, da, b)
                 t2 = fad_mul(p, a, db)
@@ -91,6 +99,60 @@ contains
             out = 0
         end select
     end function jvp_binop
+
+    logical function scaled_square(p, a, b, da, db, scale) result(found)
+        !! Prove that ``a`` is ``scale*b`` and its tangent is ``scale*db``.
+        !!
+        !! Only a literal scale is accepted.  The exact expression identities
+        !! are checked in the shared arena, so this optimisation cannot turn a
+        !! nonlinear or active coefficient into a square.  ``scale`` is an
+        !! output because the caller reuses the already-lowered coefficient.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: a, b, da, db
+        integer, intent(out) :: scale
+        integer :: left, right
+
+        found = .false.
+        scale = 0
+        if (a <= 0 .or. a > p%n_exprs) return
+        if (b <= 0 .or. b > p%n_exprs) return
+        if (da <= 0 .or. da > p%n_exprs) return
+        if (db <= 0 .or. db > p%n_exprs) return
+        if (p%exprs(a)%kind /= FAD_BINOP) return
+        if (trim(p%exprs(a)%text) /= "*") return
+        if (p%exprs(a)%args(1) == b) then
+            scale = p%exprs(a)%args(2)
+        else if (p%exprs(a)%args(2) == b) then
+            scale = p%exprs(a)%args(1)
+        else
+            scale = 0
+            return
+        end if
+        if (scale <= 0 .or. scale > p%n_exprs) then
+            scale = 0
+            return
+        end if
+        if (p%exprs(scale)%kind /= FAD_CONST) then
+            scale = 0
+            return
+        end if
+        if (p%exprs(da)%kind /= FAD_BINOP) then
+            scale = 0
+            return
+        end if
+        if (trim(p%exprs(da)%text) /= "*") then
+            scale = 0
+            return
+        end if
+        left = p%exprs(da)%args(1)
+        right = p%exprs(da)%args(2)
+        if (.not. ((left == scale .and. right == db) .or. &
+                   (left == db .and. right == scale))) then
+            scale = 0
+            return
+        end if
+        found = .true.
+    end function scaled_square
 
     integer function jvp_power(p, a, b, da, db) result(out)
         !! Tangent of `a**b`. A constant exponent is the common case and gets
