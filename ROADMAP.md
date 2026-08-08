@@ -184,7 +184,7 @@ candidate blocked by its exact AMPI/MPI dependency chain, not invalid upstream.
 The pinned checkout contains `ampi/ampif.h`, but that header includes missing
 `mpif.h`. Strict and legacy compiler diagnostics agree. Neither Tapenade nor
 FortAD is invoked, and the case is classified as
-`blocked-missing-dependency` in fortad-bench commit `7c6f2da`.
+`blocked-missing-dependency` in the current fortad-bench `main`.
 
 ## Hard execution rules
 
