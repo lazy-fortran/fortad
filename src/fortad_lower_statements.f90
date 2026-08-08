@@ -20,6 +20,7 @@ module fortad_lower_statements
         procedure_callback_flow_query_t, query_procedure_callback_flow, &
         get_source_line, TREAL
     use ast_nodes_control, only: associate_node
+    use ast_nodes_bounds, only: array_slice_node
     use frontend_compiler_control_queries, only: control_statement_query_t, &
         query_control_statement, CONTROL_SELECT_RANK, select_rank_arm_query_t
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
@@ -2835,6 +2836,306 @@ contains
             "tracked"
     end subroutine refuse_vector_subscript
 
+    subroutine validate_indexed_receiver_node(arena, idx, proc, receiver_name, &
+            receiver_decl, receiver_index, status)
+        !! Validate the one supported array receiver designator: a direct
+        !! fixed-shape array name with exactly one integer literal subscript.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(in) :: proc
+        character(len=:), allocatable, intent(out) :: receiver_name
+        integer, intent(out) :: receiver_decl, receiver_index
+        type(lower_status_t), intent(inout) :: status
+        integer :: index_node
+
+        receiver_name = ""
+        receiver_decl = 0
+        receiver_index = 0
+        status%ok = .true.
+        if (idx <= 0) then
+            status%ok = .false.
+            status%message = "the receiver designator is missing"
+            return
+        end if
+        if (idx > arena%size) then
+            status%ok = .false.
+            status%message = "the receiver designator is missing"
+            return
+        end if
+        if (.not. arena%has_node_at(idx)) then
+            status%ok = .false.
+            status%message = "the receiver designator is missing"
+            return
+        end if
+        select type (receiver => arena%entries(idx)%node)
+            type is (call_or_subscript_node)
+            if (receiver%base_expr_index /= 0) then
+                status%ok = .false.
+                status%message = "receiver aliases and computed bases are unsupported"
+                return
+            end if
+            if (.not. allocated(receiver%name)) then
+                status%ok = .false.
+                status%message = "the receiver name is unresolved"
+                return
+            end if
+            receiver_name = trim(receiver%name)
+            if (len_trim(receiver_name) == 0) then
+                status%ok = .false.
+                status%message = "the receiver name is unresolved"
+                return
+            end if
+            if (.not. allocated(receiver%arg_indices)) then
+                status%ok = .false.
+                status%message = "array receivers require one static index"
+                return
+            end if
+            if (size(receiver%arg_indices) /= 1) then
+                status%ok = .false.
+                status%message = "only one-dimensional array receivers are supported"
+                return
+            end if
+            index_node = receiver%arg_indices(1)
+            call parse_static_integer_node(arena, index_node, receiver_index, status)
+            if (.not. status%ok) return
+            receiver_decl = proc%decl_index(receiver_name)
+            call validate_indexed_receiver_decl(proc, receiver_decl, &
+                receiver_index, status)
+        class default
+            status%ok = .false.
+            status%message = "only a direct array receiver element is supported"
+        end select
+    end subroutine validate_indexed_receiver_node
+
+    subroutine validate_indexed_receiver_decl(proc, receiver_decl, receiver_index, &
+            status)
+        type(fad_proc_t), intent(in) :: proc
+        integer, intent(in) :: receiver_decl, receiver_index
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .true.
+        if (receiver_decl <= 0) then
+            status%ok = .false.
+            status%message = "the receiver is not a declared object"
+            return
+        end if
+        if (.not. proc%decls(receiver_decl)%is_array) then
+            status%ok = .false.
+            status%message = "the indexed receiver is not an array"
+            return
+        end if
+        if (proc%decls(receiver_decl)%is_allocatable) then
+            status%ok = .false.
+            status%message = "allocatable receivers are unsupported"
+            return
+        end if
+        if (proc%decls(receiver_decl)%is_polymorphic) then
+            status%ok = .false.
+            status%message = "polymorphic receivers are unsupported"
+            return
+        end if
+        if (.not. allocated(proc%decls(receiver_decl)%type_name)) then
+            status%ok = .false.
+            status%message = "the receiver has no statically declared type"
+            return
+        end if
+        if (is_polymorphic_type(proc%decls(receiver_decl)%type_name)) then
+            status%ok = .false.
+            status%message = "polymorphic receivers are unsupported"
+            return
+        end if
+        if (.not. allocated(proc%decls(receiver_decl)%dims)) then
+            status%ok = .false.
+            status%message = "array receiver shape is not fixed"
+            return
+        end if
+        if (.not. fixed_shape_dims(proc%decls(receiver_decl)%dims)) then
+            status%ok = .false.
+            status%message = "array receiver shape is not fixed"
+            return
+        end if
+        if (receiver_index == 0) then
+            status%ok = .false.
+            status%message = "array receiver index is invalid"
+            return
+        end if
+    end subroutine validate_indexed_receiver_decl
+
+    subroutine parse_static_integer_node(arena, idx, value, status)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        integer, intent(out) :: value
+        type(lower_status_t), intent(inout) :: status
+        integer :: ios
+
+        value = 0
+        status%ok = .true.
+        if (idx <= 0) then
+            status%ok = .false.
+            status%message = "dynamic receiver indices are unsupported"
+            return
+        end if
+        if (idx > arena%size) then
+            status%ok = .false.
+            status%message = "dynamic receiver indices are unsupported"
+            return
+        end if
+        if (.not. arena%has_node_at(idx)) then
+            status%ok = .false.
+            status%message = "dynamic receiver indices are unsupported"
+            return
+        end if
+        select type (literal => arena%entries(idx)%node)
+            type is (literal_node)
+            if (.not. allocated(literal%value)) then
+                status%ok = .false.
+                status%message = "dynamic receiver indices are unsupported"
+                return
+            end if
+            if (.not. integer_literal_text(literal%value)) then
+                status%ok = .false.
+                status%message = "dynamic receiver indices are unsupported"
+                return
+            end if
+            read (literal%value, *, iostat=ios) value
+            if (ios /= 0) then
+                status%ok = .false.
+                status%message = "dynamic receiver indices are unsupported"
+            end if
+        class default
+            status%ok = .false.
+            status%message = "dynamic receiver indices are unsupported"
+        end select
+    end subroutine parse_static_integer_node
+
+    subroutine parse_subroutine_receiver(designator, proc, receiver_name, &
+            indexed_receiver, receiver_index, status)
+        character(len=*), intent(in) :: designator
+        type(fad_proc_t), intent(in) :: proc
+        character(len=:), allocatable, intent(out) :: receiver_name
+        logical, intent(out) :: indexed_receiver
+        integer, intent(out) :: receiver_index
+        type(lower_status_t), intent(inout) :: status
+        character(len=:), allocatable :: index_text
+        integer :: open, close, receiver_decl, ios
+
+        receiver_name = ""
+        indexed_receiver = .false.
+        receiver_index = 0
+        status%ok = .true.
+        open = index(trim(designator), "(")
+        close = index(trim(designator), ")", back=.true.)
+        if (open == 0) then
+            if (close > 0) then
+                status%ok = .false.
+                status%message = "the receiver designator is unresolved"
+                return
+            end if
+            receiver_name = trim(designator)
+            if (len_trim(receiver_name) == 0) then
+                status%ok = .false.
+                status%message = "the receiver designator is unresolved"
+            end if
+            return
+        end if
+        if (open <= 1 .or. close /= len_trim(designator) .or. &
+            close <= open + 1) then
+            status%ok = .false.
+            status%message = "array sections and computed receivers are unsupported"
+            return
+        end if
+        index_text = trim(designator(open + 1:close - 1))
+        if (index(index_text, ":") > 0 .or. index(index_text, ",") > 0) then
+            status%ok = .false.
+            status%message = "array sections are unsupported"
+            return
+        end if
+        if (.not. integer_literal_text(index_text)) then
+            status%ok = .false.
+            status%message = "dynamic receiver indices are unsupported"
+            return
+        end if
+        read (index_text, *, iostat=ios) receiver_index
+        if (ios /= 0) then
+            status%ok = .false.
+            status%message = "dynamic receiver indices are unsupported"
+            return
+        end if
+        receiver_name = trim(designator(:open - 1))
+        if (index(receiver_name, "(") > 0 .or. index(receiver_name, ")") > 0) then
+            status%ok = .false.
+            status%message = "aliases and computed receivers are unsupported"
+            return
+        end if
+        if (len_trim(receiver_name) == 0) then
+            status%ok = .false.
+            status%message = "the receiver designator is unresolved"
+            return
+        end if
+        indexed_receiver = .true.
+        receiver_decl = proc%decl_index(receiver_name)
+        call validate_indexed_receiver_decl(proc, receiver_decl, &
+            receiver_index, status)
+    end subroutine parse_subroutine_receiver
+
+    integer function static_array_receiver_expr(proc, receiver_name, index_value) &
+            result(out)
+        type(fad_proc_t), intent(inout) :: proc
+        character(len=*), intent(in) :: receiver_name
+        integer, intent(in) :: index_value
+        type(fad_expr_t) :: expression
+
+        expression%kind = FAD_INDEX
+        expression%text = trim(receiver_name)
+        allocate (expression%args(1))
+        expression%args(1) = proc%add_expr(expr_const(itoa(index_value)))
+        out = proc%add_expr(expression)
+    end function static_array_receiver_expr
+
+    logical function fixed_shape_dims(dims) result(fixed)
+        character(len=*), intent(in) :: dims
+        character(len=:), allocatable :: text, lower, upper
+        integer :: colon
+
+        fixed = .false.
+        text = trim(dims)
+        if (len_trim(text) == 0) return
+        colon = index(text, ":")
+        if (colon == 0) then
+            fixed = integer_literal_text(text)
+            return
+        end if
+        if (index(text, ":", back=.true.) /= colon) return
+        if (colon <= 1) return
+        if (colon >= len(text)) return
+        lower = trim(text(:colon - 1))
+        upper = trim(text(colon + 1:))
+        if (len_trim(lower) == 0) return
+        if (len_trim(upper) == 0) return
+        if (.not. integer_literal_text(lower)) return
+        if (.not. integer_literal_text(upper)) return
+        fixed = .true.
+    end function fixed_shape_dims
+
+    logical function integer_literal_text(text) result(is_integer)
+        character(len=*), intent(in) :: text
+        integer :: i, first
+        character :: digit
+        character(len=:), allocatable :: value
+
+        value = trim(text)
+        is_integer = .false.
+        if (len_trim(value) == 0) return
+        first = 1
+        if (value(1:1) == "+" .or. value(1:1) == "-") first = 2
+        if (first > len(value)) return
+        do i = first, len(value)
+            digit = value(i:i)
+            if (digit < "0" .or. digit > "9") return
+        end do
+        is_integer = .true.
+    end function integer_literal_text
+
     recursive integer function lower_type_bound_call(arena, call_index, node, proc, status) &
             result(out)
         !! Lower one concrete same-file type-bound function call.
@@ -2861,11 +3162,12 @@ contains
         character(len=:), allocatable :: receiver_name
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
-        integer :: receiver, receiver_decl, i, j
+        integer :: receiver, receiver_decl, receiver_index, i, j
         integer :: type_matches, function_matches
-        logical :: found_type, found_function
+        logical :: found_type, found_function, indexed_receiver
         logical :: named_pass
         type(type_bound_call_query_t) :: dispatch
+        type(storage_query_t) :: receiver_storage
 
         out = 0
         access = query_component_access(arena, node%base_expr_index)
@@ -2874,26 +3176,36 @@ contains
                 "the receiver is not a component access")
             return
         end if
-        if (trim(arena%entries(access%base_node_index)%node_type) /= "identifier") then
-            call refuse_type_bound(status, node%name, &
-                "only a simple concrete receiver is supported")
-            return
-        end if
+        indexed_receiver = .false.
+        receiver_index = 0
         select type (receiver_node => arena%entries(access%base_node_index)%node)
             type is (identifier_node)
             receiver_name = trim(receiver_node%name)
+            receiver_decl = proc%decl_index(receiver_name)
+            type is (call_or_subscript_node)
+            call validate_indexed_receiver_node(arena, access%base_node_index, &
+                proc, receiver_name, receiver_decl, receiver_index, status)
+            if (.not. status%ok) return
+            indexed_receiver = .true.
         class default
-            call refuse_type_bound(status, node%name, &
-                "only a simple concrete receiver is supported")
+            if (trim(arena%entries(access%base_node_index)%node_type) == &
+                "array_slice" .or. &
+                trim(arena%entries(access%base_node_index)%node_type) == &
+                "range_subscript") then
+                call refuse_type_bound(status, node%name, &
+                    "array sections are unsupported")
+            else
+                call refuse_type_bound(status, node%name, &
+                    "only a simple concrete receiver is supported")
+            end if
             return
         end select
-        receiver_decl = proc%decl_index(receiver_name)
         if (receiver_decl <= 0) then
             call refuse_type_bound(status, node%name, &
                 "the receiver is not a declared object")
             return
         end if
-        if (proc%decls(receiver_decl)%is_array) then
+        if (proc%decls(receiver_decl)%is_array .and. .not. indexed_receiver) then
             call refuse_type_bound(status, node%name, &
                 "array receivers are unsupported")
             return
@@ -2903,7 +3215,33 @@ contains
                 "allocatable receivers are unsupported")
             return
         end if
-        call static_object_type(arena, access%base_node_index, proc, object_type)
+        if (indexed_receiver) then
+            if (allocated(proc%decls(receiver_decl)%type_name)) then
+                object_type = proc%decls(receiver_decl)%type_name
+            end if
+            dispatch = query_type_bound_call(arena, call_index)
+            if (dispatch%receiver_path%found) then
+                if (dispatch%receiver_path%is_polymorphic) then
+                    call refuse_type_bound(status, node%name, &
+                        "polymorphic receivers are unsupported")
+                    return
+                end if
+            end if
+            if (dispatch%receiver_declaration_index > 0) then
+                receiver_storage = query_storage(arena, &
+                    dispatch%receiver_declaration_index)
+                if (receiver_storage%found) then
+                    if (receiver_storage%is_polymorphic .or. &
+                        receiver_storage%is_unlimited_polymorphic) then
+                        call refuse_type_bound(status, node%name, &
+                            "polymorphic receivers are unsupported")
+                        return
+                    end if
+                end if
+            end if
+        else
+            call static_object_type(arena, access%base_node_index, proc, object_type)
+        end if
         if (.not. allocated(object_type)) then
             call refuse_type_bound(status, node%name, &
                 "the receiver has no statically declared type")
@@ -3473,12 +3811,12 @@ contains
         type(program_unit_query_t) :: unit
         type(program_unit_query_t) :: candidate_unit
         character(len=:), allocatable :: object_type, type_name, method, impl
-        character(len=:), allocatable :: receiver_name
+        character(len=:), allocatable :: receiver_name, receiver_designator
         integer, allocatable :: actual_indices(:), args(:)
         character(len=64), allocatable :: arg_names(:)
-        integer :: receiver, receiver_decl, i, matches, separator
+        integer :: receiver, receiver_decl, receiver_index, i, matches, separator
         integer :: type_matches
-        logical :: named_pass, found_subroutine
+        logical :: named_pass, found_subroutine, indexed_receiver
         type(type_bound_call_query_t) :: dispatch
 
         select type (node => arena%entries(idx)%node)
@@ -3489,7 +3827,7 @@ contains
                     "the receiver or binding is unresolved")
                 return
             end if
-            receiver_name = trim(node%name(:separator - 1))
+            receiver_designator = trim(node%name(:separator - 1))
             method = trim(node%name(separator + 1:))
             if (allocated(node%arg_indices)) then
                 actual_indices = node%arg_indices
@@ -3501,13 +3839,19 @@ contains
                 "the call node is not a subroutine")
             return
         end select
+        call parse_subroutine_receiver(receiver_designator, proc, receiver_name, &
+            indexed_receiver, receiver_index, status)
+        if (.not. status%ok) then
+            call refuse_type_bound(status, method, trim(status%message))
+            return
+        end if
         receiver_decl = proc%decl_index(receiver_name)
         if (receiver_decl <= 0) then
             call refuse_type_bound(status, method, &
                 "the receiver is not a declared object")
             return
         end if
-        if (proc%decls(receiver_decl)%is_array) then
+        if (proc%decls(receiver_decl)%is_array .and. .not. indexed_receiver) then
             call refuse_type_bound(status, method, &
                 "array receivers are unsupported")
             return
@@ -3521,6 +3865,14 @@ contains
             call refuse_type_bound(status, method, &
                 "the receiver has no statically declared type")
             return
+        end if
+        if (indexed_receiver) then
+            call validate_indexed_receiver_decl(proc, receiver_decl, &
+                receiver_index, status)
+            if (.not. status%ok) then
+                call refuse_type_bound(status, method, trim(status%message))
+                return
+            end if
         end if
         object_type = proc%decls(receiver_decl)%type_name
         if (is_polymorphic_type(object_type)) then
@@ -3600,7 +3952,11 @@ contains
             return
         end if
 
-        receiver = proc%add_expr(expr_var(receiver_name))
+        if (indexed_receiver) then
+            receiver = static_array_receiver_expr(proc, receiver_name, receiver_index)
+        else
+            receiver = proc%add_expr(expr_var(receiver_name))
+        end if
         named_pass = hierarchy%pass_arg .and. allocated(hierarchy%pass_name)
         if (named_pass) named_pass = len_trim(hierarchy%pass_name) > 0
         if (hierarchy%pass_arg) then
@@ -3740,6 +4096,67 @@ contains
         end do
     end subroutine lower_named_pass_arguments
 
+    logical function indexed_receiver_has_binding(arena, idx, method, proc) &
+            result(found)
+        !! Route an indexed or section receiver to the type-bound boundary.
+        !! The normal component path is deliberately used for data components;
+        !! only a proven binding name is sent to type-bound lowering.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: method
+        type(fad_proc_t), intent(in) :: proc
+        type(array_slice_query_t) :: slice
+        character(len=:), allocatable :: receiver_name, type_name
+        integer :: receiver_decl, base_idx
+
+        found = .false.
+        receiver_name = ""
+        base_idx = 0
+        if (idx <= 0) return
+        if (idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        select type (receiver => arena%entries(idx)%node)
+            type is (call_or_subscript_node)
+            if (receiver%base_expr_index /= 0) return
+            if (.not. allocated(receiver%name)) return
+            receiver_name = trim(receiver%name)
+            base_idx = idx
+            type is (array_slice_node)
+            slice = query_array_slice(arena, idx)
+            if (.not. slice%found) return
+            base_idx = slice%base_node_index
+            if (base_idx <= 0) return
+            if (base_idx > arena%size) return
+            if (.not. arena%has_node_at(base_idx)) return
+            select type (base => arena%entries(base_idx)%node)
+                type is (identifier_node)
+                if (.not. allocated(base%name)) return
+                receiver_name = trim(base%name)
+            class default
+                return
+            end select
+        class default
+            return
+        end select
+        if (len_trim(receiver_name) == 0) return
+        receiver_decl = proc%decl_index(receiver_name)
+        if (receiver_decl <= 0) return
+        if (.not. proc%decls(receiver_decl)%is_array) return
+        if (.not. allocated(proc%decls(receiver_decl)%type_name)) return
+        if (proc%decls(receiver_decl)%is_polymorphic) then
+            found = .true.
+            return
+        end if
+        if (is_polymorphic_type(proc%decls(receiver_decl)%type_name)) then
+            found = .true.
+            return
+        end if
+        type_name = canonical_type_name(proc%decls(receiver_decl)%type_name)
+        if (.not. allocated(type_name)) return
+        if (len_trim(type_name) == 0) return
+        found = type_has_binding(arena, type_name, method)
+    end function indexed_receiver_has_binding
+
     logical function is_type_bound_reference(arena, base_idx, proc) result(found)
         !! Distinguish ``object%binding(args)`` from an array component
         !! ``object%values(i)`` before lowering either one.  A local binding is
@@ -3762,7 +4179,11 @@ contains
         if (access%base_node_index > arena%size) return
         if (.not. arena%has_node_at(access%base_node_index)) return
         if (trim(arena%entries(access%base_node_index)%node_type) /= &
-            "identifier") return
+            "identifier") then
+            found = indexed_receiver_has_binding(arena, &
+                access%base_node_index, access%component_name, proc)
+            return
+        end if
         call static_object_type(arena, access%base_node_index, proc, object_type)
         if (.not. allocated(object_type)) return
         type_name = canonical_type_name(object_type)

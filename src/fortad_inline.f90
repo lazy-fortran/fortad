@@ -22,8 +22,9 @@ module fortad_inline
         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_CALL_STMT, &
         FAD_IF, FAD_ELSE, FAD_END_IF, &
-        FAD_INTENT_NONE, expr_const, expr_var
+        FAD_INTENT_NONE, FAD_INTENT_IN, expr_const, expr_var
     use fortad_registry, only: registry_has, call_rule_has
+    use fortad_emit, only: emit_expr
     implicit none
     private
 
@@ -174,8 +175,9 @@ contains
         !!
         !! Each dummy is bound to the actual's *name*, not to an expression,
         !! so a dummy the callee writes to writes to the caller's variable -
-        !! which is what passing it meant. That only works when the actual is
-        !! a plain variable; anything else is refused rather than guessed at.
+        !! which is what passing it meant. A fixed array element is also safe
+        !! for a read-only dummy and remains an expression in the caller.
+        !! Writable dummies still require plain variables.
         type(fad_proc_t), intent(inout) :: target
         type(fad_proc_t), intent(in) :: callee
         integer, intent(in) :: at, tag
@@ -347,7 +349,8 @@ contains
         character(len=32) :: suffix
         integer, allocatable :: formal_actual(:)
         logical :: named
-        integer :: i, j, n_actual, n_formal, next_formal, formal
+        integer :: i, j, n_actual, n_formal, next_formal, formal, dummy_decl
+        logical :: indexed_read_only
 
         n_binds = 0
         n_actual = size(actuals)
@@ -422,16 +425,29 @@ contains
                     return
                 end if
                 if (require_plain) then
-                    if (target%exprs(actuals(formal_actual(i)))%kind /= FAD_VAR) then
+                    indexed_read_only = .false.
+                    if (target%exprs(actuals(formal_actual(i)))%kind == FAD_INDEX) then
+                        dummy_decl = callee%decl_index(callee%params(i))
+                        if (dummy_decl > 0) then
+                            if (callee%decls(dummy_decl)%intent == FAD_INTENT_IN) then
+                                indexed_read_only = .true.
+                            end if
+                        end if
+                    end if
+                    if (indexed_read_only) then
+                        binds(n_binds)%expr = actuals(formal_actual(i))
+                        binds(n_binds)%renamed = ""
+                    else if (target%exprs(actuals(formal_actual(i)))%kind /= FAD_VAR) then
                         status%ok = .false.
                         status%message = "inlining "//trim(callee%name)// &
                             " needs plain variables as arguments, because it may "// &
                             "write to them"
                         return
+                    else
+                        binds(n_binds)%expr = 0
+                        binds(n_binds)%renamed = &
+                            trim(target%exprs(actuals(formal_actual(i)))%text)
                     end if
-                    binds(n_binds)%expr = 0
-                    binds(n_binds)%renamed = &
-                        trim(target%exprs(actuals(formal_actual(i)))%text)
                 else
                     binds(n_binds)%expr = actuals(formal_actual(i))
                     binds(n_binds)%renamed = ""
@@ -815,7 +831,7 @@ contains
                                 e%text = trim(target%exprs(binds(k)%expr)%text)// &
                                     trim(callee%exprs(idx)%text(percent:))
                             else
-                                e%text = trim(binds(k)%renamed)// &
+                                e%text = trim(emit_expr(target, binds(k)%expr))// &
                                     trim(callee%exprs(idx)%text(percent:))
                             end if
                         else
