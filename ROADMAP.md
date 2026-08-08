@@ -77,8 +77,8 @@ slice at a time. The current upstream handoff exposes polymorphic allocation
 source facts, nested and array-element component paths, abstract-binding
 metadata, and bounded polymorphic allocation/source facts. FortAD now consumes
 that contract for a bounded active concrete `REAL` allocatable component:
-already-allocated scalar or rank-one element reads and writes work in JVP and
-VJP, while whole-component operations, lifetime changes, aliases, pointers,
+already-allocated scalar, rank-one, or rank-two element reads and writes work
+in JVP and VJP, while whole-component operations, lifetime changes, aliases, pointers,
 polymorphic paths, and unsupported ranks remain named refusals. The adjoint
 shadow is caller-owned and must already be allocated, so this slice does not
 pretend to solve general allocatable lifetime replay. Fixed-path `SELECT TYPE`,
@@ -128,13 +128,14 @@ FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
 candidate files: 61 runnable pure-Fortran cases, 142 deliberate refusals, 32
-invalid-upstream closures, 2 dependency-blocked cases, 1,269 queued
+invalid-upstream closures, 2 dependency-blocked cases, 1,265 queued
 candidates, and 508 non-Fortran or source-absent cases. Thus 237 of 1,432
 strict pure-Fortran candidates are classified (16.5%), while 1,195 remain in
-the pure-Fortran queue. Across the whole corpus, 745 of 2,014 candidates are
-accounted for (37.0%). The completed compiler-only triage covers all 1,269
-current queue rows and 3,439 source files (1,966 compiled files, 861 compiler
-diagnostics, 538 missing-dependency diagnostics, and 74 include fragments).
+the pure-Fortran queue. Across the whole corpus, 749 of 2,014 candidates are
+accounted for (37.2%). The completed compiler-only triage covers all 1,265
+current queue rows and 3,430 source files (1,957 compiled files, 1,399
+syntax-error files, 861 compiler-diagnostic files, 538 missing-dependency
+diagnostics, and 74 include fragments).
 Compiler triage is classification evidence. Source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
 committed. The latest runnable promotion is `nonRegressions/set05/v065`, a
@@ -261,17 +262,15 @@ the current integration gate is still open:
 
 The 2026-08-08 integration wave is recorded at these repository heads:
 
-- FortFront `2fb9166c0f3879d1c93323cb68cfa373103d480c`, including bounded
-  polymorphic allocation/source facts and the prior storage, ownership, and
-  dispatch contract.
-- FFC `4ac7337113d8a56a7afb5519d41fd5470a818253`, including rank-three
-  intrinsic allocatable-owner lowering and its independent compiler oracle.
-- FortAD `aa60b99633ed6ee845c121b57037df840f402935`, including the active
-  concrete allocatable-component JVP/VJP slice and independent finite-
-  difference/adjoint oracle, on top of rank-two contiguous sections.
-- fortad-bench `eba9bc83d5f57def88bd4340bb416dd16f2a1fa3`, including four
-  exact-source queue-shard closures selected by modern-feature score and
-  provenance repinned to the FortAD docs head.
+- FortFront `15199205`, including abstract/deferred hierarchy implementation
+  nodes, PASS signatures, and dispatch-target identity facts.
+- FFC `d942549`, including rank-four intrinsic allocatable-owner lowering and
+  its independent gfortran compiler/runtime oracle.
+- FortAD `9cbfb0e`, including the active concrete rank-two allocatable-
+  component JVP/VJP slice and independent finite-difference/adjoint oracle.
+- fortad-bench `f35334c`, including the next four exact-source modern-feature
+  queue-shard closures and regenerated queue, batch, compiler, and ledger
+  artifacts.
 
 The next feature order has four steps. First, complete FortFront facts for
 abstract/deferred hierarchy dispatch, generic and callback target flow, and
@@ -282,7 +281,7 @@ Fourth, expand reverse checkpointing and numerical/application rules. Active
 global mutable state, uncontrolled aliases, active I/O, and opaque calls
 without rules remain product refusals rather than compatibility work.
 
-FortFront source `main` is currently `2fb9166c`. This handoff includes the
+FortFront source `main` is currently `15199205`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -300,12 +299,14 @@ The focused `test_ownership_dispatch_metadata`,
 `test_call_argument_mapping`, and `test_binding_hierarchy_query` API oracles
 pass. A clean FortFront worktree passes its broader GNU gate at 1,579 static
 modules, 381 build targets, and 483 test executables. The focused component,
-storage, and procedure-call oracles pass. The full parallel gate has a
+storage, procedure-call, and three-level abstract-hierarchy oracles pass. The
+full parallel gate has a
 known shared-artifact failure in `test_module_distribution`. That test passes
 when rerun standalone. The Windows and downstream multi-compiler gates remain
 open.
 
-The compiler-path handoff is ffc docs `6dbf9b6` over code `74c9d88`, which
+The compiler-path handoff is documented in ffc docs `6dbf9b6` and uses code
+`74c9d88`. It
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, GOTO, FORALL, WHERE,
 SELECT, complex, intrinsic-extra, and reduction-expression extractions,
@@ -328,8 +329,10 @@ counted loop, with an independent gfortran differential oracle. The newer
 rank-two intrinsic allocatable-component slice also covers runtime extents,
 `ALLOCATED`, `SIZE`, element reads/writes, and deallocation, while whole
 component assignment, passing as an actual, aliases, unsupported kinds, and
-rank greater than two remain explicit refusals. Rank greater than two remains
-open.
+rank greater than two remain explicit refusals for components. FFC `d942549`
+now covers rank-four intrinsic integer, real, and logical allocatable owners.
+Derived, polymorphic, pointer/alias, unsupported-kind, and rank-five owner
+paths remain explicit boundaries.
 Clean
 validation is `fo clean && fo build` 447/447 on the prior structured-control
 handoff. The FORALL/WHERE/SELECT slices add independent compiler and runtime
@@ -343,9 +346,9 @@ oracles pass with independent gfortran differentials. PR #699 merged as
 `fc3ea15`. Complex, intrinsic-extra, and reduction-expression are
 `76c5ae9`/`f3beaa8`/`338fea4`. The production ffc inventory is now 51 tracked
 `.inc` files / 67,182 lines. The current local gate builds 456 targets, and
-the focused rank-two allocatable-component oracle passes. Aggregate CI still
+the focused rank-two and rank-four allocatable-owner oracles pass. Aggregate CI still
 retains known formatter/full-suite and corpus failures. The latest full GNU
-`fo` run reports 25 baseline compiler and
+`fo` run reports 26 baseline compiler and
 conformance failures. The same failures reproduce before the runtime-override
 slice, so it remains a separate upstream repair lane. This is recorded for
 cross-repository provenance. FortAD does not consume ffc as a build
@@ -368,13 +371,14 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `27d6ad0c`, which includes the
+The current FortFront `main` handoff is `15199205`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths, plus formal-ordered actual-to-formal call
       mappings for positional, keyword, and omitted optional arguments, exact
       generic candidates, the bounded type-binding hierarchy query, the
-      type-bound call dispatch query, dispatch-target signature facts, the
+      type-bound call dispatch query, dispatch-target signature facts,
+      effective abstract/deferred implementation nodes and PASS signatures, the
       procedure-pointer target query, and the procedure-pointer call-target
       query. The focused API oracles pass on
       the
@@ -392,7 +396,7 @@ The current FortFront `main` handoff is `27d6ad0c`, which includes the
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo` builds 408 targets, checks 407 derivative
-      targets, and runs 56 tests.
+      targets, and runs 59 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
       hazards. 108 `-Warray-temporaries` diagnostics still keep
       `fo lint` nonzero. The other four lanes still rely on a run that
@@ -409,8 +413,8 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `69f31724`. Its GNU behavioral
-gate is green (408 build targets, 407 derivative targets, 58/58 tests).
+The implementation snapshot is FortAD code at `9cbfb0e`. Its GNU behavioral
+gate is green (408 build targets, 407 derivative targets, 59/59 tests).
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
@@ -426,11 +430,11 @@ scalar procedure-pointer call (`b7ec636`), and the `set02/lh193` plus
 additions are FortAD's bounded reverse `MOVE_ALLOC` lifetime slice (code
 `aa9453b`, implementation commit `41cb5ba`), rank-two automatic reallocation
 (`5f879a6`), FortFront's ownership-event, component-storage, and bounded
-polymorphic-allocation facts (main `2fb9166c`), FFC's rank-two and rank-three
-runtime-descriptor/allocatable-owner slices (main `4ac7337`), FortAD's
-rank-two contiguous-section lowering and active concrete allocatable-component
-JVP/VJP (main `69f31724`), and four measured queue-shard boundaries in
-fortad-bench `main` (`4b72a92`). These are narrow support claims. General
+polymorphic-allocation facts (main `15199205`), FFC's rank-two through rank-four
+runtime-descriptor/allocatable-owner slices (main `d942549`), FortAD's
+rank-two contiguous-section lowering and active concrete rank-two allocatable-
+component JVP/VJP (main `9cbfb0e`), and eight measured queue-shard boundaries in
+fortad-bench `main` (`f35334c`). These are narrow support claims. General
 callback flow, repeated or rank-greater-than-two automatic reallocation,
 general allocatable-component lifetime, polymorphic ownership replay, and
 runtime dispatch whose target set is unresolved remain open.
@@ -532,7 +536,7 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `27d6ad0c` (the ownership/storage and dispatch
+`fo` must consume FortFront `15199205` (the ownership/storage and dispatch
 metadata handoff plus the merged procedure-name, #2980, public array-query,
 nested-substring, issue-1968, call-argument mapping, exact generic candidate,
 bounded type-binding hierarchy, type-bound call dispatch, procedure-pointer
@@ -1064,15 +1068,28 @@ of selected child ends the fixed-path derivative contract.
         aliases, unsupported kinds, and rank greater than two remain explicit
         compiler boundaries.
       - [x] **P7.2f active concrete allocatable components.** FortAD
-        `69f31724` consumes FortFront's resolved storage/component facts for
-        already-allocated scalar or rank-one intrinsic REAL component
+        `9cbfb0e` consumes FortFront's resolved storage/component facts for
+        already-allocated scalar, rank-one, or rank-two intrinsic REAL component
         elements. JVP and VJP preserve the containing derived value, with a
         caller-allocated concrete adjoint shadow, and the independent oracle
         checks hand values, central differences, and the adjoint identity.
         Whole-component reads/writes, allocation or deallocation in the
         differentiated procedure, pointers, targets, aliases, polymorphic or
-        global storage, unsupported kinds, and rank greater than one remain
+        global storage, unsupported kinds, and rank greater than two remain
         explicit refusals. General component lifetime replay remains open.
+      - [x] **P7.2g rank-four intrinsic allocatable owners.** FFC `d942549`
+        lowers local and dummy integer, real, and logical rank-four
+        allocatables, including allocation, element access, `ALLOCATED`,
+        `SIZE`/`DIM`, dummy mutation, whole-owner copy, and deallocation. Its
+        independent gfortran compiler/runtime oracle passes. Derived,
+        polymorphic, pointer/alias, unsupported-kind, and rank-five paths
+        remain explicit boundaries.
+      - [x] **P7.2h active rank-two allocatable components.** FortAD `9cbfb0e`
+        extends the bounded active concrete `REAL` component slice from rank
+        one to rank two. The independent oracle checks hand values, central
+        differences, the adjoint identity, and precise whole-component,
+        rank-three, and non-REAL refusals. Component lifetime replay remains
+        open.
 - [ ] **P7.3 Aliasing and sections.** Track `pointer`, `target`, association,
       overlapping actual arguments, noncontiguous sections, and component
       aliases by storage identity. Test aliases that share a target and aliases
@@ -1393,11 +1410,17 @@ problem-specific rule.
             independent API oracle covers
             `items(i,j)%payload` and bounded rank-two sections. `ASSOCIATE`
             selector expressions remain an explicit refusal boundary.
+      - [x] **P8.5e abstract hierarchy implementation facts.** FortFront
+            `15199205` exposes effective implementation nodes, declaring and
+            inherited status, implicit or named `PASS` signatures, passed-object
+            types, and dispatch-target identity through a three-level
+            abstract/deferred hierarchy. The independent API oracle preserves
+            unresolved deferred and ambiguous generic boundaries.
 - [ ] **P8.6 Procedure pointers and callbacks.** Treat callback identity as a
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed
       procedures, and `class(*)` context objects. FortFront now provides
-      bounded assignment and call-target facts in `27d6ad0c`. The bounded
+      bounded assignment and call-target facts in `15199205`. The bounded
       same-scope callback call and derivative slice is delivered by FortAD
       `1080a62` with finite-difference and adjoint oracles. Reassignment,
       null callbacks, passed procedures, `class(*)` context objects, general
