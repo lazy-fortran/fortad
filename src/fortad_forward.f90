@@ -195,9 +195,16 @@ contains
             if (index(trim(spec%independents(i)), "%") == 0 .and. &
                 is_derived_decl(primal, di)) then
                 status%ok = .false.
-                status%message = "active derived object '"// &
-                    trim(spec%independents(i))// &
-                    "' must name a real component"
+                if (primal%decls(di)%is_polymorphic) then
+                    status%message = "active polymorphic receiver '"// &
+                        trim(spec%independents(i))// &
+                        "' would perturb dynamic type; dynamic type perturbations "// &
+                        "are unsupported"
+                else
+                    status%message = "active derived object '"// &
+                        trim(spec%independents(i))// &
+                        "' must name a real component"
+                end if
                 return
             end if
             active(di) = .true.

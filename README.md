@@ -52,7 +52,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Elemental procedures | same-file elemental functions retain elemental JVP/VJP array calls |
 | Fixed-form input | CLI `.f`, `.for`, `.ftn`, and `.f77` files with legacy comments and declarations |
 | Derived components | bounded concrete scalar, nested, inherited, and array component paths |
-| Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known local or inherited child bindings |
+| Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known bindings and bounded direct polymorphic dispatch |
 | Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
 | Aliasing and sections | named refusal for `pointer`, `target`, pointer association, and noncontiguous sections |
 | GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |

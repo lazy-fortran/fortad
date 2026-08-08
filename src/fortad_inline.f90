@@ -532,8 +532,12 @@ contains
                     ! The actual belongs to the caller. Preserve interface
                     ! properties such as VALUE when the callee dummy is
                     ! copied over that declaration during inlining.
+                    d%type_name = target%decls(actual_index)%type_name
                     d%is_value = target%decls(actual_index)%is_value
                     d%is_optional = target%decls(actual_index)%is_optional
+                    d%is_polymorphic = target%decls(actual_index)%is_polymorphic
+                    d%is_unlimited_polymorphic = &
+                        target%decls(actual_index)%is_unlimited_polymorphic
                 else
                     d%is_optional = .false.
                 end if
