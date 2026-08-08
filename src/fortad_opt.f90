@@ -26,7 +26,7 @@ module fortad_opt
     use fortad_affine, only: collapse_affine_loops
     use fortad_dce, only: eliminate_dead_stores
     use fortad_kinds, only: dp
-    use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_expr_t, expr_var, &
+    use fortad_ir, only: fad_proc_t, fad_stmt_t, fad_expr_t, expr_var, fad_copy_stmt, &
                          expr_const, expr_binop, FAD_CONST, FAD_VAR, &
                          FAD_BINOP, FAD_UNOP, FAD_CALL, FAD_INDEX, &
                          FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
@@ -1978,7 +1978,10 @@ contains
         integer :: i
 
         do i = at, p%n_stmts - 1
-            p%stmts(i) = p%stmts(i + 1)
+            ! Component-wise: nvfortran raises an internal compiler error
+            ! on intrinsic assignment of this type, which blocked the
+            ! entire OpenACC build.
+            call fad_copy_stmt(p%stmts(i), p%stmts(i + 1))
         end do
         p%n_stmts = p%n_stmts - 1
     end subroutine remove_stmt
