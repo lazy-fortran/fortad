@@ -22,6 +22,13 @@ supplies matching allocated concrete primal, tangent, and cotangent payloads.
 The derivative differentiates only the selected concrete components and does
 not differentiate a type tag or a descriptor.
 
+The same fixed-source scalar assignment slice accepts an unlimited-polymorphic
+`class(*)` component. When `SOURCE=` names one concrete active object and one
+`TYPE IS` or `CLASS IS` arm is proven, FortAD allocates the paired concrete
+shadow and differentiates a direct assignment such as `item%scale = 4*x`.
+Multiple concrete arms, `MOLD=` or factory sources, and other unproven dynamic
+type or lifetime changes remain refusals.
+
 The slice is intentionally narrow. The owner must be a concrete, non-aliased
 holder and the selector must be a scalar component path with exactly one fixed
 concrete `TYPE IS` arm. FortAD refuses unresolved or multi-arm dispatch,
@@ -32,4 +39,6 @@ allocated and type-compatible for every primal and derivative call.
 
 The independent analytic, central finite-difference, adjoint-identity, and
 boundary oracle is
-`test/test_polymorphic_nested_component_oracle.f90`.
+`test/test_polymorphic_nested_component_oracle.f90`. The unlimited-polymorphic
+assignment case is covered independently by
+`test/test_polymorphic_unlimited_assignment_oracle.f90`.
