@@ -88,6 +88,8 @@ contains
         call refuse_active_nested_polymorphic_component(primal, active_paths, active, &
             status)
         if (.not. status%ok) return
+        call refuse_polymorphic_component_read_modify_write(primal, status)
+        if (.not. status%ok) return
         call refuse_active_polymorphic_ownership(primal, active, status)
         if (.not. status%ok) return
         if (spec%vector) then
@@ -447,6 +449,71 @@ contains
             if (found .and. .not. active_component) cycle
         end do
     end subroutine refuse_active_nested_polymorphic_component
+
+    subroutine refuse_polymorphic_component_read_modify_write(primal, status)
+        !! A fixed-path component assignment is supported only when its RHS
+        !! does not read the pre-assignment component. The bounded shadow
+        !! has no old-value snapshot for a read-modify-write.
+        type(fad_proc_t), intent(in) :: primal
+        type(forward_status_t), intent(inout) :: status
+        integer :: i
+        character(len=:), allocatable :: target
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (.not. allocated(primal%stmts(i)%target)) cycle
+            target = trim(primal%stmts(i)%target)
+            if (index(target, achar(37)) == 0) cycle
+            if (.not. selected_component_target(primal, target)) cycle
+            if (.not. expression_reads_component(primal, primal%stmts(i)%value, &
+                    target)) cycle
+            status%ok = .false.
+            status%message = "forward mode: fixed-path polymorphic component "// &
+                "read-modify-write requires an old-value snapshot; use a "// &
+                "direct assignment or an explicit derivative rule"
+            return
+        end do
+    end subroutine refuse_polymorphic_component_read_modify_write
+
+    logical function selected_component_target(primal, target) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: target
+        integer :: i
+
+        found = .false.
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            if (.not. allocated(primal%stmts(i)%target)) cycle
+            if (trim(primal%stmts(i)%target) /= fad_base_name(target)) cycle
+            if (index(trim(emit_expr(primal, primal%stmts(i)%value)), &
+                    achar(37)) > 0) found = .true.
+            return
+        end do
+    end function selected_component_target
+
+    recursive logical function expression_reads_component(primal, idx, target) &
+            result(found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: target
+        integer :: i
+
+        found = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (index(trim(emit_expr(primal, idx)), achar(37)) > 0) then
+            if (same_component_name(emit_expr(primal, idx), target)) then
+                found = .true.
+                return
+            end if
+        end if
+        do i = 1, size(primal%exprs(idx)%args)
+            if (expression_reads_component(primal, primal%exprs(idx)%args(i), &
+                    target)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function expression_reads_component
 
     subroutine refuse_active_polymorphic_ownership(primal, active, status)
         !! A polymorphic allocatable needs a tangent descriptor with the same

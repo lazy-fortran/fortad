@@ -28,6 +28,16 @@ independent oracle covers the hand derivative, central finite differences,
 VJP values, and the JVP/VJP adjoint identity; `x_b` remains caller-owned
 derivative storage.
 
+Inside that proven single `TYPE IS` or `CLASS IS` arm, a scalar concrete
+component may also receive one direct assignment such as
+`owner%scale = 3.0d0*x`. JVP and VJP route the assignment through the paired
+concrete shadow and clear the overwritten component before replaying the
+`SOURCE=` copy, so the old payload is not differentiated through the store.
+Read-modify-write forms such as `owner%scale = owner%scale + x` remain a
+precise refusal because this bounded slice has no old-value snapshot. The
+generated-source, numerical, and refusal coverage is in
+[`test_polymorphic_nested_ownership_oracle.f90`](../../test/test_polymorphic_nested_ownership_oracle.f90).
+
 An active component of a polymorphic allocatable outside that fixed-source
 shape remains a named forward and reverse refusal. FortFront's `query_storage` facts (`is_polymorphic`,
 `is_unlimited_polymorphic`, and allocation classification) are copied into the

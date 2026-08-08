@@ -5,8 +5,10 @@ program test_polymorphic_nested_ownership_oracle
     implicit none
 
     character(len=1), parameter :: nl = achar(10)
-    character(len=:), allocatable :: source, scalar_source, dir, tangent, driver
-    type(fad_result_t) :: generated, generated_reverse, refused
+    character(len=:), allocatable :: source, scalar_source, assignment_source
+    character(len=:), allocatable :: dir, tangent, driver
+    type(fad_result_t) :: generated, generated_reverse
+    type(fad_result_t) :: assignment_jvp, assignment_vjp, refused
     integer :: unit, stat
 
     source = nested_array_source()
@@ -23,6 +25,39 @@ program test_polymorphic_nested_ownership_oracle
         print *, "FAIL nested polymorphic ownership VJP: ", &
             generated_reverse%message
         error stop 13
+    end if
+
+    assignment_source = nested_assignment_source()
+    assignment_jvp = fad_jvp(assignment_source, [character(len=1) :: "x"], &
+        from="evaluate", name="evaluate_assignment_jvp")
+    if (.not. assignment_jvp%ok) then
+        print *, "FAIL in-arm polymorphic component JVP: ", &
+            assignment_jvp%message
+        error stop 16
+    end if
+    assignment_vjp = fad_vjp(assignment_source, [character(len=1) :: "x"], &
+        dependent="y", from="evaluate", name="evaluate_assignment_vjp")
+    if (.not. assignment_vjp%ok) then
+        print *, "FAIL in-arm polymorphic component VJP: ", &
+            assignment_vjp%message
+        error stop 17
+    end if
+
+    refused = fad_jvp(nested_read_modify_source(), [character(len=1) :: "x"], &
+        from="evaluate")
+    call require_refusal(refused, "read-modify-write JVP")
+    if (index(refused%message, "read-modify-write") == 0) then
+        print *, "FAIL read-modify-write JVP refusal was not precise: ", &
+            refused%message
+        error stop 23
+    end if
+    refused = fad_vjp(nested_read_modify_source(), [character(len=1) :: "x"], &
+        dependent="y", from="evaluate")
+    call require_refusal(refused, "read-modify-write VJP")
+    if (index(refused%message, "read-modify-write") == 0) then
+        print *, "FAIL read-modify-write VJP refusal was not precise: ", &
+            refused%message
+        error stop 24
     end if
 
     refused = fad_jvp( &
@@ -62,10 +97,15 @@ program test_polymorphic_nested_ownership_oracle
         action="write")
     write (unit, '(a)') source
     close (unit)
+    open (newunit=unit, file=dir//"/assignment.f90", status="replace", &
+        action="write")
+    write (unit, '(a)') assignment_source
+    close (unit)
     tangent = "module nested_generated"//nl// &
         "    use nested_ownership_case, only: child_t, holder_t"//nl// &
         "contains"//nl//generated%code// &
         generated_reverse%code// &
+        assignment_jvp%code//assignment_vjp%code// &
         "end module nested_generated"//nl
     open (newunit=unit, file=dir//"/tangent.f90", status="replace", &
         action="write")
@@ -73,9 +113,12 @@ program test_polymorphic_nested_ownership_oracle
     close (unit)
     driver = "program driver"//nl// &
         "    use nested_ownership_case, only: evaluate"//nl// &
+        "    use nested_assignment_case, only: evaluate_assignment => evaluate"//nl// &
         "    use nested_generated, only: evaluate_jvp, evaluate_vjp"//nl// &
+        "    use nested_generated, only: evaluate_assignment_jvp, evaluate_assignment_vjp"//nl// &
         "    implicit none"//nl// &
         "    real(8) :: x, xd, y, yd, yb, xb, h, fd"//nl// &
+        "    real(8) :: ya, yad, yab, xab, fda"//nl// &
         "    x = 1.25d0"//nl// &
         "    xd = -0.4d0"//nl// &
         "    h = 1.0d-6"//nl// &
@@ -89,6 +132,15 @@ program test_polymorphic_nested_ownership_oracle
         "    if (abs(xb-yb*4.0d0*x) > 1.0d-12) error stop 12"//nl// &
         "    if (abs(xb*xd-yb*yd) > 1.0d-12) error stop 14"//nl// &
         "    if (abs(xb/yb-fd) > 1.0d-7) error stop 15"//nl// &
+        "    call evaluate_assignment_jvp(x, xd, ya, yad)"//nl// &
+        "    if (abs(ya - 3.0d0*x*x) > 1.0d-13) error stop 18"//nl// &
+        "    if (abs(yad - 6.0d0*x*xd) > 1.0d-13) error stop 19"//nl// &
+        "    fda = (evaluate_assignment(x+h)-evaluate_assignment(x-h))/(2.0d0*h)"//nl// &
+        "    if (abs(yad/xd-fda) > 1.0d-7) error stop 20"//nl// &
+        "    yab = -0.9d0"//nl// &
+        "    call evaluate_assignment_vjp(x, ya, yab, xab)"//nl// &
+        "    if (abs(xab-yab*6.0d0*x) > 1.0d-12) error stop 21"//nl// &
+        "    if (abs(xab*xd-yab*yad) > 1.0d-12) error stop 22"//nl// &
         "    print *, 'nested polymorphic ownership oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", &
@@ -97,8 +149,9 @@ program test_polymorphic_nested_ownership_oracle
     close (unit)
     call execute_command_line( &
         "gfortran -std=f2018 -O2 -J"//dir//" -I"//dir// &
-        " -o "//dir//"/run "//dir//"/primal.f90 "//dir//"/tangent.f90 "// &
-        dir//"/driver.f90 > "//dir//"/build.log 2>&1", exitstat=stat)
+        " -o "//dir//"/run "//dir//"/primal.f90 "//dir//"/assignment.f90 "// &
+        dir//"/tangent.f90 "//dir//"/driver.f90 > "// &
+        dir//"/build.log 2>&1", exitstat=stat)
     if (stat /= 0) then
         print *, "FAIL nested generated source did not compile"
         call show_file(dir//"/build.log")
@@ -155,6 +208,27 @@ contains
             "    end function evaluate"//nl// &
             "end module nested_ownership_case"//nl
     end function nested_source
+
+    function nested_assignment_source() result(text)
+        character(len=:), allocatable :: text
+
+        text = nested_source("allocate(box%field%payload, source=child)")
+        text = replace_text(text, "            y = owner%scale*x", &
+            "            owner%scale = 3.0d0*x"//nl// &
+            "            y = owner%scale*x")
+        text = replace_text(text, "module nested_ownership_case", &
+            "module nested_assignment_case")
+        text = replace_text(text, "end module nested_ownership_case", &
+            "end module nested_assignment_case")
+    end function nested_assignment_source
+
+    function nested_read_modify_source() result(text)
+        character(len=:), allocatable :: text
+
+        text = nested_assignment_source()
+        text = replace_text(text, "owner%scale = 3.0d0*x", &
+            "owner%scale = owner%scale + x")
+    end function nested_read_modify_source
 
     function nested_array_source() result(text)
         character(len=:), allocatable :: text
