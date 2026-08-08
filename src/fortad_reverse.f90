@@ -163,6 +163,7 @@ module fortad_reverse
         !! sweeps repeat the same selector, while only arithmetic in the arm
         !! chosen at runtime contributes derivatives.
         integer :: selector = 0
+        character(len=:), allocatable :: selector_alias
         type(select_arm_record_t), allocatable :: arms(:)
         integer :: n_arms = 0
     end type select_record_t
@@ -2157,10 +2158,14 @@ contains
         allocate (rec%arms(rec%n_arms))
         rec%selector = copy_renamed(primal, adjoint, &
             primal%stmts(first)%value, ssa)
+        if (allocated(primal%stmts(first)%target)) then
+            rec%selector_alias = primal%stmts(first)%target
+        end if
         before = ssa
 
         s%kind = FAD_SELECT_TYPE
         s%value = rec%selector
+        if (allocated(rec%selector_alias)) s%target = rec%selector_alias
         ignored = adjoint%add_stmt(s)
 
         do a = 1, n_guards
@@ -3689,6 +3694,7 @@ contains
 
         s%kind = FAD_SELECT_TYPE
         s%value = rec%selector
+        if (allocated(rec%selector_alias)) s%target = rec%selector_alias
         ignored = adjoint%add_stmt(s)
         do a = 1, rec%n_arms
             s%kind = rec%arms(a)%kind

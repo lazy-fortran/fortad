@@ -327,6 +327,16 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   array-element type-bound receivers with literal indices, and native
   `vjp FILE` infers legacy no-`INTENT` dependents. The full `fo` gate is green: 409
   build targets, 408 derivative targets, 72/72 tests, and lint.
+- FortAD P8.3e now differentiates an active one-dimensional
+  `class(base_t) :: a(:)` type-bound function receiver at one literal array
+  index when FortFront proves exactly one same-file concrete dispatch target.
+  JVPs carry active base and child components through paired primal/tangent
+  `SELECT TYPE` aliases; the independent gfortran oracle also checks the
+  passive-receiver VJP path and refuses pointers, aliases, sections, dynamic
+  indices, ownership-changing receivers, and unresolved multi-target dispatch.
+  This remains a borrowed fixed-path slice: dynamic type perturbations,
+  runtime target selection, and active receiver VJP scattering are not yet
+  claimed.
 - fortad-bench `9ff979e` (on top of `0668866`), including the current queue,
   batch, classifier, live-hash repins, and next7/next8/next9/next10/next11 evidence
   contracts. The reproducible queue contains 1,221 rows: 1,147 pure-Fortran
