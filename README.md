@@ -74,6 +74,11 @@ same fixed `TYPE IS` or `CLASS IS` path also supports a direct scalar
 assignment through paired concrete shadows; read-modify-write and ownership-
 changing forms remain refused. The boundary and oracle are in [the
 polymorphic ownership design note](docs/design/polymorphic-ownership.md).
+Literal indexed scalar allocatable components such as `boxes(2)%value` use the
+same bounded reallocation replay contract; dynamic indices and unsafe storage
+remain refused. Direct same-file subroutine calls use exact FortFront
+actual/formal storage facts and refuse aliases, callbacks, globals, pointers,
+allocatables, mismatches, and ambiguous mappings.
 The bounded contiguous rank-one/rank-two section support, storage-identity
 proof, and executable refusal oracles are in
 [the aliasing and sections design note](docs/design/aliasing.md).
