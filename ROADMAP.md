@@ -296,7 +296,7 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   The exact legacy v290 spelling that uses old-style type declarations and
   compound component declarations remains a FortFront metadata boundary; it
   is not counted as modern runnable support.
-  FortAD `ba50964`, including active concrete rank-four allocatable-component
+  FortAD `02d4dd2`, including active concrete rank-four allocatable-component
   JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded polymorphic reverse
   ownership replay, one-arm rank-one assumed-rank JVP/VJP, and branch-merged
   callback-flow JVP/VJP lowering with an independent oracle, plus fixed-shape
@@ -322,7 +322,7 @@ checkpointing and numerical/application rules. Active global mutable state,
 uncontrolled aliases, active I/O, and opaque calls without rules remain
 product refusals rather than compatibility work.
 
-FortFront source `main` is currently `2a493998`. This handoff includes the
+FortFront source `main` is currently `55c0c5b6`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -446,7 +446,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `2a493998`, which includes the
+The current FortFront `main` handoff is `55c0c5b6`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths, plus formal-ordered actual-to-formal call
@@ -475,11 +475,11 @@ The current FortFront `main` handoff is `2a493998`, which includes the
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo` builds 409 targets, checks 408 derivative
-      targets, and runs 66 tests.
-      The cheap lint rules report zero unused imports and zero short-circuit
-      hazards. 108 `-Warray-temporaries` diagnostics remain in compiler
-      output, while `fo lint` passes. The other four lanes still rely on a run that
-      predates the latest lowering work. `fo fmt --check` still reports
+      targets, and runs 68 tests.
+      The cheap lint rules report zero unused imports. Four pre-existing
+      short-circuit hazards and 108 `-Warray-temporaries` diagnostics remain;
+      `fo lint` is therefore still nonzero. The other four lanes still rely on
+      a run that predates the latest lowering work. `fo fmt --check` still reports
       formatting debt in legacy files, including the two files touched by this
       compatibility slice.
 - [ ] Every operator shared by fortnum and fortfem has same-machine FortAD and
@@ -492,9 +492,10 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `ba50964`. Its GNU behavioral
-gate is green (409 build targets, 408 derivative targets, 66/66 tests).
-`fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
+The implementation snapshot is FortAD code at `02d4dd2`. Its GNU behavioral
+gate is green (409 build targets, 408 derivative targets, 68/68 tests).
+`fo lint` still has four short-circuit hazards and 108 array-temporary
+warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
 scalar external-CALL refusal oracle. The complete multi-compiler gate remains
@@ -519,11 +520,11 @@ allocatable-component JVP/VJP (main `48dec22`), a bounded concrete scalar
 `ASSOCIATE` derivative slice and bounded polymorphic reverse ownership replay
 (also `48dec22`), resolved callback signature, concrete `SELECT TYPE` arm,
 branch-merged callback-flow, and loop-sensitive callback facts in FortFront
-`main` (`2a493998`), a typed `real(8)` procedure-pointer result and rank-one
+`main` (`55c0c5b6`), a typed `real(8)` procedure-pointer result and rank-one
 through rank-four assumed-rank `SELECT RANK` slices in FFC `main`
 (`f0ed424`), a fixed-shape array-element type-bound receiver JVP/VJP in FortAD
 `main` (`48dec22`), and 40 measured queue-shard boundaries in fortad-bench
-`main` (`0e297af`).
+`main` (`1d30a0f`).
 These are narrow support claims. General
 callback flow, repeated or rank-greater-than-two automatic reallocation,
 general allocatable-component lifetime, polymorphic ownership replay beyond
@@ -627,7 +628,7 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `2a493998` (the ownership/storage, dispatch, and
+`fo` must consume FortFront `55c0c5b6` (the ownership/storage, dispatch, and
 `SELECT RANK` metadata handoff plus the merged procedure-name, #2980, public
 array-query,
 nested-substring, issue-1968, call-argument mapping, exact generic candidate,
@@ -1551,7 +1552,7 @@ problem-specific rule.
             named refusals. The independent
             [`test_direct_polymorphic_oracle.f90`](test/test_direct_polymorphic_oracle.f90)
             compiles and runs two child types through both binding forms.
-      - [x] **P8.4e concrete dispatch-arm contract.** FortFront `2a493998`
+      - [x] **P8.4e concrete dispatch-arm contract.** FortFront `55c0c5b6`
             excludes abstract descendants from runtime dispatch-target facts,
             including abstract intermediates that provide concrete bindings.
             FortAD's independent
