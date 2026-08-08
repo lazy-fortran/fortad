@@ -119,6 +119,7 @@ module fortad_reverse
     type :: allocation_record_t
         !! One explicitly allocated, simple allocatable owner.
         character(len=:), allocatable :: owner
+        character(len=:), allocatable :: previous_owner
         logical :: active = .false.
         logical :: deallocated = .false.
     end type allocation_record_t
@@ -332,6 +333,8 @@ contains
         logical :: found
 
         allocation_depth = 0
+        call check_reverse_move_alloc_shape(primal, status)
+        if (.not. status%ok) return
 
         depth = 0
         do i = 1, primal%n_stmts
@@ -381,12 +384,7 @@ contains
                     return
                 end if
                 if (primal%stmts(i)%kind == FAD_MOVE_ALLOC) then
-                    status%ok = .false.
-                    status%message = "reverse mode: allocation lifetime "// &
-                        "move_alloc requires an ownership replay tape; this "// &
-                        "bounded slice retains one "// &
-                        "simple allocation owner"
-                    return
+                    cycle
                 end if
                 if (.not. allocated(primal%stmts(i)%allocation_args)) then
                     status%ok = .false.
@@ -446,6 +444,12 @@ contains
                         trim(owner)//"' is not an allocatable declaration"
                     return
                 end if
+                if (primal%decls(di)%is_polymorphic) then
+                    status%ok = .false.
+                    status%message = "reverse mode: polymorphic allocatable ownership '"// &
+                        trim(owner)//"' requires dynamic-type replay"
+                    return
+                end if
                 if (primal%stmts(i)%kind == FAD_ALLOCATE) then
                     found = .false.
                     do j = 1, i - 1
@@ -473,6 +477,16 @@ contains
                     end do
                     found = .false.
                     do j = 1, i - 1
+                        if (primal%stmts(j)%kind == FAD_MOVE_ALLOC) then
+                            if (allocated(primal%stmts(j)%call_args)) then
+                                if (size(primal%stmts(j)%call_args) >= 2) then
+                                    if (trim(fad_base_name(emit_expr(primal, &
+                                        primal%stmts(j)%call_args(2)))) == &
+                                        trim(owner)) found = .true.
+                                end if
+                            end if
+                            cycle
+                        end if
                         if (.not. allocated(primal%stmts(j)%allocation_args)) cycle
                         if (size(primal%stmts(j)%allocation_args) < 1) cycle
                         if (trim(fad_base_name(emit_expr(primal, &
@@ -499,6 +513,130 @@ contains
         end do
 
     end subroutine check_supported
+
+    subroutine check_reverse_move_alloc_shape(primal, status)
+        !! The reverse move slice has one static ownership transition only.
+        type(fad_proc_t), intent(in) :: primal
+        type(reverse_status_t), intent(inout) :: status
+        integer :: i, n_allocate, n_deallocate, n_move, source_di, target_di
+        integer :: move_at, allocate_at, deallocate_at
+        character(len=:), allocatable :: source, target, owner
+        logical :: found
+
+        n_allocate = 0
+        n_deallocate = 0
+        n_move = 0
+        move_at = 0
+        allocate_at = 0
+        deallocate_at = 0
+        do i = 1, primal%n_stmts
+            select case (primal%stmts(i)%kind)
+            case (FAD_ALLOCATE)
+                n_allocate = n_allocate + 1
+                allocate_at = i
+            case (FAD_DEALLOCATE)
+                n_deallocate = n_deallocate + 1
+                deallocate_at = i
+            case (FAD_MOVE_ALLOC)
+                n_move = n_move + 1
+                move_at = i
+            end select
+        end do
+        if (n_move == 0) return
+        if (n_move /= 1 .or. n_allocate /= 1 .or. n_deallocate /= 1) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc requires one straight-line "// &
+                "allocation owner and one matching final deallocation"
+            return
+        end if
+        if (.not. allocated(primal%stmts(move_at)%call_args)) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc requires one simple source "// &
+                "and destination"
+            return
+        end if
+        if (size(primal%stmts(move_at)%call_args) /= 2) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc requires one simple source "// &
+                "and destination"
+            return
+        end if
+        source = emit_expr(primal, primal%stmts(move_at)%call_args(1))
+        target = emit_expr(primal, primal%stmts(move_at)%call_args(2))
+        if (index(trim(source), "(") > 0 .or. index(trim(source), "%") > 0 .or. &
+            index(trim(target), "(") > 0 .or. index(trim(target), "%") > 0 .or. &
+            trim(source) == trim(target)) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc requires simple, distinct "// &
+                "local or dummy allocatable owners"
+            return
+        end if
+        source_di = primal%decl_index(trim(source))
+        target_di = primal%decl_index(trim(target))
+        if (source_di <= 0 .or. target_di <= 0) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc owners must be declared "// &
+                "allocatable objects"
+            return
+        end if
+        if (.not. primal%decls(source_di)%is_allocatable .or. &
+            .not. primal%decls(target_di)%is_allocatable) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc owners must be declared "// &
+                "allocatable objects"
+            return
+        end if
+        if (primal%decls(source_di)%is_polymorphic .or. &
+            primal%decls(target_di)%is_polymorphic .or. &
+            primal%decls(source_di)%is_select_alias .or. &
+            primal%decls(target_di)%is_select_alias) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc does not support polymorphic "// &
+                "ownership or aliases"
+            return
+        end if
+        if (move_at <= allocate_at .or. deallocate_at <= move_at) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc requires allocation, transfer, "// &
+                "then final deallocation"
+            return
+        end if
+        if (.not. allocated(primal%stmts(allocate_at)%allocation_args)) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc source has no explicit allocation"
+            return
+        end if
+        owner = fad_base_name(emit_expr(primal, &
+            primal%stmts(allocate_at)%allocation_args(1)))
+        if (trim(owner) /= trim(source)) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc source must be the allocated owner"
+            return
+        end if
+        if (.not. allocated(primal%stmts(deallocate_at)%allocation_args)) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc has no matching final deallocation"
+            return
+        end if
+        owner = fad_base_name(emit_expr(primal, &
+            primal%stmts(deallocate_at)%allocation_args(1)))
+        if (trim(owner) /= trim(target)) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc has no matching final deallocation"
+            return
+        end if
+        found = .false.
+        do i = move_at + 1, deallocate_at - 1
+            if (primal%stmts(i)%kind == FAD_ALLOCATE .or. &
+                primal%stmts(i)%kind == FAD_DEALLOCATE .or. &
+                primal%stmts(i)%kind == FAD_MOVE_ALLOC) found = .true.
+        end do
+        if (found) then
+            status%ok = .false.
+            status%message = "reverse mode: repeated or path-dependent allocation "// &
+                "lifetime needs allocation-state replay"
+        end if
+    end subroutine check_reverse_move_alloc_shape
 
     logical function array_element_component(text) result(found)
         character(len=*), intent(in) :: text
@@ -559,6 +697,21 @@ contains
         do while (changed)
             changed = .false.
             do j = 1, primal%n_stmts
+                if (primal%stmts(j)%kind == FAD_MOVE_ALLOC) then
+                    if (.not. allocated(primal%stmts(j)%call_args)) cycle
+                    if (call_reads_any(primal, primal%stmts(j), varied)) then
+                        do i = 1, size(primal%stmts(j)%call_args)
+                            di = call_arg_decl_index(primal, &
+                                primal%stmts(j)%call_args(i))
+                            if (di <= 0) cycle
+                            if (.not. varied(di)) then
+                                varied(di) = .true.
+                                changed = .true.
+                            end if
+                        end do
+                    end if
+                    cycle
+                end if
                 if (primal%stmts(j)%kind == FAD_CALL_STMT) then
                     if (.not. call_reads_any(primal, primal%stmts(j), varied)) cycle
                     do i = 1, size(primal%stmts(j)%call_args)
@@ -594,6 +747,21 @@ contains
         do while (changed)
             changed = .false.
             do j = primal%n_stmts, 1, -1
+                if (primal%stmts(j)%kind == FAD_MOVE_ALLOC) then
+                    if (.not. allocated(primal%stmts(j)%call_args)) cycle
+                    if (call_reads_any(primal, primal%stmts(j), useful)) then
+                        do i = 1, size(primal%stmts(j)%call_args)
+                            di = call_arg_decl_index(primal, &
+                                primal%stmts(j)%call_args(i))
+                            if (di <= 0) cycle
+                            if (.not. useful(di)) then
+                                useful(di) = .true.
+                                changed = .true.
+                            end if
+                        end do
+                    end if
+                    cycle
+                end if
                 if (primal%stmts(j)%kind == FAD_CALL_STMT) then
                     if (.not. call_reads_any(primal, primal%stmts(j), useful)) cycle
                     do i = 1, size(primal%stmts(j)%call_args)
@@ -1180,6 +1348,13 @@ contains
                 if (.not. status%ok) return
                 i = i + 1
 
+            case (FAD_MOVE_ALLOC)
+                call emit_move_alloc_forward(primal, adjoint, ssa, &
+                    primal%stmts(i), active, suffix, allocations, &
+                    n_allocations, status)
+                if (.not. status%ok) return
+                i = i + 1
+
             case (FAD_DEALLOCATE)
                 ! Retain both descriptors and payloads until the reverse sweep
                 ! has consumed every expression that may read this owner.
@@ -1295,6 +1470,79 @@ contains
         s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
         ignored = adjoint%add_stmt(s)
     end subroutine emit_allocation_forward
+
+    subroutine emit_move_alloc_forward(primal, adjoint, ssa, ps, active, &
+            suffix, allocations, n_allocations, status)
+        !! Transfer the retained primal and tangent owners together.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(ssa_map_t), intent(in) :: ssa
+        type(fad_stmt_t), intent(in) :: ps
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        type(allocation_record_t), intent(inout) :: allocations(:)
+        integer, intent(in) :: n_allocations
+        type(reverse_status_t), intent(inout) :: status
+        type(fad_decl_t) :: d
+        type(fad_stmt_t) :: s
+        character(len=:), allocatable :: source, target
+        integer :: source_di, target_di, i, ignored
+        logical :: owner_found
+
+        status%ok = .true.
+        source = emit_expr(primal, ps%call_args(1))
+        target = emit_expr(primal, ps%call_args(2))
+        source_di = primal%decl_index(trim(source))
+        target_di = primal%decl_index(trim(target))
+        if (source_di <= 0 .or. target_di <= 0) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc owners are not declared"
+            return
+        end if
+        owner_found = .false.
+        do i = 1, n_allocations
+            if (trim(allocations(i)%owner) == trim(source)) then
+                owner_found = .true.
+                allocations(i)%previous_owner = trim(source)
+                allocations(i)%owner = trim(target)
+                allocations(i)%active = active(source_di) .or. active(target_di)
+                exit
+            end if
+        end do
+        if (.not. owner_found) then
+            status%ok = .false.
+            status%message = "reverse mode: move_alloc source has no retained "// &
+                "allocation owner"
+            return
+        end if
+
+        d = primal%decls(target_di)
+        d%intent = FAD_INTENT_NONE
+        d%is_result = .false.
+        d%is_optional = .false.
+        if (adjoint%decl_index(trim(target)) == 0) then
+            ignored = adjoint%add_decl(d)
+        end if
+        call reset_reverse_statement(s)
+        s%kind = FAD_MOVE_ALLOC
+        allocate (s%call_args(2))
+        s%call_args(1) = copy_renamed(primal, adjoint, ps%call_args(1), ssa)
+        s%call_args(2) = copy_renamed(primal, adjoint, ps%call_args(2), ssa)
+        ignored = adjoint%add_stmt(s)
+
+        if (.not. allocations(i)%active) return
+        d%name = trim(target)//trim(suffix)
+        d%is_allocatable = .true.
+        if (adjoint%decl_index(d%name) == 0) then
+            ignored = adjoint%add_decl(d)
+        end if
+        call reset_reverse_statement(s)
+        s%kind = FAD_MOVE_ALLOC
+        allocate (s%call_args(2))
+        s%call_args(1) = adjoint%add_expr(expr_var(trim(source)//trim(suffix)))
+        s%call_args(2) = adjoint%add_expr(expr_var(trim(target)//trim(suffix)))
+        ignored = adjoint%add_stmt(s)
+    end subroutine emit_move_alloc_forward
 
     subroutine append_allocation_cleanup(primal, adjoint, allocations, &
             n_allocations, suffix)
@@ -2247,10 +2495,11 @@ contains
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: adjoint
         type(ssa_map_t), intent(in) :: ssa
-        character(len=*), intent(in) :: lhs_names(:)
+        character(len=*), intent(inout) :: lhs_names(:)
         logical, intent(in) :: is_element(:)
-        integer, intent(in) :: rhs_exprs(:), n_rec
-        type(loop_record_t), intent(in) :: loops(:)
+        integer, intent(inout) :: rhs_exprs(:)
+        integer, intent(in) :: n_rec
+        type(loop_record_t), intent(inout) :: loops(:)
         integer, intent(in) :: n_loops
         type(branch_record_t), intent(in) :: branches(:)
         integer, intent(in) :: n_branches
@@ -2268,6 +2517,9 @@ contains
         type(fad_stmt_t) :: s
         character(len=:), allocatable :: final_name, shadow_name, target_name
         integer :: i, k, di, ignored, zero, n_tmp, seed_expr, seed_copy
+
+        call retarget_move_reverse_records(adjoint, lhs_names, rhs_exprs, n_rec, &
+            loops, n_loops, allocations, n_allocations)
 
         call ssa_lookup(ssa, dependent, final_name)
         if (final_name /= dependent) then
@@ -2482,6 +2734,90 @@ contains
         call append_allocation_cleanup(primal, adjoint, allocations, &
             n_allocations, suffix)
     end subroutine build_reverse_sweep
+
+    subroutine retarget_move_reverse_records(adjoint, lhs_names, rhs_exprs, &
+            n_rec, loops, n_loops, allocations, n_allocations)
+        !! Reverse records made before MOVE_ALLOC still name the source
+        !! descriptor.  The payload has the destination name by the time the
+        !! reverse sweep runs, so retarget only those records, never the
+        !! already-emitted forward statements.
+        type(fad_proc_t), intent(inout) :: adjoint
+        character(len=*), intent(inout) :: lhs_names(:)
+        integer, intent(inout) :: rhs_exprs(:)
+        integer, intent(in) :: n_rec
+        type(loop_record_t), intent(inout) :: loops(:)
+        integer, intent(in) :: n_loops
+        type(allocation_record_t), intent(in) :: allocations(:)
+        integer, intent(in) :: n_allocations
+        integer :: i, k
+
+        do k = 1, n_allocations
+            if (.not. allocated(allocations(k)%previous_owner)) cycle
+            do i = 1, n_rec
+                lhs_names(i) = replace_move_owner(lhs_names(i), &
+                    allocations(k)%previous_owner, allocations(k)%owner)
+                rhs_exprs(i) = retarget_move_expr(adjoint, rhs_exprs(i), &
+                    allocations(k)%previous_owner, allocations(k)%owner)
+            end do
+            do i = 1, n_loops
+                call retarget_move_loop(adjoint, loops(i), &
+                    allocations(k)%previous_owner, allocations(k)%owner)
+            end do
+        end do
+    end subroutine retarget_move_reverse_records
+
+    subroutine retarget_move_loop(adjoint, rec, source, target)
+        type(fad_proc_t), intent(inout) :: adjoint
+        type(loop_record_t), intent(inout) :: rec
+        character(len=*), intent(in) :: source, target
+        integer :: i
+
+        do i = 1, rec%n_body
+            rec%body_lhs(i) = replace_move_owner(rec%body_lhs(i), source, target)
+            rec%body_rhs(i) = retarget_move_expr(adjoint, rec%body_rhs(i), &
+                source, target)
+        end do
+    end subroutine retarget_move_loop
+
+    recursive integer function retarget_move_expr(adjoint, idx, source, target) &
+            result(out)
+        type(fad_proc_t), intent(inout) :: adjoint
+        integer, intent(in) :: idx
+        character(len=*), intent(in) :: source, target
+        type(fad_expr_t) :: e
+        integer, allocatable :: args(:)
+        integer :: i
+
+        out = 0
+        if (idx <= 0 .or. idx > adjoint%n_exprs) return
+        e = adjoint%exprs(idx)
+        if ((e%kind == FAD_VAR .or. e%kind == FAD_INDEX) .and. &
+            allocated(e%text)) then
+            e%text = replace_move_owner(e%text, source, target)
+        end if
+        allocate (args(size(e%args)))
+        do i = 1, size(args)
+            args(i) = retarget_move_expr(adjoint, e%args(i), source, target)
+        end do
+        e%args = args
+        out = adjoint%add_expr(e)
+    end function retarget_move_expr
+
+    function replace_move_owner(text, source, target) result(out)
+        character(len=*), intent(in) :: text, source, target
+        character(len=:), allocatable :: out
+        integer :: n
+
+        out = text
+        n = len_trim(source)
+        if (len_trim(text) < n) return
+        if (text(:n) /= source) return
+        if (len_trim(text) == n) then
+            out = target
+        else if (text(n + 1:n + 1) == "(") then
+            out = target//text(n + 1:)
+        end if
+    end function replace_move_owner
 
     subroutine zero_component_adjoints(primal, adjoint, active, suffix, zero)
         !! Initialise component adjoints without assigning a scalar to the

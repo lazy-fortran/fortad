@@ -2,8 +2,8 @@ program test_allocation_lifetime_oracle
     !! Independent behavioral oracle for the bounded forward ownership slice.
     !! The primal uses explicit ALLOCATE, SOURCE=, MOVE_ALLOC, and DEALLOCATE;
     !! the generated JVP is checked against a central finite difference.
-    !! Reverse mode remains a named boundary until allocation-state replay is
-    !! implemented.
+    !! Reverse mode covers one straight-line allocation owner transferred by
+    !! MOVE_ALLOC, while repeated or multi-owner lifetimes remain refused.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -58,23 +58,27 @@ program test_allocation_lifetime_oracle
         "        integer, intent(in) :: n"//nl// &
         "        integer :: i"//nl// &
         "        real(8), allocatable :: scratch(:)"//nl// &
+        "        real(8), allocatable :: moved(:)"//nl// &
         "        real(8) :: out"//nl// &
         "        allocate(scratch(n), mold=x)"//nl// &
         "        do i = 1, n"//nl// &
         "            scratch(i) = 2.0d0*x"//nl// &
         "        end do"//nl// &
-        "        out = sum(scratch)"//nl// &
-        "        deallocate(scratch)"//nl// &
+        "        call move_alloc(scratch, moved)"//nl// &
+        "        out = sum(moved)"//nl// &
+        "        deallocate(moved)"//nl// &
         "    end function allocation_reverse_path"//nl// &
         "    function dummy_allocation_path(x, buf) result(out)"//nl// &
         "        real(8), intent(in) :: x"//nl// &
         "        real(8), allocatable, intent(out) :: buf(:)"//nl// &
         "        integer :: i"//nl// &
+        "        real(8), allocatable :: scratch(:)"//nl// &
         "        real(8) :: out"//nl// &
-        "        allocate(buf(3), mold=x)"//nl// &
+        "        allocate(scratch(3), mold=x)"//nl// &
         "        do i = 1, 3"//nl// &
-        "            buf(i) = 2.0d0*x"//nl// &
+        "            scratch(i) = 2.0d0*x"//nl// &
         "        end do"//nl// &
+        "        call move_alloc(scratch, buf)"//nl// &
         "        out = sum(buf)"//nl// &
         "        deallocate(buf)"//nl// &
         "    end function dummy_allocation_path"//nl// &
@@ -107,7 +111,7 @@ program test_allocation_lifetime_oracle
     end if
     vjp = fad_vjp(source, [character(len=1) :: "x"], dependent="out", &
         from="allocation_path")
-    call assert_replay_refusal(vjp)
+    call assert_multi_owner_refusal(vjp)
     vjp = fad_vjp(reverse_source, [character(len=1) :: "x"], &
         dependent="out", from="allocation_reverse_path", &
         name="allocation_reverse_path_vjp")
@@ -171,23 +175,24 @@ program test_allocation_lifetime_oracle
         "    fd = (fp - fm)/(2.0d0*h)"//nl// &
         "    if (abs(out_d - fd) > 1.0d-7) error stop 5"//nl// &
         "    x = 1.25d0"//nl// &
-        "    out_b = 1.0d0"//nl// &
+        "    out_b = 1.25d0"//nl// &
         "    call allocation_reverse_path_vjp(x, 3, out, out_b, x_b)"//nl// &
-        "    if (abs(x_b - 6.0d0) > 1.0d-12) error stop 10"//nl// &
+        "    if (abs(x_b - 7.5d0) > 1.0d-12) error stop 10"//nl// &
+        "    if (abs(x_b*x_d - out_b*out_d) > 1.0d-12) error stop 16"//nl// &
         "    h = 1.0d-6"//nl// &
         "    fp = allocation_reverse_path(x + h, 3)"//nl// &
         "    fm = allocation_reverse_path(x - h, 3)"//nl// &
         "    fd = (fp - fm)/(2.0d0*h)"//nl// &
-        "    if (abs(x_b - fd) > 1.0d-7) error stop 11"//nl// &
+        "    if (abs(x_b/out_b - fd) > 1.0d-7) error stop 11"//nl// &
         "    call dummy_allocation_path_vjp(x, buf, out, out_b, x_b)"//nl// &
-        "    if (abs(x_b - 6.0d0) > 1.0d-12) error stop 13"//nl// &
+        "    if (abs(x_b - 7.5d0) > 1.0d-12) error stop 13"//nl// &
         "    if (allocated(buf)) error stop 14"//nl// &
         "    h = 1.0d-6"//nl// &
         "    fp = dummy_allocation_path(x + h, buf)"//nl// &
         "    fm = dummy_allocation_path(x - h, buf)"//nl// &
         "    fd = (fp - fm)/(2.0d0*h)"//nl// &
-        "    if (abs(x_b - fd) > 1.0d-7) error stop 15"//nl// &
-        "    print *, 'allocation lifetime JVP oracle pass'"//nl// &
+        "    if (abs(x_b/out_b - fd) > 1.0d-7) error stop 15"//nl// &
+        "    print *, 'allocation lifetime JVP/VJP oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", action="write")
     write (unit, '(a)') driver
@@ -214,7 +219,7 @@ program test_allocation_lifetime_oracle
 
 contains
 
-    subroutine assert_replay_refusal(result)
+    subroutine assert_multi_owner_refusal(result)
         type(fad_result_t), intent(in) :: result
 
         if (result%ok) then
@@ -222,12 +227,12 @@ contains
             error stop 6
         end if
         if (.not. allocated(result%message) .or. &
-            index(result%message, "allocation lifetime") == 0 .or. &
-            index(result%message, "replay tape") == 0) then
+            index(result%message, "allocation owner") == 0 .or. &
+            index(result%message, "matching final deallocation") == 0) then
             print *, "FAIL allocation lifetime diagnostic: ", result%message
             error stop 6
         end if
-    end subroutine assert_replay_refusal
+    end subroutine assert_multi_owner_refusal
 
     subroutine show_file(path)
         character(len=*), intent(in) :: path
