@@ -1,13 +1,14 @@
 program test_polymorphic_array_ownership_oracle
     !! Independent hand and finite-difference oracle for one fixed-size array
-    !! of concrete holders with a polymorphic component owner.  Reverse mode
-    !! is checked for its precise bounded-lifetime refusal.
+    !! of concrete holders with a polymorphic component owner.  Both JVP and
+    !! VJP are checked against hand values, finite differences, and the
+    !! adjoint identity.  Dynamic indexing retains a precise refusal.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
     character(len=1), parameter :: nl = achar(10)
-    character(len=:), allocatable :: source, tangent, driver, dir
-    type(fad_result_t) :: generated, refused
+    character(len=:), allocatable :: source, dynamic_source, tangent, driver, dir
+    type(fad_result_t) :: generated, generated_reverse, refused
     integer :: unit, stat
 
     source = array_source()
@@ -18,19 +19,28 @@ program test_polymorphic_array_ownership_oracle
         error stop 1
     end if
 
-    refused = fad_vjp(source, [character(len=1) :: "x"], dependent="y", &
+    generated_reverse = fad_vjp(source, [character(len=1) :: "x"], dependent="y", &
         from="evaluate", name="evaluate_vjp")
-    if (refused%ok .or. .not. allocated(refused%message) .or. &
-        index(refused%message, "array-element polymorphic component") == 0 .or. &
-        index(refused%message, "SOURCE= ownership") == 0) then
-        print *, "FAIL array polymorphic ownership reverse refusal: ", &
-            refused%message
+    if (.not. generated_reverse%ok) then
+        print *, "FAIL array polymorphic ownership VJP: ", &
+            generated_reverse%message
         error stop 2
+    end if
+
+    dynamic_source = dynamic_array_source()
+    refused = fad_vjp(dynamic_source, [character(len=1) :: "x"], dependent="y", &
+        from="evaluate")
+    if (refused%ok .or. .not. allocated(refused%message) .or. &
+        index(refused%message, "one literal index") == 0 .or. &
+        index(refused%message, "dynamic indices") == 0) then
+        print *, "FAIL dynamic array-element ownership refusal: ", &
+            refused%message
+        error stop 3
     end if
 
     dir = "build/oracle/polymorphic_array_ownership"
     call execute_command_line("mkdir -p "//dir, exitstat=stat)
-    if (stat /= 0) error stop 3
+    if (stat /= 0) error stop 4
 
     open (newunit=unit, file=dir//"/primal.f90", status="replace", &
         action="write")
@@ -39,6 +49,7 @@ program test_polymorphic_array_ownership_oracle
     tangent = "module array_ownership_generated"//nl// &
         "    use array_ownership_case, only: child_t, holder_t"//nl// &
         "contains"//nl//generated%code// &
+        generated_reverse%code// &
         "end module array_ownership_generated"//nl
     open (newunit=unit, file=dir//"/tangent.f90", status="replace", &
         action="write")
@@ -46,9 +57,9 @@ program test_polymorphic_array_ownership_oracle
     close (unit)
     driver = "program driver"//nl// &
         "    use array_ownership_case, only: evaluate"//nl// &
-        "    use array_ownership_generated, only: evaluate_jvp"//nl// &
+        "    use array_ownership_generated, only: evaluate_jvp, evaluate_vjp"//nl// &
         "    implicit none"//nl// &
-        "    real(8) :: x, xd, y, yd, h, fd"//nl// &
+        "    real(8) :: x, xd, y, yd, yb, xb, h, fd"//nl// &
         "    x = 1.25d0"//nl// &
         "    xd = -0.4d0"//nl// &
         "    h = 1.0d-6"//nl// &
@@ -57,6 +68,11 @@ program test_polymorphic_array_ownership_oracle
         "    if (abs(yd - 4.0d0*x*xd) > 1.0d-13) error stop 5"//nl// &
         "    fd = (evaluate(x + h*xd) - evaluate(x - h*xd))/(2.0d0*h)"//nl// &
         "    if (abs(yd - fd) > 1.0d-7) error stop 6"//nl// &
+        "    yb = -0.7d0"//nl// &
+        "    call evaluate_vjp(x, y, yb, xb)"//nl// &
+        "    if (abs(xb - yb*4.0d0*x) > 1.0d-12) error stop 7"//nl// &
+        "    if (abs(xb*xd - yb*yd) > 1.0d-12) error stop 8"//nl// &
+        "    if (abs(xb*xd - yb*fd) > 1.0d-7) error stop 9"//nl// &
         "    print *, 'polymorphic array ownership oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", &
@@ -71,14 +87,14 @@ program test_polymorphic_array_ownership_oracle
     if (stat /= 0) then
         print *, "FAIL array polymorphic generated source did not compile"
         call show_file(dir//"/build.log")
-        error stop 7
+        error stop 10
     end if
     call execute_command_line("./"//dir//"/run > "//dir//"/out.txt 2>&1", &
         exitstat=stat)
     if (stat /= 0) then
         print *, "FAIL array polymorphic independent oracle"
         call show_file(dir//"/out.txt")
-        error stop 8
+        error stop 11
     end if
     print *, "test_polymorphic_array_ownership_oracle: all cases passed"
 
@@ -115,6 +131,34 @@ contains
             "    end function evaluate"//nl// &
             "end module array_ownership_case"//nl
     end function array_source
+
+    function dynamic_array_source() result(text)
+        character(len=:), allocatable :: text
+
+        text = array_source()
+        text = replace_all(text, "        type(holder_t) :: holders(2)"//nl, &
+            "        type(holder_t) :: holders(2)"//nl// &
+            "        integer :: selected"//nl// &
+            "        selected = 2"//nl)
+        text = replace_all(text, "holders(2)", "holders(selected)")
+    end function dynamic_array_source
+
+    function replace_all(text, old, new) result(out)
+        character(len=*), intent(in) :: text, old, new
+        character(len=:), allocatable :: out
+        character(len=:), allocatable :: rest
+        integer :: at
+
+        out = ""
+        rest = text
+        do
+            at = index(rest, old)
+            if (at == 0) exit
+            out = out//rest(:at - 1)//new
+            rest = rest(at + len(old):)
+        end do
+        out = out//rest
+    end function replace_all
 
     subroutine show_file(path)
         character(len=*), intent(in) :: path
