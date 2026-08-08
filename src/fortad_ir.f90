@@ -194,6 +194,7 @@ module fortad_ir
         procedure :: add_decl => proc_add_decl
         procedure :: add_decl_fields => proc_add_decl_fields
         procedure :: decl_index => proc_decl_index
+        procedure :: decl_index_of => proc_decl_index_of
     end type fad_proc_t
 
     public :: expr_const, expr_var, expr_binop, expr_unop, expr_call
@@ -495,6 +496,26 @@ contains
         out%is_associate_alias = .false.
         if (allocated(out%alias_target)) deallocate (out%alias_target)
     end subroutine set_decl_fields
+
+    !! Declaration index of the object behind a possibly-qualified reference.
+    !!
+    !! Callers used to write `decl_index_of(raw)`, passing a
+    !! `character(len=:), allocatable` function result straight into a
+    !! `character(len=*)` dummy. nvfortran rejects that -- "Argument number 2
+    !! to proc_decl_index: type mismatch" -- at every one of the forty call
+    !! sites, and that blocked the OpenACC build of the whole stack.
+    !!
+    !! Extracting the base name inside keeps the deferred-length string from
+    !! crossing a procedure boundary, and is a better interface regardless:
+    !! the two steps were always taken together.
+    integer function proc_decl_index_of(self, raw) result(idx)
+        class(fad_proc_t), intent(in) :: self
+        character(len=*), intent(in) :: raw
+        character(len=:), allocatable :: base
+
+        base = fad_base_name(raw)
+        idx = proc_decl_index(self, base)
+    end function proc_decl_index_of
 
     integer function proc_decl_index(self, name) result(idx)
         !! Index of the declaration for `name`, or 0.

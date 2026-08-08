@@ -1793,7 +1793,7 @@ contains
         found = .false.
         if (idx <= 0 .or. idx > proc%n_exprs) return
         if (.not. allocated(proc%exprs(idx)%text)) return
-        di = proc%decl_index(fad_base_name(proc%exprs(idx)%text))
+        di = proc%decl_index_of(proc%exprs(idx)%text)
         ! Component ownership needs a containing-object lifetime model.  Do
         ! not accept it merely because the expression contains a percent sign.
         found = .false.

@@ -265,8 +265,8 @@ contains
                 end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
                 if (.not. expr_reads_active(primal, primal%stmts(j)%value, active)) cycle
-                di = primal%decl_index(fad_base_name( &
-                    primal%stmts(j)%target))
+                di = primal%decl_index_of( &
+                    primal%stmts(j)%target)
                 if (di > 0) then
                     if (.not. active(di)) then
                         active(di) = .true.
@@ -339,7 +339,7 @@ contains
         if (.not. primal%stmts(stmt_index)%allocation_target_polymorphic) return
         if (.not. allocated(primal%stmts(stmt_index)%allocation_args)) return
         target_text = emit_expr(primal, primal%stmts(stmt_index)%allocation_args(1))
-        holder_di = primal%decl_index(fad_base_name(target_text))
+        holder_di = primal%decl_index_of(target_text)
         if (holder_di <= 0) return
         if (primal%decls(holder_di)%is_polymorphic) return
         if (primal%stmts(stmt_index)%allocation_source <= 0) return
@@ -381,8 +381,8 @@ contains
             if (primal%stmts(i)%kind == FAD_ALLOCATE) then
                 if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
                 if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) return
-                target_di = primal%decl_index(fad_base_name( &
-                    primal%exprs(primal%stmts(i)%allocation_args(1))%text))
+                target_di = primal%decl_index_of( &
+                    primal%exprs(primal%stmts(i)%allocation_args(1))%text)
                 if (target_di /= owner_di) cycle
                 if (found) return
                 if (primal%stmts(i)%allocation_source <= 0) return
@@ -419,8 +419,8 @@ contains
                 type_name = ""
                 return
             end if
-            target_di = primal%decl_index(fad_base_name( &
-                primal%exprs(primal%stmts(i)%allocation_args(1))%text))
+            target_di = primal%decl_index_of( &
+                primal%exprs(primal%stmts(i)%allocation_args(1))%text)
             if (target_di /= owner_di) cycle
             if (primal%stmts(i)%allocation_source <= 0 .or. &
                 primal%stmts(i)%allocation_mold > 0) then
@@ -451,7 +451,7 @@ contains
         di = 0
         if (idx <= 0 .or. idx > primal%n_exprs) return
         if (primal%exprs(idx)%kind /= FAD_VAR) return
-        di = primal%decl_index(fad_base_name(primal%exprs(idx)%text))
+        di = primal%decl_index_of(primal%exprs(idx)%text)
         if (di <= 0 .or. primal%decls(di)%is_polymorphic) di = 0
     end function fixed_source_decl
 
@@ -532,7 +532,7 @@ contains
         if (idx <= 0 .or. idx > p%n_exprs) return
         select case (p%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
-            di = p%decl_index(fad_base_name(p%exprs(idx)%text))
+            di = p%decl_index_of(p%exprs(idx)%text)
         end select
     end function arg_decl_index
 
@@ -582,7 +582,7 @@ contains
         associate (e => p%exprs(idx))
             select case (e%kind)
             case (FAD_VAR, FAD_INDEX)
-                di = p%decl_index(fad_base_name(e%text))
+                di = p%decl_index_of(e%text)
                 if (di > 0) yes = decl_active(p, di, active)
                 if (yes) return
             end select
@@ -1016,7 +1016,7 @@ contains
         logical :: target_active, source_active
 
         target_text = emit_expr(primal, ps%allocation_args(1))
-        di = primal%decl_index(fad_base_name(target_text))
+        di = primal%decl_index_of(target_text)
         target_active = .false.
         if (di > 0) target_active = decl_active(primal, di, active)
 
@@ -1073,7 +1073,7 @@ contains
 
         status%ok = .true.
         target = emit_expr(primal, ps%allocation_args(1))
-        di = primal%decl_index(fad_base_name(target))
+        di = primal%decl_index_of(target)
         if (di > 0) then
             if (decl_active(primal, di, active)) then
                 call reset_statement(s)
@@ -1107,8 +1107,8 @@ contains
 
         source = emit_expr(primal, ps%call_args(1))
         target = emit_expr(primal, ps%call_args(2))
-        source_di = primal%decl_index(fad_base_name(source))
-        target_di = primal%decl_index(fad_base_name(target))
+        source_di = primal%decl_index_of(source)
+        target_di = primal%decl_index_of(target)
         source_active = .false.
         if (source_di > 0) source_active = active(source_di)
         target_active = .false.
@@ -1272,7 +1272,7 @@ contains
                 out = 0
 
             case (FAD_VAR)
-                di = primal%decl_index(fad_base_name(pe%text))
+                di = primal%decl_index_of(pe%text)
                 if (di > 0) then
                     if (component_expr_is_active(primal, idx, active, &
                         active_paths)) then
@@ -1291,7 +1291,7 @@ contains
                 end if
 
             case (FAD_INDEX)
-                di = primal%decl_index(fad_base_name(pe%text))
+                di = primal%decl_index_of(pe%text)
                 if (di > 0) then
                     if (component_expr_is_active(primal, idx, active, &
                         active_paths)) then
@@ -1423,7 +1423,7 @@ contains
         if (di <= size(active)) yes = active(di)
         if (yes .or. .not. p%decls(di)%is_select_alias) return
         if (.not. allocated(p%decls(di)%alias_target)) return
-        base_di = p%decl_index(fad_base_name(p%decls(di)%alias_target))
+        base_di = p%decl_index_of(p%decls(di)%alias_target)
         if (base_di > 0 .and. base_di <= size(active)) yes = active(base_di)
     end function decl_active
 
@@ -1473,7 +1473,7 @@ contains
             exit
         end do
         if (component) return
-        di = primal%decl_index(fad_base_name(text))
+        di = primal%decl_index_of(text)
         if (di > 0) yes = decl_active(primal, di, active)
     end function component_path_is_active
 

@@ -789,7 +789,7 @@ contains
                 ! An array-element target must resolve to its array, or the
                 ! array never becomes active and its adjoint is silently
                 ! dropped - a wrong gradient that looks plausible.
-                di = primal%decl_index(fad_base_name(primal%stmts(j)%target))
+                di = primal%decl_index_of(primal%stmts(j)%target)
                 if (di > 0) then
                     if (.not. varied(di)) then
                         varied(di) = .true.
@@ -845,7 +845,7 @@ contains
                     cycle
                 end if
                 if (primal%stmts(j)%kind /= FAD_ASSIGN) cycle
-                di = primal%decl_index(fad_base_name(primal%stmts(j)%target))
+                di = primal%decl_index_of(primal%stmts(j)%target)
                 if (di == 0) cycle
                 if (.not. useful(di)) cycle
                 if (mark_reads(primal, primal%stmts(j)%value, useful)) changed = .true.
@@ -874,8 +874,8 @@ contains
             if (allocated(primal%stmts(i)%allocation_args)) then
                 if (size(primal%stmts(i)%allocation_args) >= 1) then
                     if (has_fixed_source_owner(primal, &
-                        primal%decl_index(fad_base_name(emit_expr(primal, &
-                        primal%stmts(i)%allocation_args(1)))))) cycle
+                        primal%decl_index_of(emit_expr(primal, &
+                        primal%stmts(i)%allocation_args(1))))) cycle
                 end if
             end if
             status%ok = .false.
@@ -907,7 +907,7 @@ contains
                 if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
                 target = emit_expr(primal, primal%stmts(i)%allocation_args(1))
                 if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) cycle
-                target_di = primal%decl_index(fad_base_name(target))
+                target_di = primal%decl_index_of(target)
                 if (target_di /= owner_di) cycle
                 if (found) return
                 if (primal%stmts(i)%allocation_source <= 0 .or. &
@@ -915,8 +915,8 @@ contains
                 source_di = 0
                 if (primal%stmts(i)%allocation_source > 0) then
                     if (primal%exprs(primal%stmts(i)%allocation_source)%kind == FAD_VAR) then
-                        source_di = primal%decl_index(fad_base_name( &
-                            primal%exprs(primal%stmts(i)%allocation_source)%text))
+                        source_di = primal%decl_index_of( &
+                            primal%exprs(primal%stmts(i)%allocation_source)%text)
                         if (source_di > 0) then
                             if (primal%decls(source_di)%is_polymorphic) source_di = 0
                         end if
@@ -1009,7 +1009,7 @@ contains
         if (idx <= 0 .or. idx > primal%n_exprs) return
         select case (primal%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
-            di = primal%decl_index(fad_base_name(primal%exprs(idx)%text))
+            di = primal%decl_index_of(primal%exprs(idx)%text)
             if (di > 0) then
                 if (di <= size(active)) then
                     yes = active(di) .and. decl_is_complex(primal, di)
@@ -1078,7 +1078,7 @@ contains
         if (idx <= 0 .or. idx > primal%n_exprs) return
         if (primal%exprs(idx)%kind /= FAD_VAR .and. &
             primal%exprs(idx)%kind /= FAD_INDEX) return
-        di = primal%decl_index(fad_base_name(primal%exprs(idx)%text))
+        di = primal%decl_index_of(primal%exprs(idx)%text)
         if (di <= 0 .or. di > size(active)) return
         yes = active(di) .and. decl_is_complex(primal, di)
     end function simple_active_complex
@@ -1121,7 +1121,7 @@ contains
         if (idx <= 0 .or. idx > p%n_exprs) return
         select case (p%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
-            di = p%decl_index(fad_base_name(p%exprs(idx)%text))
+            di = p%decl_index_of(p%exprs(idx)%text)
             if (di > 0) then
                 if (flags(di)) then
                     yes = .true.
@@ -1162,7 +1162,7 @@ contains
         di = 0
         if (idx <= 0 .or. idx > p%n_exprs) return
         if (p%exprs(idx)%kind == FAD_VAR) then
-            di = p%decl_index(fad_base_name(p%exprs(idx)%text))
+            di = p%decl_index_of(p%exprs(idx)%text)
         end if
     end function call_arg_decl_index
 
@@ -1178,7 +1178,7 @@ contains
         if (idx <= 0 .or. idx > p%n_exprs) return
         select case (p%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
-            di = p%decl_index(fad_base_name(p%exprs(idx)%text))
+            di = p%decl_index_of(p%exprs(idx)%text)
             if (di > 0) then
                 if (.not. flags(di)) then
                     flags(di) = .true.
@@ -1246,7 +1246,7 @@ contains
 
         ! One outgoing adjoint per independent.
         do i = 1, size(spec%independents)
-            di = primal%decl_index(fad_base_name(trim(spec%independents(i))))
+            di = primal%decl_index_of(trim(spec%independents(i)))
             if (di == 0) cycle
             base = fad_base_name(trim(spec%independents(i)))
             seen = .false.
@@ -1384,11 +1384,11 @@ contains
                 is_element(n_rec + 1) = index(primal%stmts(i)%target, "(") > 0 .or. &
                     index(primal%stmts(i)%target, "%") > 0
                 if (is_element(n_rec + 1)) then
-                    di = primal%decl_index(fad_base_name( &
-                        primal%stmts(i)%target))
+                    di = primal%decl_index_of( &
+                        primal%stmts(i)%target)
                 else
-                    di = primal%decl_index(fad_base_name( &
-                        primal%stmts(i)%target))
+                    di = primal%decl_index_of( &
+                        primal%stmts(i)%target)
                 end if
                 if (di == 0) then
                     status%ok = .false.
@@ -1639,8 +1639,8 @@ contains
         if (d%is_polymorphic .and. ps%allocation_source > 0) then
             source_di = 0
             if (primal%exprs(ps%allocation_source)%kind == FAD_VAR) then
-                source_di = primal%decl_index(fad_base_name( &
-                    primal%exprs(ps%allocation_source)%text))
+                source_di = primal%decl_index_of( &
+                    primal%exprs(ps%allocation_source)%text)
             end if
             if (source_di > 0) then
                 d%type_name = primal%decls(source_di)%type_name
@@ -2235,7 +2235,7 @@ contains
                     "inside a branch arm"
                 return
             end if
-            di = primal%decl_index(fad_base_name(primal%stmts(i)%target))
+            di = primal%decl_index_of(primal%stmts(i)%target)
             if (di == 0) then
                 status%ok = .false.
                 status%message = "assignment to undeclared '"// &
@@ -2561,8 +2561,8 @@ contains
                 block
                     integer :: cdi
                     type(fad_decl_t) :: cd
-                    cdi = primal%decl_index(fad_base_name( &
-                        primal%stmts(i)%target))
+                    cdi = primal%decl_index_of( &
+                        primal%stmts(i)%target)
                     cd = primal%decls(cdi)
                     cd%name = fresh
                     cd%intent = FAD_INTENT_NONE
@@ -2577,7 +2577,7 @@ contains
                 block
                     integer :: base_di
                     type(fad_decl_t) :: bd
-                    base_di = primal%decl_index(fad_base_name(fresh))
+                    base_di = primal%decl_index_of(fresh)
                     if (base_di > 0) then
                         bd = primal%decls(base_di)
                         bd%is_result = .false.
@@ -2596,8 +2596,8 @@ contains
                 block
                     integer :: tdi
                     type(fad_decl_t) :: td
-                    tdi = primal%decl_index(fad_base_name( &
-                        primal%stmts(i)%target))
+                    tdi = primal%decl_index_of( &
+                        primal%stmts(i)%target)
                     if (tdi > 0) then
                         td = primal%decls(tdi)
                         td%name = fresh
@@ -3993,7 +3993,7 @@ contains
 
         yes = .false.
         call ssa_base_of(ssa, trim(ssa_name), base)
-        di = primal%decl_index(fad_base_name(base))
+        di = primal%decl_index_of(base)
         if (di > 0) yes = active(di)
     end function adjoint_is_live
 
@@ -4008,7 +4008,7 @@ contains
         integer :: di, ignored
 
         call ssa_base_of(ssa, ssa_name, base)
-        di = primal%decl_index(fad_base_name(base))
+        di = primal%decl_index_of(base)
         if (di == 0) return
         d = primal%decls(di)
         d%name = ssa_name//suffix
@@ -4326,7 +4326,7 @@ contains
         select case (adjoint%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
             call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
-            di = primal%decl_index(fad_base_name(base))
+            di = primal%decl_index_of(base)
             if (di > 0) then
                 if (primal%decls(di)%is_array) then
                     found = di
@@ -4446,7 +4446,7 @@ contains
             if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
             if (index(trim(primal%stmts(i)%target), "%") == 0) cycle
             if (index(trim(primal%stmts(i)%target), "(") == 0) cycle
-            di = primal%decl_index(fad_base_name(primal%stmts(i)%target))
+            di = primal%decl_index_of(primal%stmts(i)%target)
             if (di == 0) cycle
             call add_component_snapshot(ssa, primal%stmts(i)%target, snapshot)
             d = primal%decls(di)
@@ -4538,7 +4538,7 @@ contains
             exit
         end do
         if (component) return
-        di = primal%decl_index(fad_base_name(text))
+        di = primal%decl_index_of(text)
         if (di > 0) then
             yes = active(di)
         end if
