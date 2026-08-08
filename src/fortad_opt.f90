@@ -455,7 +455,7 @@ contains
                 end if
             end if
             n = n + 1
-            out(n) = p%stmts(i)
+            call fad_copy_stmt(out(n), p%stmts(i))
         end do
         p%stmts(1:n) = out(1:n)
         p%n_stmts = n
@@ -2783,9 +2783,9 @@ contains
             end block
         end if
         do i = p%n_stmts, at, -1
-            p%stmts(i + 1) = p%stmts(i)
+            call fad_copy_stmt(p%stmts(i + 1), p%stmts(i))
         end do
-        p%stmts(at) = s
+        call fad_copy_stmt(p%stmts(at), s)
         p%n_stmts = p%n_stmts + 1
     end subroutine insert_before
 
@@ -3393,7 +3393,7 @@ contains
 
         moved = p%stmts(target_stmt)
         do k = target_stmt, first + 2, -1
-            p%stmts(k) = p%stmts(k - 1)
+            call fad_copy_stmt(p%stmts(k), p%stmts(k - 1))
         end do
         p%stmts(first + 1) = moved
 
