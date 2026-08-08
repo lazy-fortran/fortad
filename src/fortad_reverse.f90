@@ -119,10 +119,18 @@ module fortad_reverse
     type :: allocation_record_t
         !! One explicitly allocated, simple allocatable owner.
         character(len=:), allocatable :: owner
+        !! For a polymorphic allocatable component, ``owner`` is the concrete
+        !! derived-object shadow base and ``owner_path`` is the component
+        !! descriptor whose lifetime is retained (for example
+        !! ``box%field%payload``).  Keeping both avoids pretending that the
+        !! enclosing derived object owns allocatable storage itself.
+        character(len=:), allocatable :: owner_path
         character(len=:), allocatable :: previous_owner
         character(len=:), allocatable :: source
+        character(len=:), allocatable :: source_type
         logical :: active = .false.
         logical :: deallocated = .false.
+        logical :: component = .false.
     end type allocation_record_t
 
     type :: call_record_t
@@ -584,6 +592,8 @@ contains
         end if
         call check_reverse_move_alloc_shape(primal, status)
         if (.not. status%ok) return
+        call check_nested_polymorphic_component_lifetime(primal, status)
+        if (.not. status%ok) return
 
         depth = 0
         do i = 1, primal%n_stmts
@@ -665,22 +675,12 @@ contains
                 owner = fad_base_name(owner_text)
                 if (index(trim(owner_text), "%") > 0) then
                     if (primal%stmts(i)%allocation_target_polymorphic) then
-                        status%ok = .false.
-                        if (array_element_component(owner_text)) then
-                            status%message = "reverse mode: array-element polymorphic "// &
-                                "component allocation '"//trim(owner_text)// &
-                                "' cannot replay SOURCE= ownership per element; "// &
-                                "forward fixed-source differentiation is supported, "// &
-                                "but reverse needs a per-element value-copy replay tape"
-                        else
-                            status%message = "reverse mode: nested polymorphic component "// &
-                                "allocation '"//trim(owner_text)// &
-                                "' cannot replay SOURCE= ownership; forward fixed-source "// &
-                                "differentiation is supported, but reverse needs a "// &
-                                "component value-copy replay tape"
-                        end if
-                        return
+                        ! The bounded component lifetime was checked above.  It
+                        ! is retained as a component descriptor, not mistaken
+                        ! for an allocatable declaration named by its base.
+                        cycle
                     end if
+                    if (is_polymorphic_component_path(primal, owner_text)) cycle
                     status%ok = .false.
                     status%message = "reverse mode: allocation owner '"// &
                         trim(owner)//"' must be a simple local or dummy "// &
@@ -777,6 +777,264 @@ contains
         end do
 
     end subroutine check_supported
+
+    subroutine check_nested_polymorphic_component_lifetime(primal, status)
+        !! Permit one and only one scalar polymorphic component acquisition.
+        !! The component must be acquired from one declared concrete source and
+        !! released once after the straight-line computation.  This is the
+        !! reverse boundary for ``allocate(box%field%payload, source=child)``;
+        !! array elements, reallocation, aliases, and ownership transfers stay
+        !! refusals because their descriptor history is not represented here.
+        type(fad_proc_t), intent(in) :: primal
+        type(reverse_status_t), intent(inout) :: status
+        integer :: i, n_allocate, n_deallocate, allocate_at, deallocate_at
+        character(len=:), allocatable :: target, deallocated_target
+
+        status%ok = .true.
+        n_allocate = 0
+        n_deallocate = 0
+        allocate_at = 0
+        deallocate_at = 0
+        target = ""
+        deallocated_target = ""
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind == FAD_ALLOCATE) then
+                if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
+                if (size(primal%stmts(i)%allocation_args) < 1) cycle
+                target = emit_expr(primal, primal%stmts(i)%allocation_args(1))
+                if (.not. primal%stmts(i)%allocation_target_polymorphic) cycle
+                if (index(trim(target), "%") == 0) cycle
+                n_allocate = n_allocate + 1
+                allocate_at = i
+                if (.not. fixed_source_component(primal, i)) then
+                    status%ok = .false.
+                    if (array_element_component(target)) then
+                        status%message = "reverse mode: array-element polymorphic component "// &
+                            "allocation '"//trim(target)//"' cannot replay SOURCE= ownership "// &
+                            "per element; reverse needs a per-element value-copy replay tape"
+                    else
+                        status%message = "reverse mode: nested polymorphic component allocation '"// &
+                            trim(target)//"' cannot replay SOURCE= ownership; requires one "// &
+                            "scalar fixed-source acquisition with the same concrete dynamic type"
+                    end if
+                    return
+                end if
+            else if (primal%stmts(i)%kind == FAD_DEALLOCATE) then
+                if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
+                if (size(primal%stmts(i)%allocation_args) < 1) cycle
+                deallocated_target = emit_expr(primal, &
+                    primal%stmts(i)%allocation_args(1))
+                if (.not. is_polymorphic_component_path(primal, &
+                    deallocated_target)) cycle
+                n_deallocate = n_deallocate + 1
+                deallocate_at = i
+            end if
+        end do
+
+        if (n_allocate == 0) return
+        if (n_allocate /= 1 .or. n_deallocate /= 1) then
+            status%ok = .false.
+            status%message = "reverse mode: polymorphic component ownership '"// &
+                trim(target)//"' does not support reallocation or repeated "// &
+                "acquisition/deallocation"
+            return
+        end if
+        if (.not. same_component_name(target, deallocated_target) .or. &
+            deallocate_at <= allocate_at) then
+            status%ok = .false.
+            status%message = "reverse mode: polymorphic component ownership '"// &
+                trim(target)//"' requires one matching final deallocation"
+            return
+        end if
+    end subroutine check_nested_polymorphic_component_lifetime
+
+    logical function fixed_source_component(primal, stmt_index) result(supported)
+        !! Facts for the one supported component ownership transition.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: stmt_index
+        character(len=:), allocatable :: target, source_type, dispatch_type
+        integer :: owner_di, source_di, i
+        logical :: found
+
+        supported = .false.
+        if (stmt_index <= 0 .or. stmt_index > primal%n_stmts) return
+        if (primal%stmts(stmt_index)%kind /= FAD_ALLOCATE) return
+        if (.not. primal%stmts(stmt_index)%allocation_target_polymorphic) return
+        if (.not. allocated(primal%stmts(stmt_index)%allocation_args)) return
+        if (size(primal%stmts(stmt_index)%allocation_args) < 1) return
+        target = emit_expr(primal, primal%stmts(stmt_index)%allocation_args(1))
+        if (index(trim(target), "%") == 0) return
+        if (array_element_component(target)) return
+        if (index(trim(target), "(") > 0) return
+        if (primal%stmts(stmt_index)%allocation_source <= 0 .or. &
+            primal%stmts(stmt_index)%allocation_mold > 0) return
+        source_di = concrete_source_decl(primal, &
+            primal%stmts(stmt_index)%allocation_source)
+        if (source_di <= 0) return
+        if (.not. source_initializer_supported(primal, source_di)) return
+
+        owner_di = primal%decl_index(fad_base_name(target))
+        if (owner_di <= 0) return
+        if (primal%decls(owner_di)%is_polymorphic .or. &
+            primal%decls(owner_di)%is_allocatable .or. &
+            primal%decls(owner_di)%is_associate_alias .or. &
+            primal%decls(owner_di)%is_select_alias) return
+
+        found = .false.
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (.not. same_component_name(emit_expr(primal, i), target)) cycle
+            found = .true.
+            if (.not. primal%exprs(i)%component_is_allocatable .or. &
+                .not. primal%exprs(i)%component_is_polymorphic) return
+            if (primal%exprs(i)%component_is_pointer .or. &
+                primal%exprs(i)%component_is_target .or. &
+                primal%exprs(i)%component_is_global) return
+            if (primal%exprs(i)%component_rank /= 0) return
+            exit
+        end do
+        if (.not. found) return
+
+        source_type = type_leaf(primal%decls(source_di)%type_name)
+        dispatch_type = ""
+        found = .false.
+        do i = stmt_index + 1, primal%n_stmts
+            if (primal%stmts(i)%kind == FAD_END_SELECT) exit
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            if (.not. same_component_name(emit_expr(primal, &
+                primal%stmts(i)%value), target)) cycle
+            call fixed_dispatch_type(primal, i, dispatch_type, found)
+            exit
+        end do
+        if (.not. found) return
+        supported = same_variable_name(source_type, type_leaf(dispatch_type))
+    end function fixed_source_component
+
+    integer function concrete_source_decl(primal, idx) result(di)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+
+        di = 0
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind /= FAD_VAR) return
+        di = primal%decl_index_of(primal%exprs(idx)%text)
+        if (di <= 0 .or. primal%decls(di)%is_polymorphic) di = 0
+    end function concrete_source_decl
+
+    logical function source_initializer_supported(primal, source_di) result(ok)
+        !! Do not let the ownership classifier hide an unsupported active
+        !! initializer of the concrete SOURCE object.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: source_di
+        integer :: i
+
+        ok = .true.
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (primal%decl_index(fad_base_name(primal%stmts(i)%target)) /= &
+                source_di) cycle
+            if (.not. initializer_calls_supported(primal, &
+                primal%stmts(i)%value)) then
+                ok = .false.
+                return
+            end if
+        end do
+    end function source_initializer_supported
+
+    recursive logical function initializer_calls_supported(primal, idx) result(ok)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        integer :: i
+
+        ok = .true.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind == FAD_CALL .and. &
+            .not. has_rule(primal%exprs(idx)%text)) then
+            ok = .false.
+            return
+        end if
+        do i = 1, size(primal%exprs(idx)%args)
+            if (.not. initializer_calls_supported(primal, &
+                primal%exprs(idx)%args(i))) then
+                ok = .false.
+                return
+            end if
+        end do
+    end function initializer_calls_supported
+
+    subroutine fixed_dispatch_type(primal, select_at, type_name, found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: select_at
+        character(len=:), allocatable, intent(out) :: type_name
+        logical, intent(out) :: found
+        integer :: i, depth, concrete
+
+        type_name = ""
+        found = .false.
+        concrete = 0
+        depth = 1
+        do i = select_at + 1, primal%n_stmts
+            select case (primal%stmts(i)%kind)
+            case (FAD_SELECT_TYPE)
+                depth = depth + 1
+            case (FAD_END_SELECT)
+                depth = depth - 1
+                if (depth == 0) exit
+            case (FAD_TYPE_IS, FAD_CLASS_IS)
+                if (depth /= 1) cycle
+                concrete = concrete + 1
+                if (allocated(primal%stmts(i)%target)) then
+                    type_name = primal%stmts(i)%target
+                end if
+            end select
+        end do
+        found = concrete == 1 .and. len_trim(type_name) > 0
+    end subroutine fixed_dispatch_type
+
+    logical function is_polymorphic_component_path(primal, text) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        integer :: i
+
+        found = .false.
+        if (index(trim(text), "%") == 0) return
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (.not. same_component_name(emit_expr(primal, i), text)) cycle
+            found = primal%exprs(i)%component_is_allocatable .and. &
+                primal%exprs(i)%component_is_polymorphic
+            return
+        end do
+    end function is_polymorphic_component_path
+
+    function type_leaf(type_name) result(leaf)
+        character(len=*), intent(in) :: type_name
+        character(len=:), allocatable :: leaf
+        integer :: open, close
+
+        leaf = trim(type_name)
+        open = index(leaf, "(")
+        close = index(leaf, ")", back=.true.)
+        if (open > 0 .and. close > open) leaf = trim(leaf(open + 1:close - 1))
+    end function type_leaf
+
+    function shadow_component_path(path, suffix) result(shadow)
+        !! Put the derivative suffix on the enclosing derived object, not on
+        !! the allocatable component name: ``box%field%payload`` becomes
+        !! ``box_b%field%payload``.
+        character(len=*), intent(in) :: path, suffix
+        character(len=:), allocatable :: shadow, base
+        integer :: cut
+
+        base = fad_base_name(path)
+        cut = len_trim(base) + 1
+        if (cut <= len_trim(path)) then
+            shadow = trim(base)//trim(suffix)//trim(path(cut:))
+        else
+            shadow = trim(base)//trim(suffix)
+        end if
+    end function shadow_component_path
 
     subroutine check_component_reallocation_shape(stmt, status)
         !! Reverse replay is deliberately narrower than ordinary component
@@ -1135,6 +1393,9 @@ contains
                 active)) cycle
             if (allocated(primal%stmts(i)%allocation_args)) then
                 if (size(primal%stmts(i)%allocation_args) >= 1) then
+                    if (primal%stmts(i)%allocation_target_polymorphic .and. &
+                        index(trim(emit_expr(primal, primal%stmts(i)%allocation_args(1))), &
+                        "%") > 0 .and. fixed_source_component(primal, i)) cycle
                     if (has_fixed_source_owner(primal, &
                         primal%decl_index_of(emit_expr(primal, &
                         primal%stmts(i)%allocation_args(1))))) cycle
@@ -1852,15 +2113,23 @@ contains
         type(reverse_status_t), intent(inout) :: status
         type(fad_decl_t) :: d
         type(fad_stmt_t) :: s
-        character(len=:), allocatable :: owner
+        character(len=:), allocatable :: owner, owner_text, derivative_target
         integer :: di, i, ignored, source_di
-        logical :: indexed_owner
+        logical :: indexed_owner, component_owner
 
         status%ok = .true.
-        owner = fad_base_name(emit_expr(primal, ps%allocation_args(1)))
+        owner_text = emit_expr(primal, ps%allocation_args(1))
+        owner = fad_base_name(owner_text)
+        component_owner = ps%allocation_target_polymorphic .and. &
+            index(trim(owner_text), "%") > 0
         record%owner = trim(owner)
+        record%owner_path = trim(owner_text)
+        record%component = component_owner
         if (ps%allocation_source > 0) then
             record%source = trim(emit_expr(primal, ps%allocation_source))
+            source_di = concrete_source_decl(primal, ps%allocation_source)
+            if (source_di > 0) record%source_type = &
+                type_leaf(primal%decls(source_di)%type_name)
         end if
         di = primal%decl_index(trim(owner))
         if (di <= 0) then
@@ -1877,7 +2146,15 @@ contains
         call reset_reverse_statement(s)
         s%kind = FAD_ALLOCATE
         indexed_owner = primal%exprs(ps%allocation_args(1))%kind == FAD_INDEX
-        if (indexed_owner) then
+        if (component_owner) then
+            allocate (s%allocation_args(size(ps%allocation_args)))
+            s%allocation_args(1) = copy_renamed(primal, adjoint, &
+                ps%allocation_args(1), ssa)
+            do i = 2, size(ps%allocation_args)
+                s%allocation_args(i) = copy_renamed(primal, adjoint, &
+                    ps%allocation_args(i), ssa)
+            end do
+        else if (indexed_owner) then
             if (allocated(primal%exprs(ps%allocation_args(1))%args)) then
                 allocate (s%allocation_args(1 + size( &
                     primal%exprs(ps%allocation_args(1))%args)))
@@ -1905,6 +2182,10 @@ contains
         ignored = adjoint%add_stmt(s)
 
         record%active = active(di)
+        if (component_owner .and. ps%allocation_source > 0) then
+            source_di = concrete_source_decl(primal, ps%allocation_source)
+            if (source_di > 0) record%active = record%active .or. active(source_di)
+        end if
         if (.not. record%active) return
 
         d%name = trim(owner)//trim(suffix)
@@ -1931,7 +2212,13 @@ contains
         call reset_reverse_statement(s)
         s%kind = FAD_ALLOCATE
         allocate (s%allocation_args(1))
-        s%allocation_args(1) = adjoint%add_expr(expr_var(d%name))
+        if (component_owner) then
+            derivative_target = shadow_component_path(trim(owner_text), suffix)
+            s%allocation_args(1) = adjoint%add_expr(expr_var( &
+                derivative_target))
+        else
+            s%allocation_args(1) = adjoint%add_expr(expr_var(d%name))
+        end if
         if (d%is_polymorphic) then
             s%allocation_mold = adjoint%add_expr(expr_var(trim(owner)))
         else if (ps%allocation_source > 0) then
@@ -1942,10 +2229,15 @@ contains
         end if
         ignored = adjoint%add_stmt(s)
 
+        if (component_owner) then
+            call emit_zero_component_shadow(primal, adjoint, active, suffix, &
+                record)
+        end if
+
         ! A polymorphic shadow cannot be assigned a scalar zero.  Its fixed
         ! SOURCE= dynamic type is retained by MOLD=owner; the active concrete
         ! component is initialized by zero_component_adjoints below.
-        if (.not. d%is_polymorphic .and. &
+        if (.not. component_owner .and. .not. d%is_polymorphic .and. &
             index(trim(d%type_name), "type(") /= 1) then
             call reset_reverse_statement(s)
             s%kind = FAD_ASSIGN
@@ -1954,6 +2246,65 @@ contains
             ignored = adjoint%add_stmt(s)
         end if
     end subroutine emit_allocation_forward
+
+    subroutine emit_zero_component_shadow(primal, adjoint, active, suffix, &
+            record)
+        !! A component shadow is allocated with SOURCE= so its dynamic type
+        !! is proven, then its real scalar payload leaves are reset before
+        !! reverse accumulation.  The payload is never assigned a scalar
+        !! directly while it is CLASS(base_t).
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: suffix
+        type(allocation_record_t), intent(in) :: record
+        type(fad_stmt_t) :: s
+        character(len=:), allocatable :: source, target, tail, alias, component_text
+        integer :: i, ignored, n_real
+        logical :: opened
+
+        associate (unused_active => active, unused_suffix => suffix)
+        end associate
+        if (.not. record%component .or. .not. allocated(record%source) .or. &
+            .not. allocated(record%source_type)) return
+        source = trim(record%source)
+        target = shadow_component_path(trim(record%owner_path), suffix)
+        alias = "fad_component_shadow_b"
+        opened = .false.
+        n_real = 0
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (.not. primal%stmts(i)%target_is_component_path) cycle
+            if (.not. primal%stmts(i)%target_component_is_real) cycle
+            if (.not. allocated(primal%stmts(i)%target)) cycle
+            if (index(trim(primal%stmts(i)%target), source//"%") /= 1) cycle
+            component_text = trim(primal%stmts(i)%target)
+            if (.not. opened) then
+                call reset_reverse_statement(s)
+                s%kind = FAD_SELECT_TYPE
+                s%value = adjoint%add_expr(expr_var(target))
+                s%target = alias
+                ignored = adjoint%add_stmt(s)
+                call reset_reverse_statement(s)
+                s%kind = FAD_TYPE_IS
+                s%target = record%source_type
+                ignored = adjoint%add_stmt(s)
+                opened = .true.
+            end if
+            tail = component_text(len_trim(source) + 1:)
+            call reset_reverse_statement(s)
+            s%kind = FAD_ASSIGN
+            s%target = alias//tail
+            s%value = adjoint%add_expr(expr_const("0.0"//adjoint%real_suffix))
+            ignored = adjoint%add_stmt(s)
+            n_real = n_real + 1
+        end do
+        if (opened .and. n_real > 0) then
+            call reset_reverse_statement(s)
+            s%kind = FAD_END_SELECT
+            ignored = adjoint%add_stmt(s)
+        end if
+    end subroutine emit_zero_component_shadow
 
     subroutine emit_move_alloc_forward(primal, adjoint, ssa, ps, active, &
             suffix, allocations, n_allocations, status)
@@ -2043,6 +2394,24 @@ contains
             if (.not. allocations(i)%deallocated) cycle
             di = primal%decl_index(trim(allocations(i)%owner))
             if (di <= 0) cycle
+            if (allocations(i)%component) then
+                if (allocations(i)%active .and. adjoint%decl_index( &
+                    trim(allocations(i)%owner)//trim(suffix)) > 0) then
+                    call reset_reverse_statement(s)
+                    s%kind = FAD_DEALLOCATE
+                    allocate (s%allocation_args(1))
+                    s%allocation_args(1) = adjoint%add_expr(expr_var( &
+                        shadow_component_path(trim(allocations(i)%owner_path), suffix)))
+                    ignored = adjoint%add_stmt(s)
+                end if
+                call reset_reverse_statement(s)
+                s%kind = FAD_DEALLOCATE
+                allocate (s%allocation_args(1))
+                s%allocation_args(1) = adjoint%add_expr(expr_var( &
+                    trim(allocations(i)%owner_path)))
+                ignored = adjoint%add_stmt(s)
+                cycle
+            end if
             if (allocations(i)%active .and. adjoint%decl_index( &
                 trim(allocations(i)%owner)//trim(suffix)) > 0) then
                 call reset_reverse_statement(s)
@@ -2069,7 +2438,9 @@ contains
         type(allocation_record_t), intent(in) :: allocations(:)
         integer, intent(in) :: n_allocations
         type(fad_stmt_t) :: s
-        character(len=:), allocatable :: source, payload, target
+        character(len=:), allocatable :: source, payload, target, owner_path
+        character(len=:), allocatable :: source_alias
+        character(len=32) :: source_number
         integer :: i, percent, ignored
 
         percent = index(trim(lhs), "%")
@@ -2079,11 +2450,42 @@ contains
             source = trim(allocations(i)%source)
             if (index(trim(lhs), source//"%") /= 1) cycle
             payload = trim(lhs(percent:))
-            target = trim(allocations(i)%owner)//trim(suffix)//payload
-            s%kind = FAD_ASSIGN
-            s%target = fad_suffix_name(trim(lhs), suffix)
-            s%value = adjoint%add_expr(expr_var(target))
-            ignored = adjoint%add_stmt(s)
+            owner_path = allocations(i)%owner
+            if (allocations(i)%component .and. &
+                allocated(allocations(i)%owner_path)) then
+                owner_path = allocations(i)%owner_path
+            end if
+            if (allocations(i)%component) then
+                target = shadow_component_path(trim(owner_path), suffix)//payload
+                if (.not. allocated(allocations(i)%source_type)) return
+                write (source_number, '(i0)') i
+                source_alias = "fad_source_component_b_"//trim(source_number)
+                call reset_reverse_statement(s)
+                s%kind = FAD_SELECT_TYPE
+                s%value = adjoint%add_expr(expr_var( &
+                    shadow_component_path(trim(owner_path), suffix)))
+                s%target = source_alias
+                ignored = adjoint%add_stmt(s)
+                call reset_reverse_statement(s)
+                s%kind = FAD_TYPE_IS
+                s%target = allocations(i)%source_type
+                ignored = adjoint%add_stmt(s)
+                call reset_reverse_statement(s)
+                s%kind = FAD_ASSIGN
+                s%target = shadow_component_path(trim(lhs), suffix)
+                s%value = adjoint%add_expr(expr_var(source_alias//payload))
+                ignored = adjoint%add_stmt(s)
+                call reset_reverse_statement(s)
+                s%kind = FAD_END_SELECT
+                ignored = adjoint%add_stmt(s)
+            else
+                target = trim(owner_path)//trim(suffix)//payload
+                call reset_reverse_statement(s)
+                s%kind = FAD_ASSIGN
+                s%target = fad_suffix_name(trim(lhs), suffix)
+                s%value = adjoint%add_expr(expr_var(target))
+                ignored = adjoint%add_stmt(s)
+            end if
             return
         end do
     end subroutine emit_source_component_adjoint_for_target
@@ -3398,6 +3800,8 @@ contains
             if (primal%exprs(i)%kind /= FAD_VAR .and. &
                 primal%exprs(i)%kind /= FAD_INDEX) cycle
             if (index(primal%exprs(i)%text, "%") == 0) cycle
+            if (is_polymorphic_component_path(primal, &
+                primal%exprs(i)%text)) cycle
             ! A polymorphic dispatch receiver is selected again in the reverse
             ! sweep. Its cotangent is selected in parallel there; emitting a
             ! bare receiver-alias shadow here would be invalid.
@@ -3429,6 +3833,8 @@ contains
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
             if (index(primal%stmts(i)%target, "%") == 0) cycle
+            if (is_polymorphic_component_path(primal, &
+                primal%stmts(i)%target)) cycle
             if (is_select_alias_path(primal, primal%stmts(i)%target)) cycle
             if (is_scalar_polymorphic_receiver_path(primal, &
                 primal%stmts(i)%target)) cycle
@@ -3662,7 +4068,7 @@ contains
         type(reverse_status_t), intent(inout) :: status
         character(len=:), allocatable :: selector, path
         integer :: i, j, k, depth, concrete, base_di
-        logical :: active_component, found
+        logical :: active_component, found, fixed_ownership
 
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
@@ -3726,6 +4132,19 @@ contains
                         "runtime path; unresolved dispatch is unsupported"
                     return
                 end if
+                fixed_ownership = .false.
+                do k = 1, primal%n_stmts
+                    if (primal%stmts(k)%kind /= FAD_ALLOCATE) cycle
+                    if (.not. allocated(primal%stmts(k)%allocation_args)) cycle
+                    if (size(primal%stmts(k)%allocation_args) < 1) cycle
+                    if (trim(emit_expr(primal, primal%stmts(k)%allocation_args(1))) /= &
+                        trim(selector)) cycle
+                    if (fixed_source_component(primal, k)) then
+                        fixed_ownership = .true.
+                        exit
+                    end if
+                end do
+                if (fixed_ownership) exit
                 do k = 1, primal%n_stmts
                     if (primal%stmts(k)%kind /= FAD_ALLOCATE .and. &
                         primal%stmts(k)%kind /= FAD_DEALLOCATE .and. &
@@ -3964,6 +4383,7 @@ contains
         integer :: a, i, ignored, seed_expr, selector_expr
 
         call receiver_cotangent_context(primal, rec, suffix, ssa%active_paths, &
+            active, &
             receiver_cotangent, receiver_alias, &
             cotangent_alias, cotangent_selector)
 
@@ -3989,6 +4409,7 @@ contains
                 s%target = rec%arms(a)%target
                 ignored = adjoint%add_stmt(s)
                 call zero_receiver_cotangent(primal, adjoint, ssa%active_paths, &
+                    active, &
                     receiver_alias, cotangent_alias)
             end if
             do i = rec%arms(a)%n, 1, -1
@@ -4025,6 +4446,7 @@ contains
     end subroutine emit_select_reverse
 
     subroutine receiver_cotangent_context(primal, rec, suffix, active_paths, &
+            active, &
             enabled, receiver_alias, cotangent_alias, &
             cotangent_selector)
         !! Identify the P8.3f receiver shape and name the matching selected
@@ -4035,6 +4457,7 @@ contains
         type(select_record_t), intent(in) :: rec
         character(len=*), intent(in) :: suffix
         character(len=*), intent(in) :: active_paths(:)
+        logical, intent(in) :: active(:)
         logical, intent(out) :: enabled
         character(len=:), allocatable, intent(out) :: receiver_alias
         character(len=:), allocatable, intent(out) :: cotangent_alias
@@ -4095,19 +4518,20 @@ contains
             if (index(selector, "(") > 0) return
         end if
         if (.not. receiver_context_has_active(primal, receiver_alias, &
-            active_paths)) return
+            active_paths, active)) return
         cotangent_alias = receiver_alias//trim(suffix)
         cotangent_selector = fad_suffix_name(selector, suffix)
         enabled = len_trim(cotangent_selector) > 0
     end subroutine receiver_cotangent_context
 
     logical function receiver_context_has_active(primal, receiver_alias, &
-            active_paths) result(found)
+            active_paths, active) result(found)
         type(fad_proc_t), intent(in) :: primal
         character(len=*), intent(in) :: receiver_alias
         character(len=*), intent(in) :: active_paths(:)
+        logical, intent(in) :: active(:)
         character(len=:), allocatable :: canonical, active_path
-        integer :: i, j
+        integer :: i, j, di
 
         found = .false.
         do i = 1, primal%n_exprs
@@ -4116,6 +4540,15 @@ contains
             if (fad_base_name(primal%exprs(i)%text) /= trim(receiver_alias)) cycle
             if (index(trim(primal%exprs(i)%text), "%") <= 0) cycle
             canonical = resolve_component_path(primal, primal%exprs(i)%text)
+            di = primal%decl_index(fad_base_name(canonical))
+            if (di > 0 .and. active(di)) then
+                found = .true.
+                return
+            end if
+            if (nested_polymorphic_component_active(primal, canonical, active)) then
+                found = .true.
+                return
+            end if
             do j = 1, size(active_paths)
                 active_path = resolve_component_path(primal, active_paths(j))
                 if (same_component_name(canonical, active_path)) then
@@ -4126,11 +4559,38 @@ contains
         end do
     end function receiver_context_has_active
 
-    subroutine zero_receiver_cotangent(primal, adjoint, active_paths, &
+    logical function nested_polymorphic_component_active(primal, path, active) &
+            result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: path
+        logical, intent(in) :: active(:)
+        integer :: i, source_di
+
+        found = .false.
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ALLOCATE) cycle
+            if (.not. primal%stmts(i)%allocation_target_polymorphic) cycle
+            if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
+            if (size(primal%stmts(i)%allocation_args) < 1) cycle
+            if (.not. same_component_name(emit_expr(primal, &
+                primal%stmts(i)%allocation_args(1)), path) .and. &
+                index(trim(path), trim(emit_expr(primal, &
+                primal%stmts(i)%allocation_args(1)))//"%") /= 1) cycle
+            if (primal%stmts(i)%allocation_source <= 0) cycle
+            source_di = concrete_source_decl(primal, &
+                primal%stmts(i)%allocation_source)
+            found = (source_di > 0 .and. active(source_di)) .or. &
+                reads_any(primal, primal%stmts(i)%allocation_source, active)
+            return
+        end do
+    end function nested_polymorphic_component_active
+
+    subroutine zero_receiver_cotangent(primal, adjoint, active_paths, active, &
             receiver_alias, cotangent_alias)
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: adjoint
         character(len=*), intent(in) :: active_paths(:)
+        logical, intent(in) :: active(:)
         character(len=*), intent(in) :: receiver_alias, cotangent_alias
         character(len=64) :: paths(64)
         character(len=:), allocatable :: source, canonical, target, base, tail
@@ -4146,7 +4606,10 @@ contains
             if (fad_base_name(source) /= trim(receiver_alias)) cycle
             if (index(source, "%") <= 0) cycle
             canonical = resolve_component_path(primal, source)
-            if (.not. active_path_matches(active_paths, canonical)) cycle
+            if (.not. active_path_matches(active_paths, canonical)) then
+                if (primal%decl_index(fad_base_name(canonical)) <= 0) cycle
+                if (.not. active(primal%decl_index(fad_base_name(canonical)))) cycle
+            end if
             base = fad_base_name(source)
             cut = len_trim(base) + 1
             tail = source(cut:)
@@ -5301,6 +5764,10 @@ contains
         component = .false.
         yes = .false.
         canonical_text = resolve_component_path(primal, text)
+        if (nested_polymorphic_component_active(primal, canonical_text, active)) then
+            yes = .true.
+            return
+        end if
         ! An explicit independent component path must remain active even when
         ! the lowered expression has no component-path metadata of its own.
         ! Do not classify every percent expression as a component here: the

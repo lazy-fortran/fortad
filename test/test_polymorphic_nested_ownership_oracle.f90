@@ -5,16 +5,24 @@ program test_polymorphic_nested_ownership_oracle
     implicit none
 
     character(len=1), parameter :: nl = achar(10)
-    character(len=:), allocatable :: source, dir, tangent, driver
-    type(fad_result_t) :: generated, refused
+    character(len=:), allocatable :: source, scalar_source, dir, tangent, driver
+    type(fad_result_t) :: generated, generated_reverse, refused
     integer :: unit, stat
 
     source = nested_array_source()
+    scalar_source = nested_source("allocate(box%field%payload, source=child)")
     generated = fad_jvp(source, [character(len=1) :: "x"], from="evaluate", &
         name="evaluate_jvp")
     if (.not. generated%ok) then
         print *, "FAIL nested polymorphic ownership JVP: ", generated%message
         error stop 1
+    end if
+    generated_reverse = fad_vjp(scalar_source, [character(len=1) :: "x"], &
+        dependent="y", from="evaluate", name="evaluate_vjp")
+    if (.not. generated_reverse%ok) then
+        print *, "FAIL nested polymorphic ownership VJP: ", &
+            generated_reverse%message
+        error stop 13
     end if
 
     refused = fad_jvp( &
@@ -37,24 +45,14 @@ program test_polymorphic_nested_ownership_oracle
         from="evaluate")
     call require_refusal(refused, "move_alloc")
 
-    refused = fad_vjp(source, [character(len=1) :: "x"], dependent="y", &
-        from="evaluate")
-    call require_refusal(refused, "reverse allocation replay")
+    refused = fad_vjp(nested_array_source(), [character(len=1) :: "x"], &
+        dependent="y", from="evaluate")
+    call require_refusal(refused, "reverse array allocation replay")
     if (index(refused%message, "array-element polymorphic component") == 0 .or. &
         index(refused%message, "SOURCE= ownership") == 0) then
         print *, "FAIL reverse array nested ownership refusal was not precise: ", &
             refused%message
         error stop 10
-    end if
-    refused = fad_vjp( &
-        nested_source("allocate(box%field%payload, source=child)"), &
-        [character(len=1) :: "x"], dependent="y", from="evaluate")
-    call require_refusal(refused, "reverse nested component replay")
-    if (index(refused%message, "nested polymorphic component") == 0 .or. &
-        index(refused%message, "SOURCE= ownership") == 0) then
-        print *, "FAIL reverse nested component refusal was not precise: ", &
-            refused%message
-        error stop 11
     end if
 
     dir = "build/oracle/polymorphic_nested_ownership"
@@ -67,6 +65,7 @@ program test_polymorphic_nested_ownership_oracle
     tangent = "module nested_generated"//nl// &
         "    use nested_ownership_case, only: child_t, holder_t"//nl// &
         "contains"//nl//generated%code// &
+        generated_reverse%code// &
         "end module nested_generated"//nl
     open (newunit=unit, file=dir//"/tangent.f90", status="replace", &
         action="write")
@@ -74,9 +73,9 @@ program test_polymorphic_nested_ownership_oracle
     close (unit)
     driver = "program driver"//nl// &
         "    use nested_ownership_case, only: evaluate"//nl// &
-        "    use nested_generated, only: evaluate_jvp"//nl// &
+        "    use nested_generated, only: evaluate_jvp, evaluate_vjp"//nl// &
         "    implicit none"//nl// &
-        "    real(8) :: x, xd, y, yd, h, fd"//nl// &
+        "    real(8) :: x, xd, y, yd, yb, xb, h, fd"//nl// &
         "    x = 1.25d0"//nl// &
         "    xd = -0.4d0"//nl// &
         "    h = 1.0d-6"//nl// &
@@ -85,6 +84,11 @@ program test_polymorphic_nested_ownership_oracle
         "    if (abs(yd - 4.0d0*x*xd) > 1.0d-13) error stop 4"//nl// &
         "    fd = (evaluate(x+h)-evaluate(x-h))/(2.0d0*h)"//nl// &
         "    if (abs(yd/xd-fd) > 1.0d-7) error stop 5"//nl// &
+        "    yb = -0.7d0"//nl// &
+        "    call evaluate_vjp(x, y, yb, xb)"//nl// &
+        "    if (abs(xb-yb*4.0d0*x) > 1.0d-12) error stop 12"//nl// &
+        "    if (abs(xb*xd-yb*yd) > 1.0d-12) error stop 14"//nl// &
+        "    if (abs(xb/yb-fd) > 1.0d-7) error stop 15"//nl// &
         "    print *, 'nested polymorphic ownership oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", &
