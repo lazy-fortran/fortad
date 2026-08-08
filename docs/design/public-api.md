@@ -116,6 +116,14 @@ objects required by the selected mode. Inspect `res%code` before writing a
 caller. The [Rosenbrock example](../../example/README.md) shows a complete VJP
 call.
 
+For the CLI, an explicit derivative output basename may also select a
+multi-procedure source during default argument inference, when no `--proc` or
+independent-name list was supplied. For example,
+`fortad vjp source.f90 --output selected_vjp.f90` tries the procedure
+`selected`, then performs the ordinary input/output inference. This is only a
+basename match; if no such procedure exists, FortAD retains the first-
+procedure default. An explicit `--proc` remains authoritative.
+
 ## Rule registry
 
 ```fortran
@@ -362,7 +370,7 @@ rejected because one path or name would be ambiguous for two products.
 | `--roundtrip` | standalone mode | parse and emit without requiring `--indep` |
 | `--rule spec` | current process | scalar rule in `NAME:partial;partial` form |
 | `--call-rule spec` | current process | statement rule in `NAME:n_args:tangent;...|adjoint;...` form |
-| `-o`, `--output path` | all transformations | output file instead of standard output |
+| `-o`, `--output path` | all transformations | output file instead of standard output; its basename can select a matching procedure |
 | `-p`, `-d`, `-b` | Tapenade compatibility | parser, forward, and reverse mode selectors |
 | `-root name` | Tapenade compatibility | selected procedure name |
 | `-O dir` | Tapenade compatibility | output directory for generated sibling files |
