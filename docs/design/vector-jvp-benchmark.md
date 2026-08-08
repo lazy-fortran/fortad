@@ -34,6 +34,8 @@ scalar JVP for each direction. This is a FortAD feature measurement rather
 than a universal claim about Tapenade or any other engine; the same kernel and
 direction count can be used for an external engine comparison.
 
-The recorded local run used GNU Fortran 16.1.1, eight directions, 131,072
+One recorded local run used GNU Fortran 16.1.1, eight directions, 131,072
 elements, and 24 timed repetitions per sample. Its five ratios were
-`0.2280`, `0.2212`, `0.1487`, `0.2259`, and `0.2236`; the median was `0.2236`.
+`0.235958`, `0.230346`, `0.235616`, `0.234393`, and `0.233896`; the median was
+`0.234393`. The exact ratio is hardware- and load-dependent; rerun the script
+for a current measurement.
