@@ -4148,6 +4148,26 @@ contains
                 if (trim(emit_expr(primal, j)) /= trim(selector)) cycle
                 found = .true.
                 if (.not. primal%exprs(j)%component_is_polymorphic) exit
+                concrete = 0
+                depth = 1
+                do k = i + 1, primal%n_stmts
+                    select case (primal%stmts(k)%kind)
+                    case (FAD_SELECT_TYPE)
+                        depth = depth + 1
+                    case (FAD_END_SELECT)
+                        depth = depth - 1
+                        if (depth == 0) exit
+                    case (FAD_TYPE_IS, FAD_CLASS_IS)
+                        if (depth == 1) concrete = concrete + 1
+                    end select
+                end do
+                if (concrete /= 1) then
+                    status%ok = .false.
+                    status%message = "reverse mode: nested polymorphic component "// &
+                        "path '"//trim(selector)//"' requires one fixed concrete "// &
+                        "runtime path; unresolved dispatch is unsupported"
+                    return
+                end if
                 do k = 1, size(active_paths)
                     path = trim(active_paths(k))
                     if (index(path, trim(selector)//"%") == 1) then
@@ -4177,26 +4197,6 @@ contains
                     status%ok = .false.
                     status%message = "reverse mode: active nested polymorphic "// &
                         "component path '"//trim(selector)//"' has unresolved owner alias or ownership"
-                    return
-                end if
-                concrete = 0
-                depth = 1
-                do k = i + 1, primal%n_stmts
-                    select case (primal%stmts(k)%kind)
-                    case (FAD_SELECT_TYPE)
-                        depth = depth + 1
-                    case (FAD_END_SELECT)
-                        depth = depth - 1
-                        if (depth == 0) exit
-                    case (FAD_TYPE_IS, FAD_CLASS_IS)
-                        if (depth == 1) concrete = concrete + 1
-                    end select
-                end do
-                if (concrete /= 1) then
-                    status%ok = .false.
-                    status%message = "reverse mode: active nested polymorphic "// &
-                        "component path '"//trim(selector)//"' requires one fixed concrete "// &
-                        "runtime path; unresolved dispatch is unsupported"
                     return
                 end if
                 fixed_ownership = .false.
