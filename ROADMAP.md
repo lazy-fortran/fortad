@@ -1949,8 +1949,16 @@ problem-specific rule.
       arm facts in `7139a946`.
       The bounded same-scope callback call and derivative slice is delivered
       by FortAD `48dec22` with hand, finite-difference, and adjoint oracles.
-      Reassignment, null callbacks, passed procedures, `class(*)` context
-      objects, general flow, and reverse callback lifetime remain open.
+      **P8.6a bounded passed-procedure callback slice (isolated branch):** one
+      direct same-scope procedure-pointer assignment with an exact scalar
+      `real(8) function(real(8), intent(in))` target can be passed directly to
+      one procedure dummy; FortFront facts drive target substitution during
+      FortAD inlining. The independent
+      `test_passed_procedure_callback_oracle.f90` covers JVP/VJP,
+      finite-difference, adjoint, and named refusals. Reassignment, null,
+      generic/ambiguous/dynamic targets, aliases, global mutable state,
+      ownership changes, `class(*)` context objects, general flow, and
+      reverse callback lifetime remain open.
 - [ ] **P8.7 Dispatch diagnostics.** Detect perturbations that cross a type or
       callback boundary. Also detect branch and clamp boundaries, along with
       event or convergence boundaries. Report the choice and source line. A

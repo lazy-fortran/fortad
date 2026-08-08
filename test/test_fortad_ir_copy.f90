@@ -26,6 +26,8 @@ program test_fortad_ir_copy
 
     original%kind = 7
     original%target = "accumulator"
+    original%callback_formal = "callback"
+    original%callback_target = "scale"
     original%value = 42
     original%is_automatic_reallocation = .true.
     original%lo = 3
@@ -46,6 +48,16 @@ program test_fortad_ir_copy
     call expect(allocated(copy%target), "target is allocated", failures)
     if (allocated(copy%target)) &
         call expect(copy%target == original%target, "target", failures)
+    call expect(allocated(copy%callback_formal), &
+        "callback_formal is allocated", failures)
+    if (allocated(copy%callback_formal)) &
+        call expect(copy%callback_formal == original%callback_formal, &
+        "callback_formal", failures)
+    call expect(allocated(copy%callback_target), &
+        "callback_target is allocated", failures)
+    if (allocated(copy%callback_target)) &
+        call expect(copy%callback_target == original%callback_target, &
+        "callback_target", failures)
     call expect(copy%value == original%value, "value", failures)
     call expect(copy%is_automatic_reallocation .eqv. &
         original%is_automatic_reallocation, "is_automatic_reallocation", failures)
@@ -56,17 +68,17 @@ program test_fortad_ir_copy
     call expect(allocated(copy%call_args), "call_args is allocated", failures)
     if (allocated(copy%call_args)) &
         call expect(all(copy%call_args == original%call_args), "call_args", &
-                    failures)
+        failures)
     call expect(allocated(copy%call_arg_names), "call_arg_names is allocated", &
         failures)
     if (allocated(copy%call_arg_names)) &
         call expect(all(copy%call_arg_names == original%call_arg_names), &
-                    "call_arg_names", failures)
+        "call_arg_names", failures)
     call expect(allocated(copy%allocation_args), "allocation_args is allocated", &
         failures)
     if (allocated(copy%allocation_args)) &
         call expect(all(copy%allocation_args == original%allocation_args), &
-                    "allocation_args", failures)
+        "allocation_args", failures)
     call expect(copy%allocation_source == original%allocation_source, &
         "allocation_source", failures)
     call expect(copy%allocation_mold == original%allocation_mold, &
@@ -96,6 +108,8 @@ program test_fortad_ir_copy
     ! then check both a retained entry and hash-consing of a duplicate.
     arena_expr%kind = FAD_CALL
     arena_expr%text = "kernel"
+    arena_expr%callback_formal = "callback"
+    arena_expr%callback_target = "scale"
     arena_expr%args = [11, 13]
     arena_expr%call_arg_names = [character(len=6) :: "first", "second"]
     arena_expr%rank = 3
@@ -127,6 +141,8 @@ program test_fortad_ir_copy
     do i = 1, 64
         arena_stmt%kind = FAD_CALL_STMT
         arena_stmt%target = "callee"
+        arena_stmt%callback_formal = "callback"
+        arena_stmt%callback_target = "scale"
         arena_stmt%value = i
         arena_stmt%call_args = [i, i + 1]
         arena_stmt%call_arg_names = [character(len=1) :: "x", "y"]
@@ -137,6 +153,10 @@ program test_fortad_ir_copy
         "first statement after arena growth", failures)
     call expect(proc%stmts(64)%value == 64, &
         "last statement after arena growth", failures)
+    call expect(proc%stmts(64)%callback_formal == "callback", &
+        "statement callback formal after arena growth", failures)
+    call expect(proc%stmts(64)%callback_target == "scale", &
+        "statement callback target after arena growth", failures)
     call expect(all(proc%stmts(64)%call_args == [64, 65]), &
         "statement arguments after arena growth", failures)
 

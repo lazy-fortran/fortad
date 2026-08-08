@@ -46,6 +46,26 @@ targets, and module-owned mutable callback state remain named refusals. See
 [`test_callback_call_oracle.f90`](../../test/test_callback_call_oracle.f90) for
 the compiled JVP/VJP, finite-difference, adjoint, and refusal oracle.
 
+## Passed-procedure callbacks: bounded P8.6 slice
+
+FortAD also accepts one narrower passed-procedure form. In the caller, a
+local procedure pointer must receive exactly one direct same-scope assignment
+to a fixed target and then be passed directly as the actual for one procedure
+dummy with an exact scalar `real(8) function(real(8), intent(in))` interface.
+FortFront supplies the actual/formal mapping, resolved target, and signature;
+FortAD records that fact on the call, substitutes the fixed target while
+inlining, and leaves the pointer declaration and assignment out of generated
+AD code. The JVP and VJP therefore differentiate the concrete target using the
+ordinary call machinery.
+
+This is intentionally a modern-Fortran abstraction boundary, not a runtime
+callback implementation. FortAD refuses reassignment, branch or loop flow,
+`NULL()` targets, generic/ambiguous/unresolved/dynamic targets, aliases,
+global mutable state, and target ownership or pointer-association changes.
+The refusal names the first violated boundary. The independent hand,
+finite-difference, adjoint, and refusal oracle is
+[`test_passed_procedure_callback_oracle.f90`](../../test/test_passed_procedure_callback_oracle.f90).
+
 ## Elemental procedures
 
 When the selected same-file procedure has an `elemental` prefix, FortAD keeps

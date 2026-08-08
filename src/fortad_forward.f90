@@ -466,7 +466,7 @@ contains
             if (index(target, achar(37)) == 0) cycle
             if (.not. selected_component_target(primal, target)) cycle
             if (.not. expression_reads_component(primal, primal%stmts(i)%value, &
-                    target)) cycle
+                target)) cycle
             status%ok = .false.
             status%message = "forward mode: fixed-path polymorphic component "// &
                 "read-modify-write requires an old-value snapshot; use a "// &
@@ -486,7 +486,7 @@ contains
             if (.not. allocated(primal%stmts(i)%target)) cycle
             if (trim(primal%stmts(i)%target) /= fad_base_name(target)) cycle
             if (index(trim(emit_expr(primal, primal%stmts(i)%value)), &
-                    achar(37)) > 0) found = .true.
+                achar(37)) > 0) found = .true.
             return
         end do
     end function selected_component_target
@@ -508,7 +508,7 @@ contains
         end if
         do i = 1, size(primal%exprs(idx)%args)
             if (expression_reads_component(primal, primal%exprs(idx)%args(i), &
-                    target)) then
+                target)) then
                 found = .true.
                 return
             end if
@@ -1476,6 +1476,8 @@ contains
         s%allocation_mold = 0
         s%allocation_target_polymorphic = .false.
         s%allocation_target_unlimited_polymorphic = .false.
+        if (allocated(s%callback_formal)) deallocate (s%callback_formal)
+        if (allocated(s%callback_target)) deallocate (s%callback_target)
         if (allocated(s%target)) deallocate (s%target)
         s%value = 0
     end subroutine reset_statement

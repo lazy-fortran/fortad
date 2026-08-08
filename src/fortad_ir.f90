@@ -68,6 +68,11 @@ module fortad_ir
         !! Keyword names for a procedure call, aligned with ``args``.  A
         !! blank entry is a positional actual.
         character(len=:), allocatable :: call_arg_names(:)
+        !! For one passed-procedure call, the formal procedure dummy and the
+        !! fixed concrete target proved at the caller boundary.  These are
+        !! passive lowering metadata and never appear in emitted Fortran.
+        character(len=:), allocatable :: callback_formal
+        character(len=:), allocatable :: callback_target
         !! Index of the array subscript base for FAD_INDEX, else 0.
         integer :: rank = 0
         !! FortFront's storage facts for a component path.  These facts are
@@ -115,6 +120,11 @@ module fortad_ir
         integer, allocatable :: call_args(:)
         !! Keyword names for ``call_args``; blank entries are positional.
         character(len=:), allocatable :: call_arg_names(:)
+        !! Passed-procedure metadata for a same-file callback call.  The
+        !! inliner substitutes CALLBACK_TARGET for CALLBACK_FORMAL in the
+        !! callee body before differentiation.
+        character(len=:), allocatable :: callback_formal
+        character(len=:), allocatable :: callback_target
         !! For FAD_ALLOCATE/FAD_DEALLOCATE, the first entry is the owning
         !! object and the remaining entries are shape expressions.  The
         !! optional SOURCE= and MOLD= expressions use the fields below.
@@ -373,6 +383,12 @@ contains
                 destination%call_arg_names = source%call_arg_names
             end if
         end if
+        if (allocated(source%callback_formal)) then
+            destination%callback_formal = source%callback_formal
+        end if
+        if (allocated(source%callback_target)) then
+            destination%callback_target = source%callback_target
+        end if
         if (allocated(source%component_type_name)) then
             destination%component_type_name = source%component_type_name
         end if
@@ -396,6 +412,16 @@ contains
         if (allocated(e%args)) then
             do i = 1, size(e%args)
                 h = modulo(h*31 + e%args(i), 1048576)
+            end do
+        end if
+        if (allocated(e%callback_formal)) then
+            do i = 1, len(e%callback_formal)
+                h = modulo(h*31 + iachar(e%callback_formal(i:i)), 1048576)
+            end do
+        end if
+        if (allocated(e%callback_target)) then
+            do i = 1, len(e%callback_target)
+                h = modulo(h*31 + iachar(e%callback_target(i:i)), 1048576)
             end do
         end if
         h = modulo(abs(h), BUCKETS)
@@ -665,6 +691,14 @@ contains
             if (size(a%call_arg_names) /= size(b%call_arg_names)) return
             if (any(a%call_arg_names /= b%call_arg_names)) return
         end if
+        if (allocated(a%callback_formal) .neqv. allocated(b%callback_formal)) return
+        if (allocated(a%callback_formal)) then
+            if (a%callback_formal /= b%callback_formal) return
+        end if
+        if (allocated(a%callback_target) .neqv. allocated(b%callback_target)) return
+        if (allocated(a%callback_target)) then
+            if (a%callback_target /= b%callback_target) return
+        end if
         if (a%rank /= b%rank) return
         if (a%is_component_path .neqv. b%is_component_path) return
         if (a%component_is_allocatable .neqv. b%component_is_allocatable) return
@@ -736,6 +770,12 @@ contains
             destination%call_args = source%call_args
         if (allocated(source%call_arg_names)) &
             destination%call_arg_names = source%call_arg_names
+        if (allocated(source%callback_formal)) then
+            destination%callback_formal = source%callback_formal
+        end if
+        if (allocated(source%callback_target)) then
+            destination%callback_target = source%callback_target
+        end if
         if (allocated(source%allocation_args)) &
             destination%allocation_args = source%allocation_args
     end subroutine fad_copy_stmt

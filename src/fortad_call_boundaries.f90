@@ -2,7 +2,7 @@ module fortad_call_boundaries
     !! Semantic boundary for the bounded direct same-file call slice.
     use fortfront, only: ast_arena_t, program_unit_query_t, query_program_unit, &
         call_arguments_query_t, query_call_arguments, call_or_subscript_node, &
-        subroutine_call_node
+        subroutine_call_node, declaration_query_t, query_declaration
     use fortad_lower_types, only: lower_status_t
     implicit none
     private
@@ -80,8 +80,11 @@ contains
                 return
             end if
             if (query%is_refused) then
-                call refuse_query(arena, query, status)
-                return
+                if (.not. query%has_procedure_callback .or. &
+                    has_non_callback_refusal(arena, query)) then
+                    call refuse_query(arena, query, status)
+                    return
+                end if
             end if
             call validate_arguments(arena, query, status)
             if (.not. status%ok) return
@@ -113,7 +116,7 @@ contains
         do i = 1, arena%size
             if (.not. arena%has_node_at(i)) cycle
             if (trim(arena%entries(i)%node_type) /= "function_def" .and. &
-                    trim(arena%entries(i)%node_type) /= "subroutine_def") cycle
+                trim(arena%entries(i)%node_type) /= "subroutine_def") cycle
             unit = query_program_unit(arena, i)
             if (.not. unit%found) cycle
             if (same_name(unit%name, name)) then
@@ -135,7 +138,7 @@ contains
         do while (current > 0)
             if (.not. arena%has_node_at(current)) return
             if (trim(arena%entries(current)%node_type) == "function_def" .or. &
-                    trim(arena%entries(current)%node_type) == "subroutine_def") then
+                trim(arena%entries(current)%node_type) == "subroutine_def") then
                 proc = current
                 return
             end if
@@ -154,29 +157,30 @@ contains
         status%message = ""
         do i = 1, size(query%arguments)
             if (.not. query%arguments(i)%is_supplied) cycle
+            if (is_procedure_dummy(arena, query%arguments(i)%formal_node_index)) cycle
             if (query%arguments(i)%formal_is_pointer .or. &
-                    query%arguments(i)%actual_is_pointer) then
+                query%arguments(i)%actual_is_pointer) then
                 call refuse(arena, query%call_node_index, &
                     "pointer storage is not part of this slice", status)
                 return
             end if
             if (query%arguments(i)%formal_is_allocatable .or. &
-                    query%arguments(i)%actual_is_allocatable) then
+                query%arguments(i)%actual_is_allocatable) then
                 call refuse(arena, query%call_node_index, &
                     "allocatable storage is not part of this slice", status)
                 return
             end if
             if (query%arguments(i)%formal_is_target .or. &
-                    query%arguments(i)%actual_is_target) then
+                query%arguments(i)%actual_is_target) then
                 call refuse(arena, query%call_node_index, &
                     "TARGET alias storage is not part of this slice", status)
                 return
             end if
             if (.not. query%arguments(i)%formal_type_known .or. &
-                    .not. query%arguments(i)%formal_rank_known .or. &
-                    .not. query%arguments(i)%actual_type_known .or. &
-                    .not. query%arguments(i)%actual_rank_known .or. &
-                    .not. query%arguments(i)%type_compatibility_known) then
+                .not. query%arguments(i)%formal_rank_known .or. &
+                .not. query%arguments(i)%actual_type_known .or. &
+                .not. query%arguments(i)%actual_rank_known .or. &
+                .not. query%arguments(i)%type_compatibility_known) then
                 call refuse(arena, query%call_node_index, &
                     "FortFront did not expose complete type/kind/rank facts", status)
                 return
@@ -188,10 +192,10 @@ contains
             end if
             intent = lower(query%arguments(i)%formal_intent)
             if (.not. query%arguments(i)%formal_is_value .and. &
-                    trim(intent) /= "in") then
+                trim(intent) /= "in") then
                 if (query%arguments(i)%actual_value_node_index <= 0 .or. &
-                        trim(arena%entries(query%arguments(i)%actual_value_node_index)%node_type) &
-                        /= "identifier") then
+                    trim(arena%entries(query%arguments(i)%actual_value_node_index)%node_type) &
+                    /= "identifier") then
                     call refuse(arena, query%call_node_index, &
                         "writable formal requires a plain scalar or whole-array actual", &
                         status)
@@ -200,6 +204,51 @@ contains
             end if
         end do
     end subroutine validate_arguments
+
+    logical function has_non_callback_refusal(arena, query) result(refused)
+        !! A procedure-pointer actual is contextual metadata, not a data
+        !! alias.  Preserve ordinary call-boundary refusals for every other
+        !! actual while letting the P8.6 consumer inspect the callback facts.
+        type(ast_arena_t), intent(in) :: arena
+        type(call_arguments_query_t), intent(in) :: query
+        integer :: i
+
+        refused = query%has_global_mutable_state .or. &
+            query%has_type_mismatch .or. query%has_unknown_argument_types
+        if (refused) return
+        do i = 1, size(query%arguments)
+            if (.not. query%arguments(i)%is_supplied) cycle
+            if (is_procedure_dummy(arena, query%arguments(i)%formal_node_index)) cycle
+            if (query%arguments(i)%formal_is_pointer .or. &
+                query%arguments(i)%formal_is_allocatable .or. &
+                query%arguments(i)%formal_is_target .or. &
+                query%arguments(i)%actual_is_pointer .or. &
+                query%arguments(i)%actual_is_allocatable .or. &
+                query%arguments(i)%actual_is_target) then
+                refused = .true.
+                return
+            end if
+        end do
+    end function has_non_callback_refusal
+
+    logical function is_procedure_dummy(arena, declaration_index) result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: declaration_index
+        type(declaration_query_t) :: declaration
+        character(len=:), allocatable :: normalized
+        integer :: i
+
+        found = .false.
+        declaration = query_declaration(arena, declaration_index)
+        if (.not. declaration%found) return
+        if (.not. allocated(declaration%type_name)) return
+        normalized = ""
+        do i = 1, len_trim(declaration%type_name)
+            if (declaration%type_name(i:i) == " ") cycle
+            normalized = normalized//lower(declaration%type_name(i:i))
+        end do
+        found = index(normalized, "procedure") == 1
+    end function is_procedure_dummy
 
     subroutine refuse_query(arena, query, status)
         type(ast_arena_t), intent(in) :: arena
@@ -223,12 +272,12 @@ contains
         do i = 1, size(query%arguments)
             if (.not. query%arguments(i)%is_supplied) cycle
             if (query%arguments(i)%formal_is_pointer .or. &
-                    query%arguments(i)%actual_is_pointer) then
+                query%arguments(i)%actual_is_pointer) then
                 reason = "pointer storage is not part of this slice"
                 exit
             end if
             if (query%arguments(i)%formal_is_allocatable .or. &
-                    query%arguments(i)%actual_is_allocatable) then
+                query%arguments(i)%actual_is_allocatable) then
                 reason = "allocatable storage is not part of this slice"
                 exit
             end if
