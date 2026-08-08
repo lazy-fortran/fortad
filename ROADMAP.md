@@ -1087,8 +1087,10 @@ problem-specific rule.
             function is normalized to an ordinary call before JVP/VJP
             generation. A statically declared child may also resolve an
             inherited binding through the FortFront hierarchy query. Named
-            PASS, generic, deferred, and ambiguous type/implementation names
-            remain named refusals. The
+            PASS uses the FortFront `pass_name` metadata to normalize the
+            receiver into the implementation's passed-object dummy position.
+            Generic, deferred, and ambiguous type/implementation names remain
+            named refusals. The
             compiled oracle is
             [`test_type_bound_oracle.f90`](test/test_type_bound_oracle.f90). It
             checks generated JVP/VJP values for both binding forms. It uses central
@@ -1105,7 +1107,7 @@ problem-specific rule.
             refusals, and independent JVP/VJP refusal checks were already
             present in the mainline. Commit `769d5c7` records the review. No
             source transplant was needed. The active receiver, generic,
-            deferred, named-PASS, and dynamic-dispatch refusal boundaries
+            deferred, and dynamic-dispatch refusal boundaries
             remain deliberate and open. The inherited static slice is covered
             by the current type-bound oracle.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for

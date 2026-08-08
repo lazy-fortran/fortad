@@ -3,7 +3,8 @@ program test_type_bound_oracle
     !! The receiver is passive; the method's real argument is differentiated
     !! after implicit PASS or NOPASS is normalized to an ordinary local call.
     !! A statically declared child may also use an inherited binding resolved
-    !! through FortFront's local-to-parent hierarchy query.
+    !! through FortFront's local-to-parent hierarchy query. Named PASS is
+    !! checked with the passed-object dummy deliberately out of first position.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -44,14 +45,16 @@ program test_type_bound_oracle
         error stop 1
     end if
 
-    call expect_refusal(named_pass_source(), "named PASS", "named PASS")
-    call check_nopass(nopass_source(), "nopass_case")
-    call check_nopass(nopass_scope_source(), "nopass_scope_case")
+    call check_pass_case(named_pass_source(), "named_pass")
+    call check_pass_case(nopass_source(), "nopass_case")
+    call check_pass_case(nopass_scope_source(), "nopass_scope_case")
     call expect_refusal(ambiguous_source(), "ambiguous type", "ambiguous")
     call expect_active_receiver_refusal(active_receiver_source())
     call check_inherited(inherited_source(), "inherited_case")
     call expect_refusal(generic_source(), "generic", "generic")
     call expect_refusal(deferred_source(), "deferred", "deferred")
+    call expect_refusal(runtime_dispatch_source(), "runtime dispatch", &
+        "concrete type")
 
     dir = "build/oracle/type_bound"
     call execute_command_line("mkdir -p "//dir, exitstat=stat)
@@ -197,21 +200,21 @@ contains
         end if
     end subroutine expect_active_receiver_refusal
 
-    subroutine check_nopass(case_source, case_module)
+    subroutine check_pass_case(case_source, case_module)
         character(len=*), intent(in) :: case_source, case_module
         type(fad_result_t) :: jvp_case, vjp_case
         character(len=:), allocatable :: case_dir, case_driver
         integer :: case_unit, case_stat
 
-        jvp_case = fad_jvp(case_source, ["x"], from="top", name="top_nopass_jvp")
+        jvp_case = fad_jvp(case_source, ["x"], from="top", name="top_pass_case_jvp")
         if (.not. jvp_case%ok) then
-            print *, "FAIL NOPASS JVP generation: ", jvp_case%message
+            print *, "FAIL PASS/NOPASS JVP generation: ", jvp_case%message
             error stop 1
         end if
         vjp_case = fad_vjp(case_source, ["x"], dependent="y", from="top", &
-            name="top_nopass_vjp")
+            name="top_pass_case_vjp")
         if (.not. vjp_case%ok) then
-            print *, "FAIL NOPASS VJP generation: ", vjp_case%message
+            print *, "FAIL PASS/NOPASS VJP generation: ", vjp_case%message
             error stop 1
         end if
 
@@ -225,35 +228,36 @@ contains
         close (case_unit)
         open (newunit=case_unit, file=case_dir//"/derivatives.f90", &
             status="replace", action="write")
-        write (case_unit, '(a)') "module type_bound_nopass_derivatives"
+        write (case_unit, '(a)') "module type_bound_pass_derivatives"
         write (case_unit, '(a)') "    use "//trim(case_module)//", only: box_t"
         write (case_unit, '(a)') "contains"
         write (case_unit, '(a)') jvp_case%code
         write (case_unit, '(a)') vjp_case%code
-        write (case_unit, '(a)') "end module type_bound_nopass_derivatives"
+        write (case_unit, '(a)') "end module type_bound_pass_derivatives"
         close (case_unit)
 
         case_driver = &
             "program driver"//nl// &
             "    use "//trim(case_module)//", only: top"//nl// &
-            "    use type_bound_nopass_derivatives, only: top_nopass_jvp, "// &
-            "top_nopass_vjp"//nl// &
+            "    use type_bound_pass_derivatives, only: top_pass_case_jvp, "// &
+            "top_pass_case_vjp"//nl// &
             "    implicit none"//nl// &
             "    real(8) :: x, x_d, y, y_d, x_b, y_b, h, fp, fm"//nl// &
             "    x = 1.5d0"//nl// &
             "    x_d = -0.7d0"//nl// &
             "    y_b = 1.3d0"//nl// &
-            "    call top_nopass_jvp(x, x_d, y, y_d)"//nl// &
+            "    call top_pass_case_jvp(x, x_d, y, y_d)"//nl// &
             "    if (abs(y - 5.5d0) > 1.0d-13) error stop 2"//nl// &
             "    if (abs(y_d - 3.0d0*x_d) > 1.0d-13) error stop 3"//nl// &
             "    h = 1.0d-6"//nl// &
             "    fp = top(x + h)"//nl// &
             "    fm = top(x - h)"//nl// &
             "    if (abs(y_d - (fp - fm)/(2.0d0*h)*x_d) > 1.0d-7) error stop 4"//nl// &
-            "    call top_nopass_vjp(x, y, y_b, x_b)"//nl// &
+            "    call top_pass_case_vjp(x, y, y_b, x_b)"//nl// &
             "    if (abs(y - 5.5d0) > 1.0d-13) error stop 5"//nl// &
             "    if (abs(x_b - 3.0d0*y_b) > 1.0d-13) error stop 6"//nl// &
-            "    print *, 'NOPASS type-bound oracle pass'"//nl// &
+            "    if (abs(y_b*y_d - x_b*x_d) > 1.0d-13) error stop 7"//nl// &
+            "    print *, 'PASS/NOPASS type-bound oracle pass'"//nl// &
             "end program driver"//nl
         open (newunit=case_unit, file=case_dir//"/driver.f90", status="replace", &
             action="write")
@@ -265,18 +269,18 @@ contains
             case_dir//"/driver.f90 > "//case_dir//"/build.log 2>&1", &
             exitstat=case_stat)
         if (case_stat /= 0) then
-            print *, "FAIL NOPASS: generated code did not compile"
+            print *, "FAIL PASS/NOPASS: generated code did not compile"
             call show_file(case_dir//"/build.log")
             error stop 1
         end if
         call execute_command_line("./"//case_dir//"/run > "//case_dir//"/out.txt 2>&1", &
             exitstat=case_stat)
         if (case_stat /= 0) then
-            print *, "FAIL NOPASS: independent oracle failed"
+            print *, "FAIL PASS/NOPASS: independent oracle failed"
             call show_file(case_dir//"/out.txt")
             error stop 1
         end if
-    end subroutine check_nopass
+    end subroutine check_pass_case
 
     subroutine check_inherited(case_source, case_module)
         character(len=*), intent(in) :: case_source, case_module
@@ -369,14 +373,14 @@ contains
         text = "module named_pass"//nl// &
             "    type :: box_t"//nl// &
             "    contains"//nl// &
-            "        procedure, pass(obj) :: value"//nl// &
+            "        procedure, pass(self) :: value"//nl// &
             "    end type box_t"//nl// &
             "contains"//nl// &
-            "    pure function value(obj, x) result(y)"//nl// &
-            "        class(box_t), intent(in) :: obj"//nl// &
+            "    pure function value(x, self) result(y)"//nl// &
             "        real(8), intent(in) :: x"//nl// &
+            "        class(box_t), intent(in) :: self"//nl// &
             "        real(8) :: y"//nl// &
-            "        y = x"//nl// &
+            "        y = 3.0d0*x + 1.0d0"//nl// &
             "    end function value"//nl// &
             "    pure function top(x) result(y)"//nl// &
             "        real(8), intent(in) :: x"//nl// &
@@ -501,14 +505,14 @@ contains
             "    type :: base_t"//nl// &
             "        real(8) :: scale"//nl// &
             "    contains"//nl// &
-            "        procedure :: value"//nl// &
+            "        procedure, pass(self) :: value"//nl// &
             "    end type base_t"//nl// &
             "    type, extends(base_t) :: box_t"//nl// &
             "    end type box_t"//nl// &
             "contains"//nl// &
-            "    pure function value(self, x) result(y)"//nl// &
-            "        class(base_t), intent(in) :: self"//nl// &
+            "    pure function value(x, self) result(y)"//nl// &
             "        real(8), intent(in) :: x"//nl// &
+            "        class(base_t), intent(in) :: self"//nl// &
             "        real(8) :: y"//nl// &
             "        y = self%scale*x + 1.0d0"//nl// &
             "    end function value"//nl// &
@@ -544,6 +548,29 @@ contains
             "    end function top"//nl// &
             "end module generic_case"//nl
     end function generic_source
+
+    function runtime_dispatch_source() result(text)
+        character(len=:), allocatable :: text
+        text = "module runtime_dispatch_case"//nl// &
+            "    type :: box_t"//nl// &
+            "    contains"//nl// &
+            "        procedure, pass(self) :: value"//nl// &
+            "    end type box_t"//nl// &
+            "contains"//nl// &
+            "    pure function value(self, x) result(y)"//nl// &
+            "        class(box_t), intent(in) :: self"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        real(8) :: y"//nl// &
+            "        y = x"//nl// &
+            "    end function value"//nl// &
+            "    pure function top(model, x) result(y)"//nl// &
+            "        class(box_t), intent(in) :: model"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        real(8) :: y"//nl// &
+            "        y = model%value(x)"//nl// &
+            "    end function top"//nl// &
+            "end module runtime_dispatch_case"//nl
+    end function runtime_dispatch_source
 
     function deferred_source() result(text)
         character(len=:), allocatable :: text
