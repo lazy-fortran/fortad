@@ -42,7 +42,7 @@ program test_polymorphic_array_receiver_oracle
         "end module polymorphic_array_receiver_case"//nl
 
     character(len=32) :: independents(3)
-    type(fad_result_t) :: jvp, vjp
+    type(fad_result_t) :: jvp, vjp, active_vjp
     character(len=:), allocatable :: dir, driver
     integer :: unit, stat
 
@@ -52,6 +52,10 @@ program test_polymorphic_array_receiver_oracle
     vjp = fad_vjp(source, ["x"], dependent="y", from="top", &
         name="top_vjp")
     call require_ok(vjp, "VJP")
+    active_vjp = fad_vjp(source, [character(len=32) :: "a(2)%scale", &
+        "a(2)%bias", "x"], &
+        dependent="y", from="top", name="top_active_vjp")
+    call require_ok(active_vjp, "active receiver VJP")
 
     dir = "build/oracle/polymorphic_array_receiver"
     call execute_command_line("mkdir -p "//dir, exitstat=stat)
@@ -66,13 +70,15 @@ program test_polymorphic_array_receiver_oracle
     write (unit, '(a)') "contains"
     write (unit, '(a)') jvp%code
     write (unit, '(a)') vjp%code
+    write (unit, '(a)') active_vjp%code
     write (unit, '(a)') "end module polymorphic_array_receiver_derivatives"
     close (unit)
 
     driver = &
         "program driver"//nl// &
         "    use polymorphic_array_receiver_case, only: child_t, top"//nl// &
-        "    use polymorphic_array_receiver_derivatives, only: top_jvp, top_vjp"//nl// &
+        "    use polymorphic_array_receiver_derivatives, only: top_jvp, top_vjp, "// &
+        "top_active_vjp"//nl// &
         "    implicit none"//nl// &
         "    type(child_t) :: a(2), a_d(2), a_b(2), plus(2), minus(2)"//nl// &
         "    real(8) :: x, x_d, y, y_d, y_b, x_b, h, fp, fm, fd"//nl// &
@@ -89,17 +95,23 @@ program test_polymorphic_array_receiver_oracle
         "    if (abs(y_d - 2.4d0) > 1.0d-13) error stop 3"//nl// &
         "    h = 1.0d-6"//nl// &
         "    plus = a; plus(2)%scale = a(2)%scale + h*a_d(2)%scale; "// &
-            "plus(2)%bias = a(2)%bias + h*a_d(2)%bias"//nl// &
+        "plus(2)%bias = a(2)%bias + h*a_d(2)%bias"//nl// &
         "    minus = a; minus(2)%scale = a(2)%scale - h*a_d(2)%scale; "// &
-            "minus(2)%bias = a(2)%bias - h*a_d(2)%bias"//nl// &
+        "minus(2)%bias = a(2)%bias - h*a_d(2)%bias"//nl// &
         "    fp = top(plus, x + h*x_d); fm = top(minus, x - h*x_d)"//nl// &
         "    fd = (fp - fm)/(2.0d0*h)"//nl// &
         "    if (abs(y_d - fd) > 1.0d-7) error stop 4"//nl// &
         "    call top_vjp(a, x, y, y_b, x_b)"//nl// &
         "    if (abs(x_b - 3.9d0) > 1.0d-13) error stop 5"//nl// &
-        "    dot_forward = y_b*(a(2)%scale*x_d)"//nl// &
-        "    dot_reverse = x_b*x_d"//nl// &
-        "    if (abs(dot_forward - dot_reverse) > 1.0d-13) error stop 6"//nl// &
+        "    a_b = child_t(0.0d0, 0.0d0)"//nl// &
+        "    call top_active_vjp(a, x, y, y_b, a_b, x_b)"//nl// &
+        "    if (abs(a_b(2)%scale - 2.6d0) > 1.0d-13) error stop 7"//nl// &
+        "    if (abs(a_b(2)%bias - 1.3d0) > 1.0d-13) error stop 8"//nl// &
+        "    if (abs(x_b - 3.9d0) > 1.0d-13) error stop 9"//nl// &
+        "    dot_forward = y_b*y_d"//nl// &
+        "    dot_reverse = a_b(2)%scale*a_d(2)%scale + "// &
+        "a_b(2)%bias*a_d(2)%bias + x_b*x_d"//nl// &
+        "    if (abs(dot_forward - dot_reverse) > 1.0d-13) error stop 10"//nl// &
         "    print *, 'polymorphic array receiver oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", action="write")
@@ -130,6 +142,7 @@ program test_polymorphic_array_receiver_oracle
     call expect_refusal(ownership_source(), "ownership", "ownership-changing")
     call expect_refusal(unresolved_source(), "runtime dispatch", &
         "fixed concrete runtime path")
+    call expect_dynamic_type_refusal()
     print *, "test_polymorphic_array_receiver_oracle: all cases passed"
 
 contains
@@ -152,7 +165,31 @@ contains
             print *, "FAIL ", trim(label), ": ", result%message
             error stop 1
         end if
+        result = fad_vjp(case_source, independents, dependent="y", from="top")
+        if (result%ok .or. .not. allocated(result%message) .or. &
+            index(result%message, needle) == 0) then
+            print *, "FAIL active VJP ", trim(label), ": ", result%message
+            error stop 1
+        end if
     end subroutine expect_refusal
+
+    subroutine expect_dynamic_type_refusal()
+        type(fad_result_t) :: result
+        result = fad_jvp(source, [character(len=32) :: "a"], from="top")
+        if (result%ok .or. .not. allocated(result%message) .or. &
+            index(result%message, "dynamic type perturbations") == 0) then
+            print *, "FAIL dynamic-type active receiver refusal: ", result%message
+            error stop 1
+        end if
+        result = fad_vjp(source, [character(len=32) :: "a"], dependent="y", &
+            from="top")
+        if (result%ok .or. .not. allocated(result%message) .or. &
+            index(result%message, "dynamic type perturbations") == 0) then
+            print *, "FAIL dynamic-type active receiver VJP refusal: ", &
+                result%message
+            error stop 1
+        end if
+    end subroutine expect_dynamic_type_refusal
 
     function replace_text(base, old, new) result(text)
         character(len=*), intent(in) :: base, old, new
