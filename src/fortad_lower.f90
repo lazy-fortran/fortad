@@ -16,6 +16,7 @@ module fortad_lower
     use fortad_inline, only: inline_calls, inline_status_t, references
     use fortad_lower_body, only: lower_function, lower_subroutine, &
         inherit_module_uses
+    use fortad_lower_statements, only: rewrite_associate_aliases
     use fortad_lower_types, only: lower_status_t
     implicit none
     private
@@ -232,6 +233,26 @@ contains
             end if
         end if
 
+        ! ASSOCIATE selector facts include resolved storage and type metadata.
+        ! The ordinary parse-only path intentionally omits those facts, so
+        ! rerun FortFront's semantic pass only for sources that contain the
+        ! construct rather than paying that cost for every procedure.
+        if (contains_associate_construct(res%arena)) then
+            opts%run_semantics = .true.
+            call compile_frontend_from_string(source, res, opts)
+            if (.not. res%parse_ok) then
+                status%ok = .false.
+                status%message = "parse failed while resolving ASSOCIATE selector facts"
+                if (allocated(res%error_msg)) then
+                    if (len_trim(res%error_msg) > 0) then
+                        status%message = "parse failed while resolving ASSOCIATE selector facts: "// &
+                            trim(res%error_msg)
+                    end if
+                end if
+                return
+            end if
+        end if
+
         if (has_module_allocatable_state(source)) then
             status%ok = .false.
             status%message = "module-level allocatable mutable state is not supported; use local or dummy ownership"
@@ -331,6 +352,7 @@ contains
                 else
                     call lower_subroutine(res%arena, unit, source, proc, status)
                 end if
+                if (status%ok) call rewrite_associate_aliases(proc)
                 proc%is_elemental = header_has_attribute(source_header, "elemental")
                 proc%is_pure = header_has_attribute(source_header, "pure")
                 if (proc%is_elemental) then
@@ -438,6 +460,21 @@ contains
             end if
         end do
     end function contains_procedure_pointer_declaration
+
+    logical function contains_associate_construct(arena) result(found)
+        !! Whether semantic ASSOCIATE selector facts are needed.
+        type(ast_arena_t), intent(in) :: arena
+        integer :: i
+
+        found = .false.
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) == "associate") then
+                found = .true.
+                return
+            end if
+        end do
+    end function contains_associate_construct
 
     subroutine refuse_global_state(arena, reference, status)
         !! Active mutable global state has no explicit ownership contract.
