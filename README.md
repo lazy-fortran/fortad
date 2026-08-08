@@ -170,6 +170,12 @@ written as `fortad kernel.f90 --mode reverse`. The explicit `jvp`, `vjp`, and
 `hvp` forms remain strict compact spellings: their product name already fixes
 the mode.
 
+Reverse-mode inference also handles a legacy subroutine with no `INTENT`
+annotations when it has one unambiguous output: `fortad vjp legacy.f90`
+infers the written dummy as the dependent and excludes it from the
+independents. Use `--dep NAME` when the procedure has multiple possible
+outputs.
+
 For Tapenade-style scripts, `--head` (also `-head`) combines the procedure
 and active arguments: `fortad vjp -head 'kernel(x)' source.f90`. Commas are
 accepted too. The procedure name is equivalent to `--proc`; the names inside
