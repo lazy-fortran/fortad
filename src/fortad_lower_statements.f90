@@ -188,14 +188,16 @@ contains
             type is (assignment_node)
             s%kind = FAD_ASSIGN
             s%line = n%line
+            s%is_automatic_reallocation = .false.
             call lower_target(arena, n%target_index, proc, s, status)
             if (.not. status%ok) return
             if (whole_allocatable_target(arena, n%target_index, proc)) then
-                status%ok = .false.
-                status%message = "unsupported implicit reallocation at line "// &
-                    itoa(n%line)//" for '"//trim(s%target)//"': assign allocatable arrays only through "// &
-                    "an explicitly allocated element or section"
-                return
+                if (.not. automatic_reallocation_supported(arena, &
+                        n%target_index, proc, status%message)) then
+                    status%ok = .false.
+                    return
+                end if
+                s%is_automatic_reallocation = .true.
             end if
             s%value = lower_expr(arena, n%value_index, proc, status)
             if (.not. status%ok) return
@@ -722,8 +724,8 @@ contains
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: idx
         type(fad_proc_t), intent(in) :: proc
+        type(storage_query_t) :: storage
         character(len=:), allocatable :: name
-        integer :: di
 
         found = .false.
         if (idx <= 0 .or. idx > arena%size) return
@@ -731,18 +733,111 @@ contains
         select type (node => arena%entries(idx)%node)
             type is (identifier_node)
             name = node%name
-            type is (call_or_subscript_node)
-            if (allocated(node%arg_indices)) then
-                if (size(node%arg_indices) /= 0) return
-            end if
-            name = node%name
         class default
             return
         end select
-        di = proc%decl_index(trim(name))
-        found = .false.
-        if (di > 0) found = proc%decls(di)%is_allocatable
+        storage = query_storage(arena, idx)
+        if (storage%found) then
+            found = storage%is_allocatable
+        else
+            found = proc%decl_index(trim(name)) > 0
+            if (found) found = proc%decls(proc%decl_index(trim(name)))%is_allocatable
+        end if
     end function whole_allocatable_target
+
+    logical function automatic_reallocation_supported(arena, idx, proc, message) &
+            result(supported)
+        !! Accept only a concrete scalar or rank-one local/dummy owner.  The
+        !! descriptor and payload are then re-created by ordinary Fortran
+        !! assignment in both the primal and generated derivative procedures;
+        !! no separate allocation-state tape is needed for this bounded slice.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(in) :: proc
+        character(len=:), allocatable, intent(out) :: message
+        type(storage_query_t) :: storage
+        character(len=:), allocatable :: name, dims
+        integer :: di, i, rank
+
+        supported = .false.
+        message = ""
+        select type (node => arena%entries(idx)%node)
+            type is (identifier_node)
+            name = trim(node%name)
+        class default
+            message = "unsupported automatic reallocation at line "// &
+                itoa(arena%get_node_line(idx))//": allocatable components and "// &
+                "computed owners require component lifetime tracking"
+            return
+        end select
+
+        storage = query_storage(arena, idx)
+        di = proc%decl_index(name)
+        if (.not. storage%found .and. di <= 0) then
+            message = "unsupported automatic reallocation at line "// &
+                itoa(arena%get_node_line(idx))//": FortFront did not prove the "// &
+                "allocatable owner's storage"
+            return
+        end if
+        if (storage%found) then
+            if (storage%is_pointer .or. storage%is_target) then
+                message = "unsupported automatic reallocation for '"//trim(name)// &
+                    "': pointer/target alias storage identity is not tracked"
+                return
+            end if
+        end if
+        if ((storage%found .and. (storage%is_module_state .or. &
+                storage%is_save_state .or. storage%is_common_state))) then
+            message = "unsupported automatic reallocation for '"//trim(name)// &
+                "': global mutable ownership requires an explicit derivative rule"
+            return
+        end if
+        if (storage%found) then
+            if (storage%is_polymorphic .or. storage%is_unlimited_polymorphic) then
+                message = "unsupported automatic reallocation for '"//trim(name)// &
+                    "': polymorphic ownership requires dynamic-type replay"
+                return
+            end if
+        end if
+        if (di > 0) then
+            if (proc%decls(di)%is_polymorphic) then
+                message = "unsupported automatic reallocation for '"//trim(name)// &
+                    "': polymorphic ownership requires dynamic-type replay"
+                return
+            end if
+        end if
+
+        if (di <= 0) then
+            message = "unsupported automatic reallocation for '"//trim(name)// &
+                "': owner is not a local or dummy declaration"
+            return
+        end if
+        if (.not. proc%decls(di)%is_allocatable) then
+            message = "unsupported automatic reallocation for '"//trim(name)// &
+                "': owner is not allocatable"
+            return
+        end if
+        if (.not. proc%decls(di)%is_array) then
+            supported = .true.
+            return
+        end if
+        if (.not. allocated(proc%decls(di)%dims)) then
+            message = "unsupported automatic reallocation for '"//trim(name)// &
+                "': rank is not proven by FortFront"
+            return
+        end if
+        dims = trim(proc%decls(di)%dims)
+        rank = 1
+        do i = 1, len_trim(dims)
+            if (dims(i:i) == ",") rank = rank + 1
+        end do
+        if (rank > 1) then
+            message = "unsupported automatic reallocation for '"//trim(name)// &
+                "': only concrete scalar and rank-one owners are supported"
+            return
+        end if
+        supported = .true.
+    end function automatic_reallocation_supported
 
     logical function allocation_object_declared(proc, idx) result(found)
         type(fad_proc_t), intent(in) :: proc

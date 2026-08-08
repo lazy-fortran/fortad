@@ -328,11 +328,35 @@ contains
         type(fad_proc_t), intent(in) :: primal
         type(reverse_status_t), intent(inout) :: status
         type(loop_shape_t) :: shape
-        integer :: i, depth, allocation_depth, di, j
+        integer :: i, depth, allocation_depth, di, j, automatic_count
+        integer :: explicit_lifetime_count
         character(len=64) :: owner, owner_text
         logical :: found
 
         allocation_depth = 0
+        automatic_count = 0
+        explicit_lifetime_count = 0
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%is_automatic_reallocation) then
+                automatic_count = automatic_count + 1
+            end if
+            select case (primal%stmts(i)%kind)
+            case (FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC)
+                explicit_lifetime_count = explicit_lifetime_count + 1
+            end select
+        end do
+        if (automatic_count > 1) then
+            status%ok = .false.
+            status%message = "reverse mode: repeated automatic reallocation "// &
+                "requires allocation-state replay"
+            return
+        end if
+        if (automatic_count > 0 .and. explicit_lifetime_count > 0) then
+            status%ok = .false.
+            status%message = "reverse mode: automatic reallocation cannot be combined "// &
+                "with explicit allocation lifetime operations"
+            return
+        end if
         call check_reverse_move_alloc_shape(primal, status)
         if (.not. status%ok) return
 
@@ -340,6 +364,14 @@ contains
         do i = 1, primal%n_stmts
             select case (primal%stmts(i)%kind)
             case (FAD_ASSIGN)
+                if (primal%stmts(i)%is_automatic_reallocation) then
+                    if (depth /= 0 .or. allocation_depth /= 0) then
+                        status%ok = .false.
+                        status%message = "reverse mode: path-dependent automatic "// &
+                            "reallocation requires allocation-state replay"
+                        return
+                    end if
+                end if
                 ! An element write is a scatter wherever it appears. Inside a
                 ! loop `analyse_loop` validates the index; outside one the
                 ! index is whatever the subscript says and the adjoint goes to

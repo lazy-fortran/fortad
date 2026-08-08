@@ -78,6 +78,9 @@ module fortad_ir
         integer :: kind = 0
         character(len=:), allocatable :: target
         integer :: value = 0
+        !! FortFront proved this whole assignment targets a concrete
+        !! allocatable owner and may perform automatic reallocation.
+        logical :: is_automatic_reallocation = .false.
         !! Loop bounds for FAD_DO; condition for FAD_IF; selector expression
         !! for FAD_SELECT_TYPE.
         integer :: lo = 0, hi = 0, step = 0
