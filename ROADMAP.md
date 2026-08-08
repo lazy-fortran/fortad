@@ -309,7 +309,7 @@ split it into smaller checkboxes before writing code.
 
 ---
 
-## Status on 2026-08-08
+## Status on 2026-08-09
 
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, and
 the current bounded integration wave is green. Broader modern-Fortran support
@@ -343,7 +343,7 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   Its narrowed generic-dispatch query now resolves unique integer/real
   overloads to exact candidates, implementations, and signatures, while
   ambiguous, deferred, dynamic, pointer, and allocatable calls remain refused.
-- FFC `1b2549e`, including rank-three and rank-four intrinsic
+- FFC `b426ae3`, including rank-three and rank-four intrinsic
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
@@ -388,7 +388,7 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   compound component declarations now retains complete component metadata and
   compiles through the explicit reverse probe; it remains a legacy
   compatibility case, not modern runnable support.
-  FortAD `2e7446e` (on top of `51bea55`, `f94e35c`, `caff12b`, `92bf9ad`, `bfe204d`, `1215d44`, `f51bb4c`, `a693014`, `4c8635a`, `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
+  FortAD `22e9627` (on top of `2e7446e`, `51bea55`, `f94e35c`, `caff12b`, `92bf9ad`, `bfe204d`, `1215d44`, `f51bb4c`, `a693014`, `4c8635a`, `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
   `e28ba4b`, `58899bf`, and `a45dbea`), including active
   concrete rank-four
   allocatable-component JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded
@@ -415,11 +415,16 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   exact actual/formal storage facts; aliases, callbacks, globals, pointers,
   allocatables, mismatches, and ambiguous mappings are refused. Function
   expression calls retain the existing keyword/optional forwarding path. The
-  full `fo` gate is green: 410 build targets, 409 derivative targets, 83/83
+  full `fo` gate is green: 410 build targets, 409 derivative targets, 84/84
   tests, and lint.
   A fixed-source scalar `class(*)` component assignment inside one proven
   `TYPE IS` or `CLASS IS` arm now differentiates through concrete shadows in
   JVP and VJP. Unresolved multi-arm dispatch and all unsafe ownership forms
+  remain precise refusals.
+  Reverse mode also replays one scalar local or dummy `class(*)`, allocatable
+  owner acquired from a declared concrete `SOURCE=` object, with one concrete
+  `SELECT TYPE` arm and final deallocation. Ambiguous dispatch, polymorphic or
+  factory sources, arrays, aliases, `MOVE_ALLOC`, and global mutable ownership
   remain precise refusals.
   The CLI reports ambiguous inferred reverse dependents with the exact
   `--dep NAME` choices and writes no output until the ambiguity is resolved.
