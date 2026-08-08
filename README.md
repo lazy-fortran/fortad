@@ -51,7 +51,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
 | Elemental procedures | same-file elemental functions retain elemental JVP/VJP array calls |
 | Fixed-form input | CLI `.f`, `.for`, `.ftn`, and `.f77` files with legacy comments and declarations |
-| Derived components | bounded concrete scalar, nested, inherited, and array component paths |
+| Derived components | bounded concrete scalar, nested, inherited, array, and fixed-source polymorphic component paths |
 | Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known bindings and bounded direct polymorphic dispatch |
 | Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
 | Aliasing and sections | bounded rank-one/rank-two contiguous range sections. Named refusals cover `pointer`, `target`, pointer association, vector subscripts, and noncontiguous or computed sections |
@@ -67,15 +67,16 @@ The bounded real-objective complex VJP and its hand/finite-difference/adjoint
 oracle are covered by [`test_complex_reverse_oracle.f90`](test/test_complex_reverse_oracle.f90).
 The bounded derived-component contract and its JVP/VJP oracle are in
 [the derived-components design note](docs/design/derived-components.md).
-Allocatable components and lifetime-changing statements are currently refused
-with a source-line diagnostic. The boundary and primal oracle are in
-[the allocation-lifetime design note](docs/design/allocation-lifetime.md).
+General allocatable lifetime changes remain refused with a source-line
+diagnostic. One scalar nested polymorphic component may use a concrete local
+`SOURCE=` acquisition followed by final deallocation in JVP and VJP. The
+boundary and oracle are in [the polymorphic ownership design note](docs/design/polymorphic-ownership.md).
 The bounded contiguous rank-one/rank-two section support, storage-identity
 proof, and executable refusal oracles are in
 [the aliasing and sections design note](docs/design/aliasing.md).
 The fixed-dispatch abstract/deferred hierarchy slice and its multi-level
 oracle are in [the abstract hierarchy design note](docs/design/abstract-hierarchy.md).
-Passive fixed-type polymorphic allocatable dispatch, bounded active
+Passive fixed-type polymorphic allocatable dispatch, bounded active nested
 `allocate(source=concrete)` ownership, and the remaining semantic boundary
 for polymorphic ownership are in
 [the polymorphic ownership design note](docs/design/polymorphic-ownership.md).

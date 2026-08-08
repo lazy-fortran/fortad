@@ -131,12 +131,12 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 63 runnable pure-Fortran cases, 133 expected refusals, 33
-invalid-upstream closures, 86 other bounded FortAD feature/dependency
-classifications, and 506 non-Fortran or source-absent cases. Thus 313 of
-1,432 strict pure-Fortran candidates are classified (21.9%), while 1,119
-remain in the pure-Fortran queue. Across the whole corpus, 821 of 2,014
-candidates are accounted for (40.8%). The 74 mixed-language rows remain a
+candidate files: 63 runnable pure-Fortran cases, 133 expected refusals, 34
+invalid-upstream closures, 87 other bounded FortAD feature/dependency
+classifications, and 508 non-Fortran or source-absent cases. Thus 317 of
+1,432 strict pure-Fortran candidates are classified (22.1%), while 1,115
+remain in the pure-Fortran queue. Across the whole corpus, 825 of 2,014
+candidates are accounted for (40.9%). The 74 mixed-language rows remain a
 separate dependency lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -165,6 +165,9 @@ character-substring, and legacy labeled-DO boundaries.
 The `next18` shard adds `set01/lh099`, `set01/lh101`, `set01/lh106`, and
 `set01/lh108` with explicit DO-WHILE, invalid-upstream, dependent-inference,
 and COMMON/undefined-storage boundaries.
+The `next19` shard adds `set01/lh110` through `set01/lh113` with legacy
+inference, array-liveness, missing-reference/generated-interface, and invalid
+DO-variable boundaries.
 The preceding `next6` shard closes `set11/lh011`, `set04/lh156`,
 `set07/v521`, and `set11/vpf17`. Fresh Tapenade parser, forward, and reverse
 probes pass for all four. FortAD records module-level global state,
@@ -304,7 +307,7 @@ remains open below.
 
 The 2026-08-08 integration wave is recorded at these repository heads:
 
-- FortFront `3fe59496`, including abstract/deferred hierarchy, concrete-only
+- FortFront `410da087`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
@@ -324,7 +327,7 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   Its narrowed generic-dispatch query now resolves unique integer/real
   overloads to exact candidates, implementations, and signatures, while
   ambiguous, deferred, dynamic, pointer, and allocatable calls remain refused.
-- FFC `c17019e`, including rank-three and rank-four intrinsic
+- FFC `ef4c0f4`, including rank-three and rank-four intrinsic
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
@@ -346,7 +349,10 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   forms remain explicit boundaries. Rank-two integer and `real(8)` whole
   arrays now use the same descriptor shape/stride contract, with independent
   differential and refusal tests; sections, allocatables, and pointer/target
-  actuals remain unsupported.
+  actuals remain unsupported. Runtime automatic arrays with one through four
+  dimensions now lower through the descriptor path, with an independent
+  rank-four differential oracle and existing runtime-array regressions.
+  Sections with multiple retained dimensions remain an explicit FFC boundary.
 - FortAD includes the automatic derived-component CLI inference slice: when
   `--indep` is omitted it selects only read concrete `REAL` component paths
   from derived dummies, including array-element paths, and never widens a
@@ -360,13 +366,18 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   compound component declarations now retains complete component metadata and
   compiles through the explicit reverse probe; it remains a legacy
   compatibility case, not modern runnable support.
-  FortAD `7c65a88` (on top of `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
+  FortAD `4c8635a` (on top of `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
   `e28ba4b`, `58899bf`, and `a45dbea`), including active
   concrete rank-four
   allocatable-component JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded
   polymorphic reverse ownership replay, one-arm rank-one assumed-rank JVP/VJP,
   and branch-merged callback-flow JVP/VJP lowering with an independent oracle,
-  plus fixed-shape array-element type-bound receiver JVP/VJP. Scalar whole
+  plus fixed-shape array-element type-bound receiver JVP/VJP. It also supports
+  one scalar fixed-source polymorphic allocatable component ownership path in
+  JVP and VJP, with paired concrete shadows and a generated-source,
+  finite-difference, and adjoint-identity oracle. Arrays, sections,
+  reallocation, aliases, pointers, factories, unresolved dispatch, and global
+  state remain explicit refusals. Scalar whole
   allocatable-component automatic reallocation now works in JVP and VJP for the
   bounded scalar concrete case. The latest NVIDIA
   compatibility slice removes remaining intrinsic assignment of allocatable
@@ -421,11 +432,11 @@ The 2026-08-08 integration wave is recorded at these repository heads:
 - FortAD now also supports one fixed-arm `CLASS IS` path with the same passive
   dynamic-type contract and independent numerical/refusal oracle; multiple
   arms, aliases, pointers, global state, and ownership remain refusals.
-- fortad-bench `34a3955` (on top of `04cdebc`, `ecefdb3`, `72f026c`, `69a4446`, `e2d96f7`, `9fb6137`, and `1e34b90`), including the
+- fortad-bench `8f6992f` (on top of `34a3955`, `04cdebc`, `ecefdb3`, `72f026c`, `69a4446`, `e2d96f7`, `9fb6137`, and `1e34b90`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
-  next10/next11/next12/next13/next14/next15/next16/next17/next18 evidence contracts. The reproducible queue
-  contains 1,193 rows: 1,119 pure-Fortran and 74 mixed-language candidates;
-  821 of 2,014 corpus candidates are accounted for, including 313 of 1,432
+  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19 evidence contracts. The reproducible queue
+  contains 1,189 rows: 1,115 pure-Fortran and 74 mixed-language candidates.
+  825 of 2,014 corpus candidates are accounted for, including 317 of 1,432
   strict pure-Fortran candidates.
 
 The next feature order has four steps. The first callback-flow step is
@@ -441,7 +452,7 @@ checkpointing and numerical/application rules. Active global mutable state,
 uncontrolled aliases, active I/O, and opaque calls without rules remain
 product refusals rather than compatibility work.
 
-FortFront source `main` is currently `3fe59496`. This handoff includes the
+FortFront source `main` is currently `410da087`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -1691,6 +1702,13 @@ problem-specific rule.
             cotangents. Multiple arms, aliases, pointers, global mutable state,
             and ownership changes remain explicit refusals. The independent
             oracle is `test_polymorphic_class_is_oracle.f90`.
+      - [x] **P8.3l fixed-source nested polymorphic component ownership.** A
+            scalar `class(base_t), allocatable` component at a statically known
+            nested path accepts one concrete local `SOURCE=` acquisition and
+            final deallocation. JVP and VJP use paired concrete shadows and
+            pass generated-source, finite-difference, and adjoint-identity
+            checks. Arrays, sections, repeated acquisition, aliases, pointers,
+            factories, unresolved dispatch, and global state remain refusals.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through
@@ -1891,11 +1909,11 @@ An unsupported result is recorded as such and never counted as a runtime win.
       (`fortad-bench/docs/corpora/tapenade.toml`) pins the upstream tree and
       inventories 2,014 candidate cases. Automate parser, compiler, Tapenade,
       and FortAD probes across all rows. The queue-shard workflow is now
-      parallel and reproducible. Its latest `next18` shard adds four exact
-      candidates with DO-WHILE, invalid-upstream, dependent-inference, and
-      COMMON/undefined-storage boundaries; 1,193 rows remain queued. The
-      pure-Fortran queue contains 1,119 rows; 313 of 1,432 strict
-      pure-Fortran candidates and 821 of 2,014 total
+      parallel and reproducible. Its latest `next19` shard adds four exact
+      candidates with legacy inference, array liveness, generated-interface,
+      and invalid-DO-variable boundaries. There are 1,189 rows queued. The
+      pure-Fortran queue contains 1,115 rows. There are 317 of 1,432 strict
+      pure-Fortran candidates and 825 of 2,014 total
       candidates are classified. Each shard row has an
       exact-source Tapenade/FortAD probe and an independent behavioral or
       refusal oracle. The preceding `next6` shard closed `set11/lh011`,
