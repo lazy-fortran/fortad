@@ -229,6 +229,8 @@ contains
         call seed_activity(primal, spec, dependent, active, status)
         if (.not. status%ok) return
         call independent_component_paths(spec%independents, active_paths)
+        call refuse_active_polymorphic_dispatch(primal, active_paths, status)
+        if (.not. status%ok) return
         call check_reverse_allocation_sources(primal, active, status)
         if (.not. status%ok) return
         if (complex_reverse_path(primal, dependent, active) .and. &
@@ -3396,6 +3398,8 @@ contains
             ! sweep. Its cotangent is selected in parallel there; emitting a
             ! bare receiver-alias shadow here would be invalid.
             if (is_select_alias_path(primal, primal%exprs(i)%text)) cycle
+            if (is_scalar_polymorphic_receiver_path(primal, &
+                primal%exprs(i)%text)) cycle
             base = fad_base_name(primal%exprs(i)%text)
             di = primal%decl_index(base)
             if (di <= 0) cycle
@@ -3420,6 +3424,8 @@ contains
             if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
             if (index(primal%stmts(i)%target, "%") == 0) cycle
             if (is_select_alias_path(primal, primal%stmts(i)%target)) cycle
+            if (is_scalar_polymorphic_receiver_path(primal, &
+                primal%stmts(i)%target)) cycle
             base = fad_base_name(primal%stmts(i)%target)
             di = primal%decl_index(base)
             if (di <= 0) cycle
@@ -3478,6 +3484,91 @@ contains
             ignored = adjoint%add_stmt(s)
         end do
     end subroutine zero_component_adjoints
+
+    logical function is_scalar_polymorphic_receiver_path(primal, text) &
+            result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: base, selector
+        integer :: di, i
+
+        found = .false.
+        if (index(trim(text), "%") <= 0) return
+        base = fad_base_name(text)
+        di = primal%decl_index(base)
+        if (di <= 0) return
+        if (.not. primal%decls(di)%is_polymorphic) return
+        if (primal%decls(di)%is_array) return
+        if (primal%decls(di)%is_allocatable) return
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            selector = emit_expr(primal, primal%stmts(i)%value)
+            if (fad_base_name(selector) == trim(base)) then
+                found = .true.
+                return
+            end if
+        end do
+    end function is_scalar_polymorphic_receiver_path
+
+    subroutine refuse_active_polymorphic_dispatch(primal, active_paths, status)
+        !! A scalar CLASS cotangent can be paired with the primal selector
+        !! only on one proven concrete path. Multiple runtime arms would
+        !! require a dynamic-type cotangent descriptor, so refuse them before
+        !! reverse SSA emission rather than producing an invalid shadow.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: active_paths(:)
+        type(reverse_status_t), intent(inout) :: status
+        character(len=:), allocatable :: selector, base
+        integer :: i, j, k, depth, concrete, di
+        logical :: active_receiver
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            selector = emit_expr(primal, primal%stmts(i)%value)
+            base = fad_base_name(selector)
+            di = primal%decl_index(base)
+            if (di <= 0) cycle
+            if (.not. primal%decls(di)%is_polymorphic) cycle
+            if (primal%decls(di)%is_array) cycle
+            active_receiver = .false.
+            do j = 1, primal%n_exprs
+                if (primal%exprs(j)%kind /= FAD_VAR .and. &
+                    primal%exprs(j)%kind /= FAD_INDEX) cycle
+                if (fad_base_name(primal%exprs(j)%text) /= trim(base)) cycle
+                if (index(trim(primal%exprs(j)%text), "%") == 0) cycle
+                do k = 1, size(active_paths)
+                    if (same_component_name(primal%exprs(j)%text, &
+                        active_paths(k))) then
+                        active_receiver = .true.
+                        exit
+                    end if
+                end do
+                if (active_receiver) exit
+            end do
+            if (.not. active_receiver) cycle
+            concrete = 0
+            depth = 1
+            j = i + 1
+            do while (j <= primal%n_stmts .and. depth > 0)
+                select case (primal%stmts(j)%kind)
+                case (FAD_SELECT_TYPE)
+                    depth = depth + 1
+                case (FAD_END_SELECT)
+                    depth = depth - 1
+                case (FAD_TYPE_IS, FAD_CLASS_IS)
+                    if (depth == 1) concrete = concrete + 1
+                end select
+                j = j + 1
+            end do
+            if (concrete /= 1) then
+                status%ok = .false.
+                status%message = "reverse mode: active polymorphic receiver "// &
+                    "requires one fixed concrete runtime path; dynamic "// &
+                    "dispatch shadows are unsupported"
+                return
+            end if
+        end do
+    end subroutine refuse_active_polymorphic_dispatch
 
     subroutine zero_call_adjoints(primal, adjoint, ssa, rec, suffix, zero)
         !! Declare and clear adjoints for the arguments of an opaque call.
@@ -3790,18 +3881,25 @@ contains
         receiver_alias = trim(rec%selector_alias)
         alias_di = primal%decl_index(receiver_alias)
         if (alias_di <= 0) return
-        if (.not. primal%decls(alias_di)%is_select_alias) return
-        if (.not. allocated(primal%decls(alias_di)%alias_target)) return
-        selector = trim(primal%decls(alias_di)%alias_target)
-        if (index(selector, "(") <= 0) return
+        if (primal%decls(alias_di)%is_select_alias) then
+            if (.not. allocated(primal%decls(alias_di)%alias_target)) return
+            selector = trim(primal%decls(alias_di)%alias_target)
+        else
+            if (.not. primal%decls(alias_di)%is_polymorphic) return
+            selector = receiver_alias
+        end if
         receiver_di = primal%decl_index(fad_base_name(selector))
         if (receiver_di <= 0) return
-        if (.not. primal%decls(receiver_di)%is_array) return
         if (.not. primal%decls(receiver_di)%is_polymorphic) return
         if (primal%decls(receiver_di)%is_allocatable .or. &
             primal%decls(receiver_di)%is_associate_alias .or. &
             primal%decls(receiver_di)%is_select_alias) return
-        if (index(selector, ",") > 0) return
+        if (primal%decls(receiver_di)%is_array) then
+            if (index(selector, "(") <= 0) return
+            if (index(selector, ",") > 0) return
+        else
+            if (index(selector, "(") > 0) return
+        end if
         if (.not. receiver_context_has_active(primal, receiver_alias, &
             active_paths)) return
         cotangent_alias = receiver_alias//trim(suffix)
