@@ -363,7 +363,7 @@ contains
             call move_alloc(tmp, self%stmts)
         end if
         self%n_stmts = self%n_stmts + 1
-        self%stmts(self%n_stmts) = s
+        call fad_copy_stmt(self%stmts(self%n_stmts), s)
         idx = self%n_stmts
     end function proc_add_stmt
 

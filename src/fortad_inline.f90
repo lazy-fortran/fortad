@@ -893,9 +893,9 @@ contains
             call move_alloc(grown, p%stmts)
         end if
         do i = p%n_stmts, at, -1
-            p%stmts(i + 1) = p%stmts(i)
+            call fad_copy_stmt(p%stmts(i + 1), p%stmts(i))
         end do
-        p%stmts(at) = s
+        call fad_copy_stmt(p%stmts(at), s)
         p%n_stmts = p%n_stmts + 1
     end subroutine insert_stmt
 
