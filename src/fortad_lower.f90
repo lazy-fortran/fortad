@@ -212,6 +212,26 @@ contains
             end if
         end if
 
+        ! Procedure-pointer target flow is a semantic fact.  Keep the
+        ! parse-only fast path for ordinary sources, but give FortFront's
+        ! bounded callback query the semantic arena whenever a procedure
+        ! pointer declaration is present.
+        if (contains_procedure_pointer_declaration(res%arena)) then
+            opts%run_semantics = .true.
+            call compile_frontend_from_string(source, res, opts)
+            if (.not. res%parse_ok) then
+                status%ok = .false.
+                status%message = "parse failed while resolving a procedure-pointer callback"
+                if (allocated(res%error_msg)) then
+                    if (len_trim(res%error_msg) > 0) then
+                        status%message = "parse failed while resolving a procedure-pointer callback: "// &
+                            trim(res%error_msg)
+                    end if
+                end if
+                return
+            end if
+        end if
+
         if (has_module_allocatable_state(source)) then
             status%ok = .false.
             status%message = "module-level allocatable mutable state is not supported; use local or dummy ownership"
@@ -392,6 +412,32 @@ contains
             end if
         end do
     end function contains_generic_call
+
+    logical function contains_procedure_pointer_declaration(arena) result(found)
+        !! Whether semantic lowering is needed for a procedure-pointer fact.
+        type(ast_arena_t), intent(in) :: arena
+        type(declaration_query_t) :: query
+        character(len=:), allocatable :: normalized
+        integer :: i, j
+
+        found = .false.
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            query = query_declaration(arena, i)
+            if (.not. query%found) cycle
+            if (.not. query%is_pointer) cycle
+            if (.not. allocated(query%type_name)) cycle
+            normalized = ""
+            do j = 1, len_trim(query%type_name)
+                if (query%type_name(j:j) == " ") cycle
+                normalized = normalized//down(query%type_name(j:j))
+            end do
+            if (index(normalized, "procedure") == 1) then
+                found = .true.
+                return
+            end if
+        end do
+    end function contains_procedure_pointer_declaration
 
     subroutine refuse_global_state(arena, reference, status)
         !! Active mutable global state has no explicit ownership contract.

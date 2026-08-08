@@ -18,9 +18,17 @@ compiled JVP/VJP check against finite differences.
 Active optional forward arguments are supported: the generated tangent dummy
 is also `optional`, and the source and tangent actuals may be supplied or
 omitted together. Active optional reverse arguments remain a named refusal
-until reverse storage and call-shape handling are implemented. Generic
-resolution and procedure-pointer callbacks remain explicit roadmap items. An
-unsupported call is refused rather than treated as constant.
+until reverse storage and call-shape handling are implemented. A bounded
+procedure-pointer callback is supported when a direct same-scope call has
+exactly one preceding unconditional direct assignment to a same-file internal
+or external procedure. FortFront resolves that target, FortAD checks the
+function/subroutine kind and same-file argument count, then lowers the call as
+the concrete procedure so the existing inlining and derivative paths apply.
+The pointer declaration and passive assignment do not enter generated AD code.
+Reassignment, branch-local flow, `NULL()`/`NULLIFY`, generic or unresolved
+targets, and module-owned mutable callback state remain named refusals. See
+[`test_callback_call_oracle.f90`](../../test/test_callback_call_oracle.f90) for
+the compiled JVP/VJP, finite-difference, adjoint, and refusal oracle.
 
 ## Elemental procedures
 
