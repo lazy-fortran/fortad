@@ -34,6 +34,7 @@ contains
         type(lower_status_t), intent(out) :: status
         logical, allocatable :: reachable(:)
         logical :: changed
+        logical :: is_subroutine
         integer :: i, caller, callee
         type(call_arguments_query_t) :: query
 
@@ -62,10 +63,17 @@ contains
         do i = 1, arena%size
             if (.not. arena%has_node_at(i)) cycle
             if (.not. direct_same_file_call(arena, i, callee)) cycle
+            is_subroutine = trim(arena%entries(i)%node_type) == "subroutine_call"
             caller = enclosing_procedure(arena, i)
             if (caller <= 0 .or. .not. reachable(caller)) cycle
             query = query_call_arguments(arena, i)
             if (.not. query%found) then
+                ! Function expressions already have an established FortAD
+                ! lowering path, including optional and keyword forwarding.
+                ! Do not turn an unresolved function-expression query into a
+                ! new refusal. A subroutine-call statement, however, must
+                ! have an exact boundary contract.
+                if (.not. is_subroutine) cycle
                 call refuse(arena, i, "FortFront could not prove an exact "// &
                     "actual/formal mapping; ambiguous, unresolved, or non-storage actual", &
                     status)
