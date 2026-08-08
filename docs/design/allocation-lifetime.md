@@ -9,7 +9,7 @@ front end exposes it. Dead-code elimination preserves owned storage and its
 lifetime statements.
 
 The bounded automatic-reallocation slice accepts one whole assignment to a
-concrete scalar or rank-one local or dummy allocatable owner. FortFront's
+concrete scalar, rank-one, or rank-two local or dummy allocatable owner. FortFront's
 allocatable storage fact is used when available, with the lowered declaration
 fact as the parse-only fallback. The generated primal, JVP, and bounded VJP
 keep the assignment as ordinary Fortran assignment, so the compiler performs
@@ -17,7 +17,7 @@ the descriptor and payload transition. The slice deliberately refuses active
 module-owned allocatable state. Global mutable ownership would require a
 shared lifetime and alias model, so it is a product boundary rather than an
 implicit side effect. It also refuses allocation status side channels
-(`stat=`/`errmsg=`), rank greater than one, polymorphic ownership, pointer or
+(`stat=`/`errmsg=`), rank greater than two, polymorphic ownership, pointer or
 target aliasing, and allocatable components.
 
 Reverse mode now has a bounded retention slice for one explicit lifetime of a
@@ -63,6 +63,7 @@ multi-owner refusal, and the global-state boundary.
 
 The automatic-reallocation oracle is
 [`test_auto_realloc_assignment_oracle.f90`](../../test/test_auto_realloc_assignment_oracle.f90).
-It compiles the primal and generated derivatives with gfortran, checks scalar
-and rank-one hand derivatives against central differences, checks the scalar
-JVP/VJP adjoint identity, and verifies repeated-lifetime and rank-two refusals.
+It compiles the primal and generated derivatives with gfortran, checks scalar,
+rank-one, and rank-two hand derivatives against central differences, checks
+scalar and rank-two JVP/VJP adjoint identities, and verifies repeated-lifetime
+and rank-three boundary refusals.
