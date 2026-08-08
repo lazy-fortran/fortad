@@ -70,6 +70,19 @@ module fortad_ir
         character(len=:), allocatable :: call_arg_names(:)
         !! Index of the array subscript base for FAD_INDEX, else 0.
         integer :: rank = 0
+        !! FortFront's storage facts for a component path.  These facts are
+        !! copied with the expression so derivative leaves can distinguish an
+        !! active component from another component of the same derived object.
+        logical :: is_component_path = .false.
+        logical :: component_is_allocatable = .false.
+        logical :: component_is_pointer = .false.
+        logical :: component_is_target = .false.
+        logical :: component_is_polymorphic = .false.
+        logical :: component_is_global = .false.
+        logical :: component_is_real = .false.
+        integer :: component_rank = -1
+        character(len=:), allocatable :: component_type_name
+        character(len=:), allocatable :: component_original_path
     end type fad_expr_t
 
     type, public :: fad_stmt_t
@@ -558,14 +571,38 @@ contains
         if (allocated(a%text)) then
             if (a%text /= b%text) return
         end if
-        if (size(a%args) /= size(b%args)) return
-        if (size(a%args) > 0) then
-            if (any(a%args /= b%args)) return
+        if (allocated(a%args) .neqv. allocated(b%args)) return
+        if (allocated(a%args)) then
+            if (size(a%args) /= size(b%args)) return
+        end if
+        if (allocated(a%args)) then
+            if (size(a%args) > 0) then
+                if (any(a%args /= b%args)) return
+            end if
         end if
         if (allocated(a%call_arg_names) .neqv. allocated(b%call_arg_names)) return
         if (allocated(a%call_arg_names)) then
             if (size(a%call_arg_names) /= size(b%call_arg_names)) return
             if (any(a%call_arg_names /= b%call_arg_names)) return
+        end if
+        if (a%rank /= b%rank) return
+        if (a%is_component_path .neqv. b%is_component_path) return
+        if (a%component_is_allocatable .neqv. b%component_is_allocatable) return
+        if (a%component_is_pointer .neqv. b%component_is_pointer) return
+        if (a%component_is_target .neqv. b%component_is_target) return
+        if (a%component_is_polymorphic .neqv. b%component_is_polymorphic) return
+        if (a%component_is_global .neqv. b%component_is_global) return
+        if (a%component_is_real .neqv. b%component_is_real) return
+        if (a%component_rank /= b%component_rank) return
+        if (allocated(a%component_type_name) .neqv. &
+            allocated(b%component_type_name)) return
+        if (allocated(a%component_type_name)) then
+            if (a%component_type_name /= b%component_type_name) return
+        end if
+        if (allocated(a%component_original_path) .neqv. &
+            allocated(b%component_original_path)) return
+        if (allocated(a%component_original_path)) then
+            if (a%component_original_path /= b%component_original_path) return
         end if
         same = .true.
     end function fad_expr_equal

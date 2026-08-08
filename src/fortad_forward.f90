@@ -63,6 +63,7 @@ contains
         type(fad_proc_t), intent(out) :: tangent
         type(forward_status_t), intent(out) :: status
         character(len=:), allocatable :: suffix, ndir
+        character(len=256), allocatable :: active_paths(:)
         character(len=256) :: decl_name, decl_type, decl_dims, tangent_type
         logical, allocatable :: active(:)
         integer :: i, ignored, di
@@ -81,6 +82,7 @@ contains
 
         call seed_activity(primal, spec, active, status)
         if (.not. status%ok) return
+        call independent_component_paths(spec%independents, active_paths)
         call refuse_active_polymorphic_ownership(primal, active, status)
         if (.not. status%ok) return
         if (spec%vector) then
@@ -123,7 +125,8 @@ contains
 
         call build_signature(primal, tangent, active, suffix, spec%vector, ndir, &
             spec%with_primal)
-        call build_body(primal, tangent, active, suffix, spec%vector, status)
+        call build_body(primal, tangent, active, active_paths, suffix, &
+            spec%vector, status)
         if (.not. status%ok) return
 
         ! Every local the primal declared is still a local of the tangent
@@ -781,11 +784,13 @@ contains
         end if
     end subroutine add_tangent_decl
 
-    subroutine build_body(primal, tangent, active, suffix, vector, status)
+    subroutine build_body(primal, tangent, active, active_paths, suffix, &
+            vector, status)
         !! Walk the primal statements, emitting tangent then primal.
         type(fad_proc_t), intent(in) :: primal
         type(fad_proc_t), intent(inout) :: tangent
         logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: active_paths(:)
         character(len=*), intent(in) :: suffix
         logical, intent(in) :: vector
         type(forward_status_t), intent(inout) :: status
@@ -805,9 +810,10 @@ contains
                 case (FAD_ASSIGN)
                     di = primal%decl_index(target_base(ps%target))
                     if (di > 0) then
-                        if (decl_active(primal, di, active)) then
+                        if (target_path_active(primal, ps%target, di, active, &
+                            active_paths)) then
                             dexpr = tangent_of(primal, tangent, ps%value, active, &
-                                suffix, vector, status)
+                                suffix, vector, status, active_paths)
                             if (.not. status%ok) return
                             s%kind = FAD_ASSIGN
                             s%target = tangent_name(ps%target, suffix, vector)
@@ -1238,7 +1244,7 @@ contains
     end subroutine emit_call_tangent
 
     recursive integer function tangent_of(primal, tangent, idx, active, suffix, &
-            vector, status) result(out)
+            vector, status, active_paths) result(out)
         !! Tangent of a primal expression, as an expression in `tangent`.
         !!
         !! In vector mode a tangent leaf carries the whole direction block:
@@ -1252,6 +1258,7 @@ contains
         character(len=*), intent(in) :: suffix
         logical, intent(in) :: vector
         type(forward_status_t), intent(inout) :: status
+        character(len=*), intent(in), optional :: active_paths(:)
         integer, allocatable :: args(:), dargs(:)
         integer :: i, di, a, b, da, db
         type(fad_expr_t) :: e
@@ -1267,7 +1274,8 @@ contains
             case (FAD_VAR)
                 di = primal%decl_index(fad_base_name(pe%text))
                 if (di > 0) then
-                    if (decl_active(primal, di, active)) then
+                    if (component_expr_is_active(primal, idx, active, &
+                        active_paths)) then
                         if (vector) then
                             allocate (args(1))
                             args(1) = tangent%add_expr(expr_const(":"))
@@ -1285,7 +1293,8 @@ contains
             case (FAD_INDEX)
                 di = primal%decl_index(fad_base_name(pe%text))
                 if (di > 0) then
-                    if (decl_active(primal, di, active)) then
+                    if (component_expr_is_active(primal, idx, active, &
+                        active_paths)) then
                         if (vector) then
                             allocate (args(size(pe%args) + 1))
                             args(1) = tangent%add_expr(expr_const(":"))
@@ -1308,15 +1317,18 @@ contains
             case (FAD_BINOP)
                 a = copy_expr(primal, tangent, pe%args(1))
                 b = copy_expr(primal, tangent, pe%args(2))
-                da = tangent_of(primal, tangent, pe%args(1), active, suffix, vector, status)
+                da = tangent_of(primal, tangent, pe%args(1), active, suffix, vector, &
+                    status, active_paths)
                 if (.not. status%ok) return
-                db = tangent_of(primal, tangent, pe%args(2), active, suffix, vector, status)
+                db = tangent_of(primal, tangent, pe%args(2), active, suffix, vector, &
+                    status, active_paths)
                 if (.not. status%ok) return
                 out = jvp_binop(tangent, pe%text, a, b, da, db)
 
             case (FAD_UNOP)
                 a = copy_expr(primal, tangent, pe%args(1))
-                da = tangent_of(primal, tangent, pe%args(1), active, suffix, vector, status)
+                da = tangent_of(primal, tangent, pe%args(1), active, suffix, vector, &
+                    status, active_paths)
                 if (.not. status%ok) return
                 out = jvp_unop(tangent, pe%text, a, da)
 
@@ -1325,7 +1337,7 @@ contains
                 do i = 1, size(pe%args)
                     args(i) = copy_expr(primal, tangent, pe%args(i))
                     dargs(i) = tangent_of(primal, tangent, pe%args(i), active, &
-                        suffix, vector, status)
+                        suffix, vector, status, active_paths)
                     if (.not. status%ok) return
                 end do
                 if (all(dargs == 0)) then
@@ -1356,7 +1368,11 @@ contains
         if (idx <= 0 .or. idx > src%n_exprs) return
         e%kind = src%exprs(idx)%kind
         e%text = src%exprs(idx)%text
-        allocate (args(size(src%exprs(idx)%args)))
+        if (allocated(src%exprs(idx)%args)) then
+            allocate (args(size(src%exprs(idx)%args)))
+        else
+            allocate (args(0))
+        end if
         do i = 1, size(args)
             args(i) = copy_expr(src, dst, src%exprs(idx)%args(i))
         end do
@@ -1410,5 +1426,104 @@ contains
         base_di = p%decl_index(fad_base_name(p%decls(di)%alias_target))
         if (base_di > 0 .and. base_di <= size(active)) yes = active(base_di)
     end function decl_active
+
+    subroutine independent_component_paths(independents, paths)
+        character(len=*), intent(in) :: independents(:)
+        character(len=256), allocatable, intent(out) :: paths(:)
+        integer :: i, n
+
+        n = 0
+        do i = 1, size(independents)
+            if (index(trim(independents(i)), "%") > 0) n = n + 1
+        end do
+        allocate (paths(n))
+        n = 0
+        do i = 1, size(independents)
+            if (index(trim(independents(i)), "%") == 0) cycle
+            n = n + 1
+            paths(n) = trim(independents(i))
+        end do
+    end subroutine independent_component_paths
+
+    logical function component_path_is_active(primal, text, active, paths) &
+            result(yes)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in), optional :: paths(:)
+        integer :: i, di
+        logical :: component
+
+        component = .false.
+        yes = .false.
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (.not. same_component_name(primal%exprs(i)%text, text)) cycle
+            component = .true.
+            if (.not. present(paths)) then
+                yes = .true.
+            else
+                do di = 1, size(paths)
+                    if (same_component_name(paths(di), text)) then
+                        yes = .true.
+                        exit
+                    end if
+                end do
+            end if
+            exit
+        end do
+        if (component) return
+        di = primal%decl_index(fad_base_name(text))
+        if (di > 0) yes = decl_active(primal, di, active)
+    end function component_path_is_active
+
+    logical function target_path_active(primal, text, di, active, paths) &
+            result(yes)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        integer, intent(in) :: di
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in), optional :: paths(:)
+
+        yes = component_path_is_active(primal, text, active, paths)
+        if (index(trim(text), "%") == 0) then
+            yes = decl_active(primal, di, active)
+        end if
+    end function target_path_active
+
+    logical function component_expr_is_active(primal, idx, active, paths) &
+            result(yes)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in), optional :: paths(:)
+        character(len=:), allocatable :: text
+
+        text = emit_expr(primal, idx)
+        yes = component_path_is_active(primal, text, active, paths)
+    end function component_expr_is_active
+
+    logical function same_component_name(a, b) result(equal)
+        character(len=*), intent(in) :: a, b
+        integer :: i
+
+        equal = len_trim(a) == len_trim(b)
+        if (.not. equal) return
+        do i = 1, len_trim(a)
+            if (lower_name_char(a(i:i)) /= lower_name_char(b(i:i))) then
+                equal = .false.
+                return
+            end if
+        end do
+    end function same_component_name
+
+    character function lower_name_char(c)
+        character, intent(in) :: c
+
+        lower_name_char = c
+        if (c >= "A" .and. c <= "Z") then
+            lower_name_char = achar(iachar(c) + iachar("a") - iachar("A"))
+        end if
+    end function lower_name_char
 
 end module fortad_forward
