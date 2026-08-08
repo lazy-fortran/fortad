@@ -301,8 +301,10 @@ Here `-p`, `-d`, and `-b` select parser, forward, and reverse mode;
 `STEM_p.f90`, `STEM_d.f90`, or `STEM_b.f90` file. In the direct legacy path,
 absent `INTENT` metadata is supplemented by simple write-before-read analysis
 so a single output dummy can be inferred. Use `--head` or `--dep` when a
-routine has multiple or ambiguous outputs. `-multi` maps to FortAD's forward
-direction-count dummy `nd`; multidirectional reverse mode is a named
+routine has multiple or ambiguous outputs. For an ambiguous reverse inference,
+the CLI lists the candidate output names and repeats the exact `--dep NAME`
+override; it does not emit a guessed derivative. `-multi` maps to FortAD's
+forward direction-count dummy `nd`; multidirectional reverse mode is a named
 unsupported boundary rather than a silent scalar fallback. `-ext FILE` is
 accepted for command-line migration but its Tapenade summary file is not
 imported; use `--rule` or `--call-rule` for FortAD derivative rules.

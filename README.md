@@ -177,6 +177,10 @@ infers the written dummy as the dependent and excludes it from the
 independents. Use `--dep NAME` when the procedure has multiple possible
 outputs.
 
+When reverse inference is ambiguous, FortAD refuses to guess and reports the
+candidate output names in the diagnostic, followed by the exact `--dep NAME`
+override to use. No generated file is written in that case.
+
 For Tapenade-style scripts, `--head` (also `-head`) combines the procedure
 and active arguments: `fortad vjp -head 'kernel(x)' source.f90`. Commas are
 accepted too. The procedure name is equivalent to `--proc`; the names inside
