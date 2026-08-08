@@ -3069,7 +3069,11 @@ contains
         base_storage = query_storage(arena, path%base_node_index)
         if (base_storage%found .and. (base_storage%is_polymorphic .or. &
             base_storage%is_unlimited_polymorphic)) return
-        if (.not. component_type_is_real(storage%type_name)) return
+        if (.not. component_type_is_real(storage%type_name)) then
+            call refuse_component(arena, idx, &
+                "only concrete REAL allocatable components are supported", status)
+            return
+        end if
         ! The public component-path result carries the base storage class;
         ! the base AST node itself is not necessarily a storage-query node
         ! (for example, a resolved dummy designator).  Use detailed base
@@ -3134,9 +3138,9 @@ contains
                 end if
             end if
         end if
-        if (component_rank > 1) then
+        if (component_rank > 2) then
             call refuse_component(arena, idx, &
-                "allocatable component rank greater than one is not supported", status)
+                "allocatable component rank greater than two is not supported", status)
             return
         end if
         if (whole) then
