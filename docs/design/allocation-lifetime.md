@@ -83,3 +83,15 @@ The scalar allocatable-component reallocation oracle is
 It compiles and runs the primal and generated JVP/VJP with gfortran, checks the
 hand derivative and central finite difference, verifies allocation of both
 derivative component descriptors, and checks the adjoint dot-product identity.
+
+A fixed one-dimensional literal element of a concrete derived array is also
+accepted for that scalar component transition, for example
+`boxes(2)%value = 3.0d0*x`. The literal owner index is part of the proven
+storage path, so the JVP and VJP can replay the same component descriptor in
+the tangent and cotangent shadows. Dynamic or computed owner indices are
+refused because this bounded slice does not record per-element allocation
+identity. The independent
+[`test_indexed_allocatable_component_reallocation_oracle.f90`](../../test/test_indexed_allocatable_component_reallocation_oracle.f90)
+checks the generated code with gfortran, hand values, central finite
+differences, the adjoint identity, descriptor allocation, and the dynamic
+index refusal.

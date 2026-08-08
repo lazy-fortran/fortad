@@ -235,7 +235,9 @@ contains
                 s%is_automatic_reallocation = .true.
             end if
             if (s%target_component_is_allocatable .and. &
-                index(trim(s%target), "(") == 0) then
+                s%target_component_is_real .and. &
+                .not. s%target_component_is_polymorphic .and. &
+                s%target_component_rank == 0) then
                 s%is_automatic_reallocation = .true.
             end if
             s%value = lower_expr(arena, n%value_index, proc, status)
@@ -4560,7 +4562,7 @@ contains
         !! Validate a component designator using FortFront's resolved path and
         !! storage facts.  The bounded allocatable-component slice accepts only
         !! one scalar REAL component element of a concrete, non-aliased object;
-        !! its descriptor must already be allocated by the caller.
+        !! one fixed owner index is allowed for its descriptor transition.
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: idx
         type(lower_status_t), intent(inout) :: status
@@ -4659,6 +4661,10 @@ contains
                 "allocatable component rank greater than four is not supported", status)
             return
         end if
+        if (component_rank == 0) then
+            call validate_scalar_component_owner_index(arena, path, status)
+            if (.not. status%ok) return
+        end if
         if (whole .and. component_rank > 0) then
             call refuse_component(arena, idx, &
                 "whole allocatable component assignment/read is not supported; use one element", &
@@ -4666,6 +4672,47 @@ contains
             return
         end if
     end subroutine validate_component_reference
+
+    subroutine validate_scalar_component_owner_index(arena, path, status)
+        !! A scalar allocatable component of an array element has one
+        !! descriptor per element.  The bounded ownership slice can replay a
+        !! direct literal element, but not a dynamic or computed owner path.
+        type(ast_arena_t), intent(in) :: arena
+        type(component_path_query_t), intent(in) :: path
+        type(lower_status_t), intent(inout) :: status
+        integer :: index_node, index_value
+
+        status%ok = .true.
+        if (path%base_node_index <= 0 .or. &
+            path%base_node_index > arena%size) return
+        if (.not. arena%has_node_at(path%base_node_index)) return
+        if (trim(arena%entries(path%base_node_index)%node_type) /= &
+            "call_or_subscript") return
+        select type (owner => arena%entries(path%base_node_index)%node)
+            type is (call_or_subscript_node)
+            if (owner%base_expr_index /= 0) then
+                call refuse_component(arena, path%base_node_index, &
+                    "allocatable scalar component ownership requires a direct array element", &
+                    status)
+                return
+            end if
+            if (.not. allocated(owner%arg_indices)) return
+            if (size(owner%arg_indices) /= 1) then
+                call refuse_component(arena, path%base_node_index, &
+                    "allocatable scalar component ownership requires one static component index", &
+                    status)
+                return
+            end if
+            index_node = owner%arg_indices(1)
+            call parse_static_integer_node(arena, index_node, index_value, status)
+            if (.not. status%ok) then
+                call refuse_component(arena, path%base_node_index, &
+                    "allocatable scalar component ownership requires a static component index", &
+                    status)
+            end if
+        class default
+        end select
+    end subroutine validate_scalar_component_owner_index
 
     subroutine component_reference_parts(arena, idx, path_idx, whole, found)
         type(ast_arena_t), intent(in) :: arena
