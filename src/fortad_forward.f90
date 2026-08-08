@@ -83,6 +83,8 @@ contains
         call seed_activity(primal, spec, active, status)
         if (.not. status%ok) return
         call independent_component_paths(spec%independents, active_paths)
+        call refuse_active_polymorphic_dispatch(primal, active_paths, status)
+        if (.not. status%ok) return
         call refuse_active_polymorphic_ownership(primal, active, status)
         if (.not. status%ok) return
         if (spec%vector) then
@@ -276,6 +278,66 @@ contains
             end do
         end do
     end subroutine seed_activity
+
+    subroutine refuse_active_polymorphic_dispatch(primal, active_paths, status)
+        !! An active scalar CLASS shadow is valid only when upstream facts
+        !! prove one concrete runtime implementation. Multiple arms would
+        !! require a dynamic-type tangent descriptor, which this IR does not
+        !! model, so reject that boundary before emission.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: active_paths(:)
+        type(forward_status_t), intent(inout) :: status
+        character(len=:), allocatable :: selector, base
+        integer :: i, j, k, depth, concrete, di
+        logical :: active_receiver
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            selector = emit_expr(primal, primal%stmts(i)%value)
+            base = fad_base_name(selector)
+            di = primal%decl_index(base)
+            if (di <= 0) cycle
+            if (.not. primal%decls(di)%is_polymorphic) cycle
+            if (primal%decls(di)%is_array) cycle
+            active_receiver = .false.
+            do j = 1, primal%n_exprs
+                if (primal%exprs(j)%kind /= FAD_VAR .and. &
+                    primal%exprs(j)%kind /= FAD_INDEX) cycle
+                if (fad_base_name(primal%exprs(j)%text) /= trim(base)) cycle
+                if (index(trim(primal%exprs(j)%text), "%") == 0) cycle
+                do k = 1, size(active_paths)
+                    if (same_component_name(primal%exprs(j)%text, &
+                        active_paths(k))) then
+                        active_receiver = .true.
+                        exit
+                    end if
+                end do
+                if (active_receiver) exit
+            end do
+            if (.not. active_receiver) cycle
+            concrete = 0
+            depth = 1
+            j = i + 1
+            do while (j <= primal%n_stmts .and. depth > 0)
+                select case (primal%stmts(j)%kind)
+                case (FAD_SELECT_TYPE)
+                    depth = depth + 1
+                case (FAD_END_SELECT)
+                    depth = depth - 1
+                case (FAD_TYPE_IS, FAD_CLASS_IS)
+                    if (depth == 1) concrete = concrete + 1
+                end select
+                j = j + 1
+            end do
+            if (concrete /= 1) then
+                status%ok = .false.
+                status%message = "forward mode: active polymorphic receiver "// &
+                    "requires one fixed concrete runtime path; dynamic "// &
+                    "dispatch shadows are unsupported"
+                return
+            end if
+        end do
+    end subroutine refuse_active_polymorphic_dispatch
 
     subroutine refuse_active_polymorphic_ownership(primal, active, status)
         !! A polymorphic allocatable needs a tangent descriptor with the same
@@ -990,8 +1052,20 @@ contains
             base = trim(text)
         end if
         shadow = tangent_name(base, suffix, vector)
-        if (len_trim(base) == 0 .or. len_trim(text) <= len_trim(base)) return
+        if (len_trim(base) == 0) return
+        if (primal%decl_index(base) <= 0) return
+        if (primal%decls(primal%decl_index(base))%is_allocatable) return
+        if (primal%decls(primal%decl_index(base))%is_associate_alias) return
+        if (primal%decls(primal%decl_index(base))%is_select_alias) return
         if (.not. decl_active(primal, primal%decl_index(base), active)) return
+        if (len_trim(text) <= len_trim(base)) then
+            if (.not. primal%decls(primal%decl_index(base))%is_polymorphic) return
+            e%kind = primal%exprs(idx)%kind
+            e%text = shadow
+            e%rank = primal%exprs(idx)%rank
+            out = tangent%add_expr(e)
+            return
+        end if
         if (idx <= 0 .or. idx > primal%n_exprs) return
         e%kind = primal%exprs(idx)%kind
         if (e%kind == FAD_INDEX) then
