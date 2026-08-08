@@ -300,7 +300,8 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
-  oracles.
+  oracles. It also lowers `allocate(child_t :: a(n))` for polymorphic
+  allocatable arrays while preserving dynamic type and element stride.
 - FortAD includes the automatic derived-component CLI inference slice: when
   `--indep` is omitted it selects only read concrete `REAL` component paths
   from derived dummies, including array-element paths, and never widens a
@@ -359,7 +360,7 @@ checkpointing and numerical/application rules. Active global mutable state,
 uncontrolled aliases, active I/O, and opaque calls without rules remain
 product refusals rather than compatibility work.
 
-FortFront source `main` is currently `1ac86160`. This handoff includes the
+FortFront source `main` is currently `91fca52`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -376,6 +377,7 @@ ordered dummy type/category/kind/rank/intent/OPTIONAL/VALUE metadata and
 function-result metadata, as well as ownership-event paths, explicit
 `MOVE_ALLOC` transfer facts, and
 automatic-reallocation candidates, including owner paths, ranks, assignment
+and indexed type-bound receiver storage/type facts,
 kind, reallocation kind, and shape-expression indices. The earlier
 procedure-name, #2980, public array-query, nested
 substring, and issue-1968 assumed-shape fixes.
