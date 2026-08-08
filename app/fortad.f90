@@ -80,7 +80,7 @@ program fortad_cli
         explicit_indep = indep_list
         call infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
             output_path, module_name, indep_list, inference_message, verbose, stat, &
-            legacy_compat=tapenade_compat)
+            legacy_compat=(tapenade_compat .or. mode == "reverse"))
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
             stop 2, quiet=.true.
@@ -88,7 +88,7 @@ program fortad_cli
         if (len_trim(explicit_indep) > 0) indep_list = explicit_indep
     end if
 
-    if (tapenade_compat .and. mode == "reverse" .and. len_trim(dep_name) == 0) then
+    if (mode == "reverse" .and. len_trim(dep_name) == 0) then
         call infer_tapenade_dependent(source, from_name, dep_name, stat)
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') &
@@ -1279,7 +1279,7 @@ contains
                     dependent = trim(primal%stmts(i)%target)
                     n_outputs = 1
                 else if (.not. same_cli_name(dependent, &
-                    primal%stmts(i)%target)) then
+                        primal%stmts(i)%target)) then
                     n_outputs = n_outputs + 1
                 end if
             end do
