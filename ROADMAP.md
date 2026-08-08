@@ -266,13 +266,12 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   dispatch contract.
 - FFC `4ac7337113d8a56a7afb5519d41fd5470a818253`, including rank-three
   intrinsic allocatable-owner lowering and its independent compiler oracle.
-- FortAD `69f31724958f7e2a42309bc52cd1de363cf4fc5b`, including the active
+- FortAD `aa60b99633ed6ee845c121b57037df840f402935`, including the active
   concrete allocatable-component JVP/VJP slice and independent finite-
   difference/adjoint oracle, on top of rank-two contiguous sections.
-- fortad-bench `4b72a92564488ac02bdb5fcb139384e327ce46b9`, including four
-  exact-source queue-shard closures selected by modern-feature score. Its
-  shard manifests are repinned to the final FortAD documentation head after
-  this roadmap commit.
+- fortad-bench `eba9bc83d5f57def88bd4340bb416dd16f2a1fa3`, including four
+  exact-source queue-shard closures selected by modern-feature score and
+  provenance repinned to the FortAD docs head.
 
 The next feature order has four steps. First, complete FortFront facts for
 abstract/deferred hierarchy dispatch, generic and callback target flow, and
