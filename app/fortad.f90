@@ -1266,11 +1266,66 @@ contains
                 dependent = name
             end if
         end do
+        if (n_outputs == 0) then
+            ! Modern legacy-style subroutines often write a concrete component
+            ! of an otherwise input derived object.  The containing object is
+            ! not an output candidate: the component path is the dependent.
+            ! Keep this inference deliberately narrow and refuse ambiguity.
+            do i = 1, primal%n_stmts
+                if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+                if (.not. component_output_candidate(primal, &
+                    primal%stmts(i)%target)) cycle
+                if (n_outputs == 0) then
+                    dependent = trim(primal%stmts(i)%target)
+                    n_outputs = 1
+                else if (.not. same_cli_name(dependent, &
+                    primal%stmts(i)%target)) then
+                    n_outputs = n_outputs + 1
+                end if
+            end do
+        end if
         if (n_outputs /= 1) then
             dependent = ""
             stat = 1
         end if
     end subroutine infer_tapenade_dependent
+
+    logical function component_output_candidate(primal, target) result(found)
+        !! Whether TARGET is a bounded concrete REAL component output.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: target
+        integer :: i
+
+        found = .false.
+        if (index(trim(target), "%") == 0) return
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (.not. same_cli_name(primal%exprs(i)%text, target)) cycle
+            if (.not. primal%exprs(i)%component_is_real) return
+            if (primal%exprs(i)%component_is_allocatable) return
+            if (primal%exprs(i)%component_is_pointer) return
+            if (primal%exprs(i)%component_is_target) return
+            if (primal%exprs(i)%component_is_polymorphic) return
+            if (primal%exprs(i)%component_is_global) return
+            if (primal%exprs(i)%component_rank > 4) return
+            found = .true.
+            return
+        end do
+        do i = 1, primal%n_stmts
+            if (.not. primal%stmts(i)%target_is_component_path) cycle
+            if (.not. allocated(primal%stmts(i)%target)) cycle
+            if (.not. same_cli_name(primal%stmts(i)%target, target)) cycle
+            if (.not. primal%stmts(i)%target_component_is_real) return
+            if (primal%stmts(i)%target_component_is_allocatable .or. &
+                primal%stmts(i)%target_component_is_pointer .or. &
+                primal%stmts(i)%target_component_is_target .or. &
+                primal%stmts(i)%target_component_is_polymorphic .or. &
+                primal%stmts(i)%target_component_is_global) return
+            if (primal%stmts(i)%target_component_rank > 4) return
+            found = .true.
+            return
+        end do
+    end function component_output_candidate
 
     logical function legacy_output_candidate(primal, name) result(is_output)
         !! Identify a legacy dummy written before it is read.

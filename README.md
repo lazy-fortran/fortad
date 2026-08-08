@@ -194,6 +194,14 @@ paths actually read from derived-type dummies, such as `state%inner%q` or
 activity remains an explicit refusal because it can change dynamic type and
 storage identity.
 
+For legacy `-b`/`--reverse` subroutines without `INTENT`, a unique direct write
+to a concrete, non-aliased `REAL` component such as `soldat(1)%a` is inferred as
+the dependent. The generated VJP receives a separate shaped cotangent seed
+for that component and one derived shadow for independent component adjoints;
+it does not duplicate a shadow dummy or activate the whole object. Ambiguous,
+aliased, polymorphic, allocatable, pointer, global, or multiply-written
+component dependents remain named refusals.
+
 For the usual single-procedure file, `fortad source.f90` is shorter still: it
 infers the active dummies, procedure name, wrapper module, and output path.
 Tapenade-style legacy subroutines without `INTENT` are handled by the direct
