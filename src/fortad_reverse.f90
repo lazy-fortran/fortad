@@ -3955,7 +3955,7 @@ contains
     end function carries_adjoint
 
     subroutine materialise(primal, adjoint, expr, ssa, n_tmp, out, force)
-        !! Bind a compound seed to a scalar local.
+        !! Bind a compound seed to a local temporary.
         !!
         !! This is statement-level preaccumulation: the partial chain for one
         !! statement is computed once into a register-sized temporary instead of
@@ -3973,7 +3973,7 @@ contains
         type(fad_decl_t) :: d
         character(len=32) :: buf
         character(len=:), allocatable :: name
-        integer :: ignored
+        integer :: ignored, array_di
         logical :: force_bind
 
         associate (unused => ssa)
@@ -4002,6 +4002,17 @@ contains
         d%type_name = real_type_of(primal)
         d%intent = FAD_INTENT_NONE
         d%is_optional = .false.
+        array_di = array_decl_in_expr(primal, adjoint, expr, ssa)
+        if (array_di > 0) then
+            !! An array partial needs an allocatable temporary: its shape is
+            !! inherited from an assumed-shape active input at runtime.  An
+            !! ordinary local with DIMENSION(:,:) would be invalid Fortran.
+            d%is_array = .true.
+            d%is_allocatable = .true.
+            if (allocated(primal%decls(array_di)%dims)) then
+                d%dims = deferred_dims(primal%decls(array_di)%dims)
+            end if
+        end if
         ignored = adjoint%add_decl(d)
 
         s%kind = FAD_ASSIGN
@@ -4010,6 +4021,57 @@ contains
         ignored = adjoint%add_stmt(s)
         out = adjoint%add_expr(expr_var(name))
     end subroutine materialise
+
+    recursive integer function array_decl_in_expr(primal, adjoint, idx, ssa) &
+            result(found)
+        !! Find an active array declaration contributing to an expression.
+        !! Materialised reverse partials use that declaration's deferred shape
+        !! to remain valid for runtime extents.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(in) :: adjoint
+        integer, intent(in) :: idx
+        type(ssa_map_t), intent(in) :: ssa
+        character(len=:), allocatable :: base
+        integer :: i, di
+
+        found = 0
+        if (idx <= 0) return
+        if (idx > adjoint%n_exprs) return
+        select case (adjoint%exprs(idx)%kind)
+        case (FAD_VAR, FAD_INDEX)
+            call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
+            di = primal%decl_index(fad_base_name(base))
+            if (di > 0) then
+                if (primal%decls(di)%is_array) then
+                    found = di
+                    return
+                end if
+            end if
+        end select
+        if (.not. allocated(adjoint%exprs(idx)%args)) return
+        do i = 1, size(adjoint%exprs(idx)%args)
+            found = array_decl_in_expr(primal, adjoint, &
+                adjoint%exprs(idx)%args(i), ssa)
+            if (found > 0) return
+        end do
+    end function array_decl_in_expr
+
+    function deferred_dims(dims) result(out)
+        !! Convert a declared rank to deferred dimensions for an allocatable.
+        character(len=*), intent(in) :: dims
+        character(len=:), allocatable :: out
+        integer :: i, rank
+
+        rank = 1
+        do i = 1, len_trim(dims)
+            if (dims(i:i) == ",") rank = rank + 1
+        end do
+        out = ""
+        do i = 1, rank
+            if (i > 1) out = out//","
+            out = out//":"
+        end do
+    end function deferred_dims
 
     function real_type_of(primal) result(type_name)
         !! The real type the primal works in.

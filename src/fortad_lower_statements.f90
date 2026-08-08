@@ -193,7 +193,7 @@ contains
             if (.not. status%ok) return
             if (whole_allocatable_target(arena, n%target_index, proc)) then
                 if (.not. automatic_reallocation_supported(arena, &
-                        n%target_index, proc, status%message)) then
+                    n%target_index, proc, status%message)) then
                     status%ok = .false.
                     return
                 end if
@@ -747,7 +747,8 @@ contains
 
     logical function automatic_reallocation_supported(arena, idx, proc, message) &
             result(supported)
-        !! Accept only a concrete scalar or rank-one local/dummy owner.  The
+        !! Accept only a concrete scalar, rank-one, or rank-two local/dummy
+        !! owner.  The
         !! descriptor and payload are then re-created by ordinary Fortran
         !! assignment in both the primal and generated derivative procedures;
         !! no separate allocation-state tape is needed for this bounded slice.
@@ -787,7 +788,7 @@ contains
             end if
         end if
         if ((storage%found .and. (storage%is_module_state .or. &
-                storage%is_save_state .or. storage%is_common_state))) then
+            storage%is_save_state .or. storage%is_common_state))) then
             message = "unsupported automatic reallocation for '"//trim(name)// &
                 "': global mutable ownership requires an explicit derivative rule"
             return
@@ -831,9 +832,9 @@ contains
         do i = 1, len_trim(dims)
             if (dims(i:i) == ",") rank = rank + 1
         end do
-        if (rank > 1) then
+        if (rank > 2) then
             message = "unsupported automatic reallocation for '"//trim(name)// &
-                "': only concrete scalar and rank-one owners are supported"
+                "': only concrete scalar through rank-two owners are supported"
             return
         end if
         supported = .true.
