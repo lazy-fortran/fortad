@@ -239,7 +239,7 @@ procedure-name, #2980, public array-query, nested
 substring, and issue-1968 assumed-shape fixes.
 The focused `test_ownership_dispatch_metadata`,
 `test_call_argument_mapping`, and `test_binding_hierarchy_query` API oracles
-pass. A clean FortFront worktree passes its broader GNU gate at 1,567 static
+pass. A clean FortFront worktree passes its broader GNU gate at 1,569 static
 modules, 381 build targets, 378 derivative targets, and 483/483 tests.
 The focused procedure-call oracle passes. The Windows and downstream
 multi-compiler gates remain open. `test_module_distribution` is parallel
