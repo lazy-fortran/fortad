@@ -711,8 +711,14 @@ contains
                 if (primal%decls(di)%is_polymorphic) then
                     if (.not. has_fixed_source_owner(primal, di)) then
                         status%ok = .false.
-                        status%message = "reverse mode: polymorphic allocatable ownership '"// &
-                            trim(owner)//"' requires dynamic-type replay"
+                        if (primal%decls(di)%is_unlimited_polymorphic) then
+                            status%message = "reverse mode: class(*) allocatable ownership '"// &
+                                trim(owner)//"' requires one fixed concrete SELECT TYPE "// &
+                                "arm and a direct concrete SOURCE= acquisition"
+                        else
+                            status%message = "reverse mode: polymorphic allocatable ownership '"// &
+                                trim(owner)//"' requires dynamic-type replay"
+                        end if
                         return
                     end if
                 end if
@@ -1482,16 +1488,18 @@ contains
         !! second acquisition.  The source may carry the active component.
         type(fad_proc_t), intent(in) :: primal
         integer, intent(in) :: owner_di
-        integer :: i, target_di, source_di
-        character(len=:), allocatable :: target
-        logical :: found
+        integer :: i, target_di, source_di, allocate_at
+        character(len=:), allocatable :: target, source_type, dispatch_type
+        logical :: found, dispatch_found
 
         supported = .false.
         if (owner_di <= 0 .or. owner_di > primal%n_decls) return
         if (.not. primal%decls(owner_di)%is_polymorphic) return
-        if (primal%decls(owner_di)%is_unlimited_polymorphic) return
         if (primal%decls(owner_di)%is_array) return
+        if (primal%decls(owner_di)%is_associate_alias .or. &
+            primal%decls(owner_di)%is_select_alias) return
         found = .false.
+        allocate_at = 0
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind == FAD_ALLOCATE) then
                 if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
@@ -1514,6 +1522,7 @@ contains
                 end if
                 if (source_di <= 0) return
                 found = .true.
+                allocate_at = i
             else if (primal%stmts(i)%kind == FAD_MOVE_ALLOC) then
                 if (.not. allocated(primal%stmts(i)%call_args)) cycle
                 if (size(primal%stmts(i)%call_args) >= 1) then
@@ -1528,7 +1537,24 @@ contains
                 end if
             end if
         end do
-        supported = found
+        if (.not. found) return
+
+        ! A retained dynamic descriptor is useful only when the following
+        ! SELECT TYPE has one statically proven concrete arm.  Replaying a
+        ! multi-arm choice would silently claim ownership of a path that the
+        ! bounded shadow does not model, especially for CLASS(*).
+        source_type = type_leaf(primal%decls(source_di)%type_name)
+        dispatch_type = ""
+        dispatch_found = .false.
+        do i = allocate_at + 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            if (.not. same_variable_name(emit_expr(primal, &
+                primal%stmts(i)%value), primal%decls(owner_di)%name)) cycle
+            call fixed_dispatch_type(primal, i, dispatch_type, dispatch_found)
+            exit
+        end do
+        if (.not. dispatch_found) return
+        supported = same_variable_name(source_type, type_leaf(dispatch_type))
     end function has_fixed_source_owner
 
     logical function complex_reverse_path(primal, dependent, active) result(yes)

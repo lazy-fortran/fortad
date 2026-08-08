@@ -1584,6 +1584,12 @@ contains
                     call refuse_allocation(node%line, "non-allocatable target", status)
                     return
                 end if
+                if (component_storage%is_module_state .or. &
+                    component_storage%is_save_state .or. &
+                    component_storage%is_common_state) then
+                    call refuse_allocation(node%line, "global mutable ownership", status)
+                    return
+                end if
                 ! query_storage resolves both a component and a component of
                 ! an array element.  Keep that frontend fact in the IR; later
                 ! passes must not rediscover it from rendered source text.

@@ -1893,8 +1893,20 @@ problem-specific rule.
             The independent ownership oracle checks hand values, central finite
             differences, the adjoint identity, and cleanup. Factories,
             polymorphic sources, repeated or path-dependent acquisition,
-            aliases, `move_alloc`, finalization replay, `class(*)`, and global
-            state remain named refusals.
+            aliases, `move_alloc`, finalization replay, general
+            unlimited-polymorphic ownership, and global state remain named
+            refusals.
+      - [x] **P8.5i fixed-source unlimited-polymorphic reverse ownership.**
+            FortAD now replays one scalar local or dummy `class(*)`,
+            allocatable owner acquired once from a declared concrete
+            `SOURCE=` object. The reverse shadow uses that concrete type and
+            requires exactly one matching concrete `SELECT TYPE` arm before
+            one final deallocation. The independent
+            [`test_polymorphic_ownership_oracle.f90`](test/test_polymorphic_ownership_oracle.f90)
+            checks hand values, central finite differences, the adjoint
+            identity, and cleanup. Polymorphic or factory sources, ambiguous
+            or multi-arm dispatch, arrays, aliases, `move_alloc`, and global
+            mutable ownership remain precise refusals.
 - [ ] **P8.6 Procedure pointers and callbacks.** Treat callback identity as a
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed
