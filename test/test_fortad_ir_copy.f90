@@ -12,11 +12,15 @@ program test_fortad_ir_copy
     !! representative: checking a few fields would pass while a forgotten one
     !! is exactly the defect being guarded against.
 
-    use fortad_ir, only: fad_stmt_t, fad_copy_stmt
+    use fortad_ir, only: fad_stmt_t, fad_copy_stmt, fad_expr_t, fad_proc_t, &
+        fad_expr_equal, FAD_CALL, FAD_CALL_STMT
     implicit none
 
-    type(fad_stmt_t) :: original, copy
-    integer :: failures
+    type(fad_stmt_t) :: original, copy, arena_stmt
+    type(fad_expr_t) :: arena_expr, filler_expr
+    type(fad_proc_t) :: proc
+    integer :: failures, expr_index, duplicate_index, stmt_index, i
+    character(len=16) :: label
 
     failures = 0
 
@@ -86,6 +90,55 @@ program test_fortad_ir_copy
         call expect(.not. allocated(bare_copy%call_args), &
             "unallocated call_args stay unallocated", failures)
     end block
+
+    ! Arena growth must preserve every expression and statement component.
+    ! The initial arenas hold 64 entries; the loops cross that boundary and
+    ! then check both a retained entry and hash-consing of a duplicate.
+    arena_expr%kind = FAD_CALL
+    arena_expr%text = "kernel"
+    arena_expr%args = [11, 13]
+    arena_expr%call_arg_names = [character(len=6) :: "first", "second"]
+    arena_expr%rank = 3
+    arena_expr%is_component_path = .true.
+    arena_expr%component_is_allocatable = .true.
+    arena_expr%component_is_pointer = .true.
+    arena_expr%component_is_target = .true.
+    arena_expr%component_is_polymorphic = .true.
+    arena_expr%component_is_global = .true.
+    arena_expr%component_is_real = .true.
+    arena_expr%component_rank = 2
+    arena_expr%component_type_name = "child_t"
+    arena_expr%component_original_path = "state%child"
+    expr_index = proc%add_expr(arena_expr)
+
+    do i = 1, 64
+        write (label, '("filler_", i0)') i
+        filler_expr%kind = 2
+        filler_expr%text = trim(label)
+        filler_expr%rank = i
+        stmt_index = proc%add_expr(filler_expr)
+    end do
+    duplicate_index = proc%add_expr(arena_expr)
+    call expect(duplicate_index == expr_index, &
+        "expression hash-consing after arena growth", failures)
+    call expect(fad_expr_equal(proc%exprs(expr_index), arena_expr), &
+        "expression fields after arena growth", failures)
+
+    do i = 1, 64
+        arena_stmt%kind = FAD_CALL_STMT
+        arena_stmt%target = "callee"
+        arena_stmt%value = i
+        arena_stmt%call_args = [i, i + 1]
+        arena_stmt%call_arg_names = [character(len=1) :: "x", "y"]
+        stmt_index = proc%add_stmt(arena_stmt)
+    end do
+    call expect(proc%n_stmts == 64, "statement arena size", failures)
+    call expect(proc%stmts(1)%value == 1, &
+        "first statement after arena growth", failures)
+    call expect(proc%stmts(64)%value == 64, &
+        "last statement after arena growth", failures)
+    call expect(all(proc%stmts(64)%call_args == [64, 65]), &
+        "statement arguments after arena growth", failures)
 
     if (failures == 0) then
         print *, "test_fortad_ir_copy: PASS"

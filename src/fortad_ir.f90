@@ -290,7 +290,7 @@ contains
         type(fad_expr_t), intent(in) :: e
         type(fad_expr_t), allocatable :: tmp(:)
         integer, allocatable :: itmp(:)
-        integer :: cap, h, probe
+        integer :: cap, h, probe, i
 
         if (.not. allocated(self%exprs)) allocate (self%exprs(64))
         if (.not. allocated(self%bucket_head)) then
@@ -315,7 +315,9 @@ contains
         cap = size(self%exprs)
         if (self%n_exprs >= cap) then
             allocate (tmp(2*cap))
-            tmp(1:cap) = self%exprs
+            do i = 1, cap
+                call copy_expr(tmp(i), self%exprs(i))
+            end do
             call move_alloc(tmp, self%exprs)
             allocate (itmp(2*cap))
             itmp = 0
@@ -323,11 +325,49 @@ contains
             call move_alloc(itmp, self%bucket_next)
         end if
         self%n_exprs = self%n_exprs + 1
-        self%exprs(self%n_exprs) = e
+        call copy_expr(self%exprs(self%n_exprs), e)
         self%bucket_next(self%n_exprs) = self%bucket_head(h)
         self%bucket_head(h) = self%n_exprs
         idx = self%n_exprs
     end function proc_add_expr
+
+    subroutine copy_expr(destination, source)
+        !! Copy an expression without compiler-generated assignment of its
+        !! deferred text and allocatable argument vectors. nvfortran can
+        !! corrupt an adjacent allocatable descriptor when those assignments
+        !! occur while the expression arena grows.
+        type(fad_expr_t), intent(out) :: destination
+        type(fad_expr_t), intent(in) :: source
+
+        destination%kind = source%kind
+        destination%rank = source%rank
+        destination%is_component_path = source%is_component_path
+        destination%component_is_allocatable = source%component_is_allocatable
+        destination%component_is_pointer = source%component_is_pointer
+        destination%component_is_target = source%component_is_target
+        destination%component_is_polymorphic = source%component_is_polymorphic
+        destination%component_is_global = source%component_is_global
+        destination%component_is_real = source%component_is_real
+        destination%component_rank = source%component_rank
+        if (allocated(source%text)) destination%text = source%text
+        if (allocated(source%args)) then
+            allocate (destination%args(size(source%args)))
+            if (size(source%args) > 0) destination%args = source%args
+        end if
+        if (allocated(source%call_arg_names)) then
+            allocate (character(len=len(source%call_arg_names)) :: &
+                destination%call_arg_names(size(source%call_arg_names)))
+            if (size(source%call_arg_names) > 0) then
+                destination%call_arg_names = source%call_arg_names
+            end if
+        end if
+        if (allocated(source%component_type_name)) then
+            destination%component_type_name = source%component_type_name
+        end if
+        if (allocated(source%component_original_path)) then
+            destination%component_original_path = source%component_original_path
+        end if
+    end subroutine copy_expr
 
     integer function expr_hash(e) result(h)
         !! Hash of (kind, text, args). Only shallow data is read, because
@@ -354,13 +394,15 @@ contains
         class(fad_proc_t), intent(inout) :: self
         type(fad_stmt_t), intent(in) :: s
         type(fad_stmt_t), allocatable :: tmp(:)
-        integer :: cap
+        integer :: cap, i
 
         if (.not. allocated(self%stmts)) allocate (self%stmts(64))
         cap = size(self%stmts)
         if (self%n_stmts >= cap) then
             allocate (tmp(2*cap))
-            tmp(1:cap) = self%stmts
+            do i = 1, cap
+                call fad_copy_stmt(tmp(i), self%stmts(i))
+            end do
             call move_alloc(tmp, self%stmts)
         end if
         self%n_stmts = self%n_stmts + 1
