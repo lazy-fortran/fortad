@@ -80,7 +80,8 @@ program fortad_cli
         explicit_indep = indep_list
         call infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
             output_path, module_name, indep_list, inference_message, verbose, stat, &
-            legacy_compat=(tapenade_compat .or. mode == "reverse"))
+            legacy_compat=(tapenade_compat .or. mode == "reverse"), &
+            root_hint=output_stem, root_selection=tapenade_compat)
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
             stop 2, quiet=.true.
@@ -941,7 +942,8 @@ contains
     end subroutine parse_head_spec
 
     subroutine infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
-            output_path, module_name, indep_list, message, verbose, stat, legacy_compat)
+            output_path, module_name, indep_list, message, verbose, stat, legacy_compat, &
+            root_hint, root_selection)
         !! Infer the common CLI arguments from the selected primal.
         !!
         !! The library already lowers a source before differentiation, so the
@@ -956,9 +958,12 @@ contains
         logical, intent(in) :: verbose
         integer, intent(out) :: stat
         logical, intent(in), optional :: legacy_compat
+        character(len=*), intent(in), optional :: root_hint
+        logical, intent(in), optional :: root_selection
         type(fad_proc_t) :: primal
         type(lower_status_t) :: lower_status
-        character(len=:), allocatable :: product, generated_name
+        character(len=:), allocatable :: product, generated_name, candidate
+        integer :: separator, dot
         logical :: use_legacy_compat
 
         stat = 0
@@ -966,6 +971,21 @@ contains
         message = ""
         use_legacy_compat = .false.
         if (present(legacy_compat)) use_legacy_compat = legacy_compat
+        if (len_trim(from_name) == 0 .and. present(root_hint)) then
+            if (present(root_selection)) then
+                if (root_selection .and. len_trim(root_hint) > 0) then
+                    separator = max(scan(root_hint, "/", back=.true.), &
+                        scan(root_hint, achar(92), back=.true.))
+                    dot = scan(root_hint, ".", back=.true.)
+                    if (dot <= separator) dot = len_trim(root_hint) + 1
+                    if (dot > separator + 1) then
+                        candidate = trim(root_hint(separator + 1:dot - 1))
+                        call lower_source(source, primal, lower_status, candidate)
+                        if (lower_status%ok) from_name = candidate
+                    end if
+                end if
+            end if
+        end if
         if (len_trim(from_name) > 0) then
             call lower_source(source, primal, lower_status, trim(from_name))
         else
