@@ -584,10 +584,9 @@ contains
             case (FAD_ASSIGN)
                 if (primal%stmts(i)%is_automatic_reallocation) then
                     if (primal%stmts(i)%target_component_is_allocatable) then
-                        status%ok = .false.
-                        status%message = "reverse mode: whole allocatable component "// &
-                            "automatic reallocation requires component lifetime replay"
-                        return
+                        call check_component_reallocation_shape(primal%stmts(i), &
+                            status)
+                        if (.not. status%ok) return
                     end if
                     if (depth /= 0 .or. allocation_depth /= 0) then
                         status%ok = .false.
@@ -771,6 +770,47 @@ contains
         end do
 
     end subroutine check_supported
+
+    subroutine check_component_reallocation_shape(stmt, status)
+        !! Reverse replay is deliberately narrower than ordinary component
+        !! assignment: only one scalar concrete REAL descriptor transition is
+        !! safe without a component lifetime tape.
+        type(fad_stmt_t), intent(in) :: stmt
+        type(reverse_status_t), intent(inout) :: status
+
+        status%ok = .true.
+        if (.not. stmt%target_component_is_real) then
+            status%ok = .false.
+            status%message = "reverse mode: allocatable component reallocation "// &
+                "requires a concrete REAL component"
+            return
+        end if
+        if (stmt%target_component_rank /= 0) then
+            status%ok = .false.
+            status%message = "reverse mode: array-valued allocatable component "// &
+                "reallocation requires component lifetime replay"
+            return
+        end if
+        if (stmt%target_component_is_polymorphic) then
+            status%ok = .false.
+            status%message = "reverse mode: polymorphic allocatable component "// &
+                "reallocation requires dynamic-type replay"
+            return
+        end if
+        if (stmt%target_component_is_pointer .or. &
+                stmt%target_component_is_target) then
+            status%ok = .false.
+            status%message = "reverse mode: pointer/TARGET component storage "// &
+                "identity is not tracked"
+            return
+        end if
+        if (stmt%target_component_is_global) then
+            status%ok = .false.
+            status%message = "reverse mode: global mutable component ownership "// &
+                "requires an explicit derivative rule"
+            return
+        end if
+    end subroutine check_component_reallocation_shape
 
     subroutine check_reverse_move_alloc_shape(primal, status)
         !! The reverse move slice has one static ownership transition only.
