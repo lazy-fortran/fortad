@@ -20,16 +20,14 @@ implicit side effect. It also refuses allocation status side channels
 (`stat=`/`errmsg=`), rank greater than two, polymorphic ownership, pointer or
 target aliasing, and array-valued allocatable component reads.
 
-The forward/JVP slice also accepts one whole assignment to a concrete scalar
-REAL allocatable component of a local or dummy derived owner. The generated
-tangent repeats that ordinary assignment, so the Fortran compiler performs the
-component descriptor transition for both owners. Reverse mode deliberately
-refuses this case until component lifetime replay can retain and restore the
-component descriptor safely:
-
-```text
-reverse mode: whole allocatable component automatic reallocation requires component lifetime replay
-```
+The forward/JVP and reverse/VJP slices accept one whole assignment to a
+concrete scalar REAL allocatable component of a local or dummy derived owner.
+Both generated shadows repeat the ordinary component assignment, so the
+Fortran compiler performs the descriptor transition safely for the primal and
+derivative components. This is a replay of one statically known lifetime, not
+a general-purpose component tape: the scalar component is assigned once, its
+owner is concrete and non-aliased, and no explicit allocation operation is
+mixed into the procedure.
 
 Reverse mode now has a bounded retention slice for one explicit lifetime of a
 simple local or allocatable dummy array, including one explicit
@@ -58,12 +56,12 @@ reverse mode: move_alloc requires one straight-line allocation owner and one mat
 
 Repeated or path-dependent automatic reallocation, mixing automatic and
 explicit lifetime operations, array-valued component assignment/read,
-allocatable component explicit lifetime operations, polymorphic ownership,
-pointer/target aliases, and active module-owned state remain refused. A
-`MOVE_ALLOC` outside the one-owner, straight-line, matching-final-deallocation
-shape is also refused. Those cases require storage identity, dynamic ownership,
-or a per-path allocation-state tape; emitting a derivative that reads released
-or aliased storage would be unsound.
+allocatable component explicit lifetime operations, polymorphic components or
+owners, pointer/target aliases, and active module-owned state remain refused.
+A `MOVE_ALLOC` outside the one-owner, straight-line,
+matching-final-deallocation shape is also refused. Those cases require storage
+identity, dynamic ownership, or a per-path allocation-state tape; emitting a
+derivative that reads released or aliased storage would be unsound.
 
 The executable independent oracle is
 [`test_allocation_lifetime_oracle.f90`](../../test/test_allocation_lifetime_oracle.f90).
@@ -82,5 +80,6 @@ and rank-three boundary refusals.
 
 The scalar allocatable-component reallocation oracle is
 [`test_allocatable_component_reallocation_oracle.f90`](../../test/test_allocatable_component_reallocation_oracle.f90).
-It compiles and runs the primal and generated JVP, checks the hand derivative,
-and verifies the reverse lifetime-replay refusal.
+It compiles and runs the primal and generated JVP/VJP with gfortran, checks the
+hand derivative and central finite difference, verifies allocation of both
+derivative component descriptors, and checks the adjoint dot-product identity.
