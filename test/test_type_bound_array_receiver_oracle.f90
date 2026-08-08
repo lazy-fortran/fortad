@@ -1,5 +1,6 @@
 program test_type_bound_array_receiver_oracle
-    !! Independent oracle for one fixed-shape array-element receiver.
+    !! Independent oracle for fixed-shape and caller-allocated array-element
+    !! receivers.
     !! The same concrete type-bound function and subroutine are reached at
     !! models(2).  Hand values, central differences, and the adjoint identity
     !! check both generated derivative products.
@@ -44,6 +45,7 @@ program test_type_bound_array_receiver_oracle
 
     character(len=32) :: independents(3)
     type(fad_result_t) :: jvp, vjp, sub_jvp, sub_vjp
+    type(fad_result_t) :: alloc_jvp, alloc_vjp
     character(len=:), allocatable :: dir, driver
     integer :: unit, stat
 
@@ -172,8 +174,16 @@ program test_type_bound_array_receiver_oracle
     call expect_refusal(dynamic_source(), "dynamic receiver indices", &
         "dynamic receiver indices")
     call expect_refusal(section_source(), "array sections", "array sections")
-    call expect_refusal(allocatable_source(), "allocatable receivers", &
-        "allocatable receivers")
+    alloc_jvp = fad_jvp(allocatable_source(), independents, from="top", &
+        name="alloc_top_jvp")
+    alloc_vjp = fad_vjp(allocatable_source(), independents, dependent="y", &
+        from="top", name="alloc_top_vjp")
+    if (.not. alloc_jvp%ok .or. .not. alloc_vjp%ok) then
+        print *, "FAIL allocatable array receiver generation: ", &
+            merge(alloc_jvp%message, alloc_vjp%message, .not. alloc_jvp%ok)
+        error stop 1
+    end if
+    call check_allocatable_receiver(alloc_jvp%code, alloc_vjp%code)
     call expect_refusal(polymorphic_source(), "polymorphic receivers", &
         "polymorphic receivers")
     call expect_refusal(alias_source(), "aliasing", "alias")
@@ -245,6 +255,81 @@ contains
         text = replace_top(source, "type(box_t), intent(in) :: models(2)", &
             "type(box_t), pointer :: models(:)", "")
     end function alias_source
+
+    subroutine check_allocatable_receiver(jvp_code, vjp_code)
+        character(len=*), intent(in) :: jvp_code, vjp_code
+        character(len=:), allocatable :: alloc_source_text, alloc_dir
+        character(len=:), allocatable :: alloc_derivatives, alloc_driver
+        integer :: alloc_unit, alloc_stat
+
+        alloc_dir = "build/oracle/type_bound_allocatable_receiver"
+        call execute_command_line("mkdir -p "//alloc_dir, exitstat=alloc_stat)
+        if (alloc_stat /= 0) error stop 1
+        alloc_source_text = allocatable_source()
+        open (newunit=alloc_unit, file=alloc_dir//"/primal.f90", &
+            status="replace", action="write")
+        write (alloc_unit, '(a)') alloc_source_text
+        close (alloc_unit)
+        alloc_derivatives = "module allocatable_receiver_derivatives"//nl// &
+            "    use type_bound_array_receiver_case, only: box_t"//nl// &
+            "contains"//nl//jvp_code//vjp_code// &
+            "end module allocatable_receiver_derivatives"//nl
+        open (newunit=alloc_unit, file=alloc_dir//"/derivatives.f90", &
+            status="replace", action="write")
+        write (alloc_unit, '(a)') alloc_derivatives
+        close (alloc_unit)
+        alloc_driver = "program alloc_driver"//nl// &
+            "    use type_bound_array_receiver_case, only: box_t, top"//nl// &
+            "    use allocatable_receiver_derivatives, only: alloc_top_jvp, "// &
+            "alloc_top_vjp"//nl// &
+            "    implicit none"//nl// &
+            "    type(box_t), allocatable :: models(:), models_d(:), models_b(:), "// &
+            "plus(:), minus(:)"//nl// &
+            "    real(8) :: x, xd, y, yd, yb, xb, fd, h"//nl// &
+            "    allocate(models(2), models_d(2), models_b(2), plus(2), minus(2))"//nl// &
+            "    models = box_t(0.0d0, 0.0d0)"//nl// &
+            "    models_d = box_t(0.0d0, 0.0d0)"//nl// &
+            "    models(2) = box_t(3.0d0, 0.5d0)"//nl// &
+            "    models_d(2) = box_t(0.7d0, -0.2d0)"//nl// &
+            "    x = 2.0d0; xd = 0.4d0; yb = 1.3d0"//nl// &
+            "    call alloc_top_jvp(models, models_d, x, xd, y, yd)"//nl// &
+            "    if (abs(y - 8.0d0) > 1.0d-13) error stop 1"//nl// &
+            "    if (abs(yd - 2.6d0) > 1.0d-13) error stop 2"//nl// &
+            "    h = 1.0d-6"//nl// &
+            "    plus = models; minus = models"//nl// &
+            "    plus(2) = box_t(models(2)%scale+h*models_d(2)%scale, "// &
+            "models(2)%bias+h*models_d(2)%bias)"//nl// &
+            "    minus(2) = box_t(models(2)%scale-h*models_d(2)%scale, "// &
+            "models(2)%bias-h*models_d(2)%bias)"//nl// &
+            "    fd = (top(plus, x+h*xd)-top(minus, x-h*xd))/(2.0d0*h)"//nl// &
+            "    if (abs(yd-fd) > 1.0d-7) error stop 3"//nl// &
+            "    call alloc_top_vjp(models, x, y, yb, models_b, xb)"//nl// &
+            "    if (abs(models_b(2)%scale-2.6d0) > 1.0d-13) error stop 4"//nl// &
+            "    if (abs(models_b(2)%bias-5.2d0) > 1.0d-13) error stop 5"//nl// &
+            "    if (abs(xb-6.5d0) > 1.0d-13) error stop 6"//nl// &
+            "    print *, 'allocatable type-bound receiver oracle pass'"//nl// &
+            "end program alloc_driver"//nl
+        open (newunit=alloc_unit, file=alloc_dir//"/driver.f90", &
+            status="replace", action="write")
+        write (alloc_unit, '(a)') alloc_driver
+        close (alloc_unit)
+        call execute_command_line("gfortran -std=f2018 -O2 -o "//alloc_dir// &
+            "/run "//alloc_dir//"/primal.f90 "//alloc_dir// &
+            "/derivatives.f90 "//alloc_dir//"/driver.f90 > "//alloc_dir// &
+            "/build.log 2>&1", exitstat=alloc_stat)
+        if (alloc_stat /= 0) then
+            print *, "FAIL allocatable receiver: generated code did not compile"
+            call show_file(alloc_dir//"/build.log")
+            error stop 1
+        end if
+        call execute_command_line("./"//alloc_dir//"/run > "//alloc_dir// &
+            "/out.txt 2>&1", exitstat=alloc_stat)
+        if (alloc_stat /= 0) then
+            print *, "FAIL allocatable receiver independent oracle"
+            call show_file(alloc_dir//"/out.txt")
+            error stop 1
+        end if
+    end subroutine check_allocatable_receiver
 
     function replace_top(base, old, new, extra) result(text)
         character(len=*), intent(in) :: base, old, new, extra
