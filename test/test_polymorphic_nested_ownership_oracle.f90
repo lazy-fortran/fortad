@@ -7,7 +7,7 @@ program test_polymorphic_nested_ownership_oracle
     character(len=1), parameter :: nl = achar(10)
     character(len=:), allocatable :: source, scalar_source, assignment_source
     character(len=:), allocatable :: dir, tangent, driver
-    type(fad_result_t) :: generated, generated_reverse
+    type(fad_result_t) :: generated, generated_reverse, generated_array_reverse
     type(fad_result_t) :: assignment_jvp, assignment_vjp, refused
     integer :: unit, stat
 
@@ -25,6 +25,13 @@ program test_polymorphic_nested_ownership_oracle
         print *, "FAIL nested polymorphic ownership VJP: ", &
             generated_reverse%message
         error stop 13
+    end if
+    generated_array_reverse = fad_vjp(source, [character(len=1) :: "x"], &
+        dependent="y", from="evaluate", name="evaluate_array_vjp")
+    if (.not. generated_array_reverse%ok) then
+        print *, "FAIL nested array polymorphic ownership VJP: ", &
+            generated_array_reverse%message
+        error stop 14
     end if
 
     assignment_source = nested_assignment_source()
@@ -80,16 +87,6 @@ program test_polymorphic_nested_ownership_oracle
         from="evaluate")
     call require_refusal(refused, "move_alloc")
 
-    refused = fad_vjp(nested_array_source(), [character(len=1) :: "x"], &
-        dependent="y", from="evaluate")
-    call require_refusal(refused, "reverse array allocation replay")
-    if (index(refused%message, "array-element polymorphic component") == 0 .or. &
-        index(refused%message, "SOURCE= ownership") == 0) then
-        print *, "FAIL reverse array nested ownership refusal was not precise: ", &
-            refused%message
-        error stop 10
-    end if
-
     dir = "build/oracle/polymorphic_nested_ownership"
     call execute_command_line("mkdir -p "//dir, exitstat=stat)
     if (stat /= 0) error stop 2
@@ -105,6 +102,7 @@ program test_polymorphic_nested_ownership_oracle
         "    use nested_ownership_case, only: child_t, holder_t"//nl// &
         "contains"//nl//generated%code// &
         generated_reverse%code// &
+        generated_array_reverse%code// &
         assignment_jvp%code//assignment_vjp%code// &
         "end module nested_generated"//nl
     open (newunit=unit, file=dir//"/tangent.f90", status="replace", &
@@ -114,7 +112,7 @@ program test_polymorphic_nested_ownership_oracle
     driver = "program driver"//nl// &
         "    use nested_ownership_case, only: evaluate"//nl// &
         "    use nested_assignment_case, only: evaluate_assignment => evaluate"//nl// &
-        "    use nested_generated, only: evaluate_jvp, evaluate_vjp"//nl// &
+        "    use nested_generated, only: evaluate_jvp, evaluate_vjp, evaluate_array_vjp"//nl// &
         "    use nested_generated, only: evaluate_assignment_jvp, evaluate_assignment_vjp"//nl// &
         "    implicit none"//nl// &
         "    real(8) :: x, xd, y, yd, yb, xb, h, fd"//nl// &
@@ -132,6 +130,9 @@ program test_polymorphic_nested_ownership_oracle
         "    if (abs(xb-yb*4.0d0*x) > 1.0d-12) error stop 12"//nl// &
         "    if (abs(xb*xd-yb*yd) > 1.0d-12) error stop 14"//nl// &
         "    if (abs(xb/yb-fd) > 1.0d-7) error stop 15"//nl// &
+        "    call evaluate_array_vjp(x, y, yb, xb)"//nl// &
+        "    if (abs(xb-yb*4.0d0*x) > 1.0d-12) error stop 16"//nl// &
+        "    if (abs(xb*xd-yb*4.0d0*x*xd) > 1.0d-12) error stop 17"//nl// &
         "    call evaluate_assignment_jvp(x, xd, ya, yad)"//nl// &
         "    if (abs(ya - 3.0d0*x*x) > 1.0d-13) error stop 18"//nl// &
         "    if (abs(yad - 6.0d0*x*xd) > 1.0d-13) error stop 19"//nl// &

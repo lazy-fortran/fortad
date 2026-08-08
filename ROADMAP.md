@@ -1912,6 +1912,21 @@ problem-specific rule.
             identity, and cleanup. Polymorphic or factory sources, ambiguous
             or multi-arm dispatch, arrays, aliases, `move_alloc`, and global
             mutable ownership remain precise refusals.
+      - [x] **P8.5j fixed-index holder-array reverse ownership.** FortAD now
+            replays one scalar polymorphic component selected from a concrete,
+            fixed-shape one-dimensional holder array at one literal integer
+            index. The paired holder-array shadow allocates and deallocates
+            only that component, and reverse `SELECT TYPE` opens the matching
+            selected cotangent before the concrete source adjoint is restored.
+            The independent
+            [`test_polymorphic_array_ownership_oracle.f90`](test/test_polymorphic_array_ownership_oracle.f90)
+            checks JVP/VJP hand values, central finite differences, and the
+            adjoint identity; the nested ownership oracle covers a nested
+            `holders(2)%field%payload` path. Dynamic or computed indices,
+            sections, vector subscripts, rank-two paths, assumed-shape or
+            allocatable holder arrays, aliases, factories, repeated or
+            path-dependent lifetime, `MOVE_ALLOC`, and ambiguous dispatch
+            remain precise reverse refusals.
 - [ ] **P8.6 Procedure pointers and callbacks.** Treat callback identity as a
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed

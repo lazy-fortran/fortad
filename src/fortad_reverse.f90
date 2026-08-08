@@ -855,8 +855,10 @@ contains
         !! Permit one and only one scalar polymorphic component acquisition.
         !! The component must be acquired from one declared concrete source and
         !! released once after the straight-line computation.  This is the
-        !! reverse boundary for ``allocate(box%field%payload, source=child)``;
-        !! array elements, reallocation, aliases, and ownership transfers stay
+        !! reverse boundary for ``allocate(box%field%payload, source=child)``
+        !! and one literal-indexed holder element such as
+        !! ``allocate(holders(2)%payload, source=child)``.  Dynamic indices,
+        !! sections, reallocation, aliases, and ownership transfers stay
         !! refusals because their descriptor history is not represented here.
         type(fad_proc_t), intent(in) :: primal
         type(reverse_status_t), intent(inout) :: status
@@ -884,8 +886,9 @@ contains
                     status%ok = .false.
                     if (array_element_component(target)) then
                         status%message = "reverse mode: array-element polymorphic component "// &
-                            "allocation '"//trim(target)//"' cannot replay SOURCE= ownership "// &
-                            "per element; reverse needs a per-element value-copy replay tape"
+                            "allocation '"//trim(target)//"' requires one literal index "// &
+                            "for bounded reverse SOURCE= ownership; dynamic indices, "// &
+                            "sections, and per-element lifetime tapes are unsupported"
                     else
                         status%message = "reverse mode: nested polymorphic component allocation '"// &
                             trim(target)//"' cannot replay SOURCE= ownership; requires one "// &
@@ -938,8 +941,10 @@ contains
         if (size(primal%stmts(stmt_index)%allocation_args) < 1) return
         target = emit_expr(primal, primal%stmts(stmt_index)%allocation_args(1))
         if (index(trim(target), "%") == 0) return
-        if (array_element_component(target)) return
-        if (index(trim(target), "(") > 0) return
+        if (index(trim(target), "(") > 0) then
+            if (.not. array_element_component(target)) return
+            if (.not. fixed_literal_array_element(target)) return
+        end if
         if (primal%stmts(stmt_index)%allocation_source <= 0 .or. &
             primal%stmts(stmt_index)%allocation_mold > 0) return
         source_di = concrete_source_decl(primal, &
@@ -953,6 +958,12 @@ contains
             primal%decls(owner_di)%is_allocatable .or. &
             primal%decls(owner_di)%is_associate_alias .or. &
             primal%decls(owner_di)%is_select_alias) return
+        if (array_element_component(target)) then
+            if (.not. primal%decls(owner_di)%is_array) return
+            if (.not. allocated(primal%decls(owner_di)%dims)) return
+            if (index(trim(primal%decls(owner_di)%dims), ":") > 0 .or. &
+                index(trim(primal%decls(owner_di)%dims), "*") > 0) return
+        end if
 
         found = .false.
         do i = 1, primal%n_exprs
@@ -1282,6 +1293,28 @@ contains
         percent = index(trim(text), "%")
         found = open > 0 .and. percent > open
     end function array_element_component
+
+    logical function fixed_literal_array_element(text) result(found)
+        !! The bounded array-owner replay uses one scalar element selected by
+        !! a literal integer.  No descriptor arithmetic is inferred for
+        !! computed indices, sections, vectors, or multi-dimensional paths.
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: index_text
+        integer :: open, close, i, digit
+
+        found = .false.
+        open = index(trim(text), "(")
+        close = index(trim(text), ")")
+        if (open <= 1 .or. close <= open) return
+        if (index(trim(text(close + 1:)), "(") > 0) return
+        index_text = trim(text(open + 1:close - 1))
+        if (len_trim(index_text) == 0) return
+        do i = 1, len_trim(index_text)
+            digit = iachar(index_text(i:i))
+            if (digit < iachar("0") .or. digit > iachar("9")) return
+        end do
+        found = index(trim(text(close + 1:)), "%") > 0
+    end function fixed_literal_array_element
 
     subroutine seed_activity(primal, spec, dependent, active, status)
         !! Activity is varied **and** useful: reachable forward from an
@@ -4579,8 +4612,8 @@ contains
         character(len=:), allocatable, intent(out) :: cotangent_alias
         character(len=:), allocatable, intent(out) :: cotangent_selector
         character(len=:), allocatable :: selector
-        integer :: alias_di, receiver_di, concrete_targets, i
-        logical :: nested_receiver, component_found
+        integer :: alias_di, receiver_di, concrete_targets, i, j, source_di
+        logical :: nested_receiver, component_found, ownership_active
 
         enabled = .false.
         receiver_alias = ""
@@ -4620,7 +4653,10 @@ contains
                 primal%decls(receiver_di)%is_allocatable .or. &
                 primal%decls(receiver_di)%is_associate_alias .or. &
                 primal%decls(receiver_di)%is_select_alias) return
-            if (.not. component_found .or. index(selector, "(") > 0) return
+            if (.not. component_found) return
+            if (index(selector, "(") > 0) then
+                if (.not. fixed_literal_array_element(selector)) return
+            end if
         else
             if (.not. primal%decls(receiver_di)%is_polymorphic) return
             if (primal%decls(receiver_di)%is_allocatable .or. &
@@ -4634,7 +4670,28 @@ contains
             if (index(selector, "(") > 0) return
         end if
         if (.not. receiver_context_has_active(primal, receiver_alias, &
-            active_paths, active)) return
+            active_paths, active)) then
+            ! An owned polymorphic component can have its active source on the
+            ! enclosing concrete object rather than on the selected alias
+            ! declaration.  The fixed-source ownership fact is the same proof
+            ! used to allocate the paired cotangent descriptor.
+            ownership_active = .false.
+            if (nested_receiver) then
+                do j = 1, primal%n_stmts
+                    if (primal%stmts(j)%kind /= FAD_ALLOCATE) cycle
+                    if (.not. allocated(primal%stmts(j)%allocation_args)) cycle
+                    if (size(primal%stmts(j)%allocation_args) < 1) cycle
+                    if (.not. same_component_name(emit_expr(primal, &
+                        primal%stmts(j)%allocation_args(1)), selector)) cycle
+                    if (.not. fixed_source_component(primal, j)) cycle
+                    source_di = concrete_source_decl(primal, &
+                        primal%stmts(j)%allocation_source)
+                    if (source_di > 0) ownership_active = active(source_di)
+                    exit
+                end do
+            end if
+            if (.not. ownership_active) return
+        end if
         cotangent_alias = receiver_alias//trim(suffix)
         cotangent_selector = fad_suffix_name(selector, suffix)
         enabled = len_trim(cotangent_selector) > 0

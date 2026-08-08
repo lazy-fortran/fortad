@@ -46,6 +46,28 @@ precise refusal because this bounded slice has no old-value snapshot. The
 generated-source, numerical, and refusal coverage is in
 [`test_polymorphic_nested_ownership_oracle.f90`](../../test/test_polymorphic_nested_ownership_oracle.f90).
 
+Reverse replay now extends one step to a fixed-shape one-dimensional holder
+array. A path such as `holders(2)%field%payload` is supported when the holder
+array is a concrete, non-allocatable object, the subscript is one literal
+integer, the component is acquired exactly once with `SOURCE=child`, exactly
+one concrete `TYPE IS` or `CLASS IS` arm consumes it, and one matching final
+`DEALLOCATE` follows. FortAD declares a paired holder-array shadow, allocates
+only the selected component in that shadow, opens a matching selected
+cotangent, and destroys both the shadow component and primal descriptor after
+reverse propagation. The independent
+[`test_polymorphic_array_ownership_oracle.f90`](../../test/test_polymorphic_array_ownership_oracle.f90)
+checks JVP and VJP hand values, a central finite difference, and the adjoint
+identity; the nested ownership oracle also exercises the nested-array VJP.
+
+This is one selected element, not an array lifetime tape. Computed or dynamic
+indices, sections, vector subscripts, rank-two or higher holder paths,
+assumed-shape or allocatable holder arrays, pointer/TARGET or other aliases,
+factories, polymorphic sources, repeated or path-dependent lifetime changes,
+`MOLD=`, `MOVE_ALLOC`, finalization replay, global mutable state, and ambiguous
+or runtime-changing dispatch remain precise reverse refusals. Forward support
+for broader array paths is unchanged; this slice does not imply reverse
+support for them.
+
 An active component of a polymorphic allocatable outside that fixed-source
 shape remains a named forward and reverse refusal. FortFront's `query_storage` facts (`is_polymorphic`,
 `is_unlimited_polymorphic`, and allocation classification) are copied into the
@@ -64,11 +86,12 @@ unallocated, select a different child, or fail to expose the active component
 inside the guard. The refusal therefore protects both derivative correctness
 and allocation safety.
 
-The bounded reverse slice deliberately refuses component array elements and
-sections, factories and polymorphic sources (the `class(*)` case still requires
-a concrete source), `MOLD=`, repeated or path-dependent acquisition, aliases,
-`move_alloc`, whole-object assignment, finalization replay, and unresolved or
-multi-arm dispatch. It also does not
+The bounded reverse slice deliberately refuses component array sections and
+all array-element paths outside the one fixed-shape, literal-indexed holder
+case above. It also refuses factories and polymorphic sources (the `class(*)`
+case still requires a concrete source), `MOLD=`, repeated or path-dependent
+acquisition, aliases, `move_alloc`, whole-object assignment, finalization
+replay, and unresolved or multi-arm dispatch. It also does not
 weaken the existing refusals for descriptor changes, reallocation, global
 mutable state, pointer/target aliases, or unsupported allocatable components.
 Negative cases verify that these boundaries return no derivative output.
