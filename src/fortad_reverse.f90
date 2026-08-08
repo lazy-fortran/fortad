@@ -583,6 +583,12 @@ contains
             select case (primal%stmts(i)%kind)
             case (FAD_ASSIGN)
                 if (primal%stmts(i)%is_automatic_reallocation) then
+                    if (primal%stmts(i)%target_component_is_allocatable) then
+                        status%ok = .false.
+                        status%message = "reverse mode: whole allocatable component "// &
+                            "automatic reallocation requires component lifetime replay"
+                        return
+                    end if
                     if (depth /= 0 .or. allocation_depth /= 0) then
                         status%ok = .false.
                         status%message = "reverse mode: path-dependent automatic "// &
