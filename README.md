@@ -79,6 +79,8 @@ same bounded reallocation replay contract; dynamic indices and unsafe storage
 remain refused. Direct same-file subroutine calls use exact FortFront
 actual/formal storage facts and refuse aliases, callbacks, globals, pointers,
 allocatables, mismatches, and ambiguous mappings.
+The same fixed-path contract now covers scalar `class(*)` component assignment
+when one concrete `TYPE IS` or `CLASS IS` arm proves the dynamic type.
 The bounded contiguous rank-one/rank-two section support, storage-identity
 proof, and executable refusal oracles are in
 [the aliasing and sections design note](docs/design/aliasing.md).
