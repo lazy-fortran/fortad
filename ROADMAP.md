@@ -134,11 +134,11 @@ FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
 candidate files: 61 runnable pure-Fortran cases, 129 deliberate refusals, 31
-invalid-upstream closures, 1,285 queued candidates, and 508 non-Fortran or
-source-absent cases. The completed compiler-only triage covers the 1,286 rows
-that entered the queue before measured closures (1,992 accepted files, 1,417
-compiler diagnostics, and 147 include fragments). Compiler triage is
-classification evidence. Source-probe passes
+invalid-upstream closures, 1 dependency-blocked case, 1,284 queued candidates,
+and 508 non-Fortran or source-absent cases. The completed compiler-only triage
+covers the 1,286 rows that entered the queue before measured closures (1,992
+accepted files, 1,417 compiler diagnostics, and 147 include fragments).
+Compiler triage is classification evidence. Source-probe passes
 are not promoted to runnable status until an independent derivative oracle is
 committed. The latest runnable promotion is `nonRegressions/set05/v065`, a
 standards-clean `LIB::mppsum_real2(ptab,cst,str)` forward/reverse slice with
@@ -173,10 +173,18 @@ claimed.
 
 The following row, `nonRegressions/set02/lh198`, is a valid fixed-form COMMON
 case, not an invalid-upstream closure. Strict and legacy compilation and fresh
-Tapenade parser, tangent, and reverse products pass. FortAD `68cf71c` still
-refuses the active `AAA` call because no derivative rule is registered. The
-independent shared-COMMON oracle checks the primal, JVP, finite differences,
+Tapenade parser, tangent, and reverse products pass. The evidence is pinned to
+FortAD `6a33d31`, which refuses the active `AAA` call because no derivative
+rule is registered. Current FortAD `1080a62` retains that deliberate boundary.
+The independent shared-COMMON oracle checks the primal, JVP, finite differences,
 and adjoint identity. No repaired port is claimed.
+
+The next measured row, `nonRegressions/set02/lh193`, is a valid fixed-form
+candidate blocked by its exact AMPI/MPI dependency chain, not invalid upstream.
+The pinned checkout contains `ampi/ampif.h`, but that header includes missing
+`mpif.h`. Strict and legacy compiler diagnostics agree. Neither Tapenade nor
+FortAD is invoked, and the case is classified as
+`blocked-missing-dependency` in fortad-bench commit `7c6f2da`.
 
 ## Hard execution rules
 
@@ -226,7 +234,7 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is currently `c7fab385`. This handoff includes the
+FortFront source `main` is currently `aea10211`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -234,7 +242,7 @@ actual-to-formal call mappings, exact generic candidate facts, a bounded
 type-binding hierarchy query for local-to-parent binding metadata, bounded
 procedure-pointer target facts for direct assignments, and a bounded
 procedure-pointer call-target query for one unconditional same-scope
-assignment. The earlier
+assignment, and nested receiver component-path facts for type-bound calls. The earlier
 procedure-name, #2980, public array-query, nested
 substring, and issue-1968 assumed-shape fixes.
 The focused `test_ownership_dispatch_metadata`,
@@ -245,7 +253,7 @@ The focused procedure-call oracle passes. The Windows and downstream
 multi-compiler gates remain open. `test_module_distribution` is parallel
 fragile in the full gate but passes standalone.
 
-The compiler-path handoff is ffc docs `f7664d5` over code `15cf105`, which
+The compiler-path handoff is ffc docs `f7664d5` over code `b7ec636`, which
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, GOTO, FORALL, WHERE,
 SELECT, complex, intrinsic-extra, and reduction-expression extractions,
@@ -259,6 +267,10 @@ scalar `class(base_t)` type-bound override dispatch, while retaining explicit
 refusals for generic/deferred runtime bindings, pointer reassociation,
 deallocation/ownership, finalization, and class-pointer arrays. Its focused
 compiler oracle passes.
+The procedure-pointer lane now also lowers the bounded same-unit scalar
+default-real call in GCC `proc_ptr_25.f90` (#448), with a compiled behavioral
+oracle. Other result kinds and flow-sensitive targets remain explicit
+boundaries.
 Clean
 validation is `fo clean && fo build` 447/447 on the prior structured-control
 handoff. The FORALL/WHERE/SELECT slices add independent compiler and runtime
@@ -296,7 +308,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `c7fab385`, which includes the
+The current FortFront `main` handoff is `aea10211`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths, plus formal-ordered actual-to-formal call
@@ -336,7 +348,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `68cf71c`. Its GNU behavioral
+The implementation snapshot is FortAD `main` at `1080a62`. Its GNU behavioral
 gate is green (408 build targets, 407 derivative targets, 54/54 tests).
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
@@ -345,11 +357,12 @@ scalar external-CALL refusal oracle. The complete multi-compiler gate remains
 open until the remaining lanes are rerun.
 
 The 2026-08-08 wave landed four bounded slices with independent oracles:
-FortAD callback lowering (`68cf71c`), the FortFront type-bound call query
-(`c7fab385`), ffc borrowed scalar runtime override coverage (`15cf105`), and
-the `set02/lh198` corpus classification (`60bd813`). These are narrow support
-claims. General callback flow, active receiver differentiation, and general
-runtime dispatch remain open.
+FortAD callback lowering plus active concrete receiver differentiation
+(`1080a62`), FortFront nested type-bound receiver facts (`aea10211`), the ffc
+same-unit scalar procedure-pointer call (`b7ec636`), and the `set02/lh193`
+dependency classification (`7c6f2da`). These are narrow support claims.
+General callback flow, polymorphic direct dispatch, and general runtime
+dispatch remain open.
 
 ## Current integration gate
 
@@ -448,7 +461,7 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `c7fab385` (the ownership/storage and dispatch
+`fo` must consume FortFront `aea10211` (the ownership/storage and dispatch
 metadata handoff plus the merged procedure-name, #2980, public array-query,
 nested-substring, issue-1968, call-argument mapping, exact generic candidate,
 bounded type-binding hierarchy, type-bound call dispatch, procedure-pointer
@@ -1049,16 +1062,18 @@ of selected child ends the fixed-path derivative contract.
         a procedure pointer with exactly one preceding unconditional same-scope
         assignment to a resolved internal or external procedure. Its API
         oracle refuses branches, reassignment, `NULL()`, `NULLIFY`, generic,
-        and other flow-sensitive cases. FortAD `68cf71c` consumes this fact
+        and other flow-sensitive cases. FortAD `1080a62` consumes this fact
         through a narrow interface-compatibility check.
-      - [x] **P7.4i bounded callback differentiation.** FortAD `68cf71c`
+      - [x] **P7.4i bounded callback differentiation.** FortAD `1080a62`
         rewrites a resolved same-file procedure-pointer call to its concrete
         target before existing inlining and derivative generation. The
         independent [`test_callback_call_oracle.f90`](test/test_callback_call_oracle.f90)
         checks compiled JVP/VJP values against finite differences and the
         adjoint identity. Branch flow, reassignment, null callbacks, generic
         targets, active global callback state, and reverse lifetime remain
-        named refusals.
+        named refusals. FFC `b7ec636` independently closes the same-unit
+        scalar default-real procedure-pointer call in GCC `proc_ptr_25.f90`
+        (#448). Other result kinds and flow-sensitive targets remain open.
 - [ ] **P7.5 Complex values.** Define the real-Jacobian contract for complex
       inputs and outputs. Cover multiplication, division, `conjg`, `abs`,
       `real`, `aimag`, complex BLAS, and non-holomorphic refusal boundaries.
@@ -1150,17 +1165,27 @@ problem-specific rule.
             locals in two procedures to verify scope-correct binding resolution.
             An active whole-receiver case verifies the named boundary. Local
             overrides on an abstract/deferred hierarchy are covered by P8.4a.
-            Active receiver cotangents and direct class dispatch remain open.
+            Concrete scalar active receiver cotangents are covered by P8.3b.
+            Nested receiver paths and direct class dispatch remain open.
             bounded `SELECT TYPE` dispatch is covered by P8.4b.
             **Review checkpoint (2026-08-07):** the candidate implementation
             was compared with FortAD `main` at `232a001`. Its bounded
             PASS/NOPASS lowering, procedure-scope receiver lookup, ambiguity
             refusals, and independent JVP/VJP refusal checks were already
             present in the mainline. Commit `769d5c7` records the review. No
-            source transplant was needed. The active receiver, generic,
-            deferred, and dynamic-dispatch refusal boundaries
-            remain deliberate and open. The inherited static slice is covered
-            by the current type-bound oracle.
+            source transplant was needed. The generic, deferred, and
+            dynamic-dispatch refusal boundaries remain deliberate and open.
+            Active concrete receiver differentiation is now covered by P8.3b.
+            The inherited static slice is covered by the current type-bound
+            oracle.
+      - [x] **P8.3b active concrete receiver components.** FortAD `1080a62`
+            differentiates numeric components of a scalar concrete
+            `type(t)` receiver through same-file type-bound functions and
+            subroutines, including JVP and VJP receiver shadows. The
+            independent compiled oracle checks hand values, finite differences,
+            and the adjoint identity. Array, allocatable, polymorphic/dynamic,
+            generic/deferred, and aliasing receiver forms remain explicit
+            refusals.
 - [ ] **P8.4 Abstract deferred bindings.** Generate a derivative binding for
       each reachable override and a parallel derivative hierarchy. Forward and
       reverse calls preserve the primal object's dynamic type through
@@ -1185,14 +1210,14 @@ problem-specific rule.
             central differences, and the adjoint identity. The measured bench
             case is
             [`itpplasma_polymorphic_select_type_validation.txt`](https://github.com/lazy-fortran/fortad-bench/blob/main/results/itpplasma_polymorphic_select_type_validation.txt).
-      - [x] **P8.4c upstream hierarchy facts.** FortFront `aee01b72` exposes a
+      - [x] **P8.4c upstream hierarchy facts.** FortFront `aea10211` exposes a
             bounded local-to-parent type-binding hierarchy query with declaring
             type, inherited status, PASS metadata, deferred and generic flags,
             ambiguity, and resolved implementation facts. Its independent API
             oracle covers an abstract multi-level hierarchy and an ambiguous
             generic. FortAD commit `10f4779` consumes these facts for statically
             resolved inherited bindings with implicit `PASS` or `NOPASS`. The
-            independent JVP/VJP type-bound oracle passes. FFC `15cf105` also
+            independent JVP/VJP type-bound oracle passes. FFC `b7ec636` also
             covers borrowed scalar `class(base_t)` override dispatch against
             gfortran, with generic and deferred runtime bindings refused.
             General FortAD derivative hierarchy generation, runtime `CLASS`
@@ -1237,9 +1262,9 @@ problem-specific rule.
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed
       procedures, and `class(*)` context objects. FortFront now provides
-      bounded assignment and call-target facts in `c7fab385`. The bounded
+      bounded assignment and call-target facts in `aea10211`. The bounded
       same-scope callback call and derivative slice is delivered by FortAD
-      `68cf71c` with finite-difference and adjoint oracles. Reassignment,
+      `1080a62` with finite-difference and adjoint oracles. Reassignment,
       null callbacks, passed procedures, `class(*)` context objects, general
       flow, and reverse callback lifetime remain open.
 - [ ] **P8.7 Dispatch diagnostics.** Detect perturbations that cross a type or
