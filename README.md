@@ -70,7 +70,10 @@ The bounded derived-component contract and its JVP/VJP oracle are in
 General allocatable lifetime changes remain refused with a source-line
 diagnostic. One scalar nested polymorphic component may use a concrete local
 `SOURCE=` acquisition followed by final deallocation in JVP and VJP. The
-boundary and oracle are in [the polymorphic ownership design note](docs/design/polymorphic-ownership.md).
+same fixed `TYPE IS` or `CLASS IS` path also supports a direct scalar
+assignment through paired concrete shadows; read-modify-write and ownership-
+changing forms remain refused. The boundary and oracle are in [the
+polymorphic ownership design note](docs/design/polymorphic-ownership.md).
 The bounded contiguous rank-one/rank-two section support, storage-identity
 proof, and executable refusal oracles are in
 [the aliasing and sections design note](docs/design/aliasing.md).
