@@ -371,7 +371,7 @@ FortAD callback lowering plus active concrete receiver differentiation
 (`1080a62`), direct polymorphic type-bound dispatch (`56f542a`), FortFront
 nested receiver and dispatch-signature facts (`7017e709`), the ffc same-unit
 scalar procedure-pointer call (`b7ec636`), and the `set02/lh193` plus
-`set02/lh194` dependency classifications in fortad-bench `main` at `0b871d3`.
+`set02/lh194` dependency classifications in fortad-bench `main` at `b4b7ff7`.
 These are narrow support claims. General callback flow, polymorphic ownership,
 and runtime dispatch whose target set is unresolved remain open.
 
