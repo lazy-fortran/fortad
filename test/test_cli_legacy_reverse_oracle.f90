@@ -3,7 +3,9 @@ program test_cli_legacy_reverse_oracle
     implicit none
 
     character(len=:), allocatable :: cli, dir, source, generated, driver
+    character(len=:), allocatable :: ambiguous_source, diagnostic, ambiguous_output
     character(len=:), allocatable :: executable, command, compiler
+    character(len=:), allocatable :: diagnostic_text
     character(len=1024) :: buffer
     integer :: stat, unit, compiler_length
     logical :: exists
@@ -58,6 +60,26 @@ program test_cli_legacy_reverse_oracle
     if (stat /= 0) error stop 'inferred legacy VJP did not compile'
     call execute_command_line(quote(executable), wait=.true., exitstat=stat)
     if (stat /= 0) error stop 'inferred legacy VJP failed its hand oracle'
+
+    ambiguous_source = dir//'/ambiguous.f90'
+    diagnostic = dir//'/ambiguous.stderr'
+    ambiguous_output = dir//'/ambiguous_vjp.f90'
+    call write_ambiguous_fixture(ambiguous_source)
+    command = quote(cli)//' vjp '//quote(ambiguous_source)//' 2> '//quote(diagnostic)
+    call execute_command_line(command, wait=.true., exitstat=stat)
+    if (stat == 0) error stop 'ambiguous reverse inference unexpectedly succeeded'
+    inquire (file=ambiguous_output, exist=exists)
+    if (exists) error stop 'ambiguous reverse inference wrote an output'
+    call read_text(diagnostic, diagnostic_text)
+    if (index(diagnostic_text, 'candidates: y,z') == 0) then
+        error stop 'ambiguous reverse diagnostic omitted output candidates'
+    end if
+    if (index(diagnostic_text, '--dep NAME') == 0) then
+        error stop 'ambiguous reverse diagnostic omitted --dep guidance'
+    end if
+
+    call delete_file(ambiguous_source)
+    call delete_file(diagnostic)
     print *, 'PASS: CLI infers legacy reverse dependent and independents'
 
 contains
@@ -88,5 +110,46 @@ contains
 
         text = '"'//trim(value)//'"'
     end function quote
+
+    subroutine write_ambiguous_fixture(path)
+        character(len=*), intent(in) :: path
+        integer :: file_unit
+
+        open (newunit=file_unit, file=path, status='replace', action='write')
+        write (file_unit, '(a)') 'subroutine ambiguous(x, y, z)'
+        write (file_unit, '(a)') '  real :: x, y, z'
+        write (file_unit, '(a)') '  y = x*x'
+        write (file_unit, '(a)') '  z = x+1.0'
+        write (file_unit, '(a)') 'end subroutine ambiguous'
+        close (file_unit)
+    end subroutine write_ambiguous_fixture
+
+    subroutine read_text(path, text)
+        character(len=*), intent(in) :: path
+        character(len=:), allocatable, intent(out) :: text
+        character(len=4096) :: line
+        integer :: file_unit, ios
+
+        text = ''
+        open (newunit=file_unit, file=path, status='old', action='read', iostat=ios)
+        if (ios /= 0) error stop 'could not read CLI diagnostic'
+        do
+            read (file_unit, '(a)', iostat=ios) line
+            if (ios /= 0) exit
+            text = text//trim(line)//new_line('a')
+        end do
+        close (file_unit)
+    end subroutine read_text
+
+    subroutine delete_file(path)
+        character(len=*), intent(in) :: path
+        integer :: file_unit
+        logical :: present
+
+        inquire (file=path, exist=present)
+        if (.not. present) return
+        open (newunit=file_unit, file=path, status='old')
+        close (file_unit, status='delete')
+    end subroutine delete_file
 
 end program test_cli_legacy_reverse_oracle

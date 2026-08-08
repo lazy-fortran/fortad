@@ -24,7 +24,7 @@ program fortad_cli
     character(len=:), allocatable :: from_name
     character(len=:), allocatable :: directions, proc_name, source, mode
     character(len=:), allocatable :: module_name
-    character(len=:), allocatable :: inference_message
+    character(len=:), allocatable :: inference_message, candidate_names
     character(len=:), allocatable :: explicit_indep
     character(len=32), allocatable :: independents(:)
     type(fad_result_t) :: res
@@ -90,10 +90,16 @@ program fortad_cli
     end if
 
     if (mode == "reverse" .and. len_trim(dep_name) == 0) then
-        call infer_tapenade_dependent(source, from_name, dep_name, stat)
+        call infer_tapenade_dependent(source, from_name, dep_name, candidate_names, stat)
         if (stat /= 0) then
-            write (error_unit_or_output(), '(a)') &
-                "fortad: could not infer Tapenade dependent; use --dep NAME"
+            if (len_trim(candidate_names) > 0) then
+                write (error_unit_or_output(), '(a)') &
+                    "fortad: could not infer Tapenade dependent; candidates: "// &
+                    trim(candidate_names)//"; use --dep NAME"
+            else
+                write (error_unit_or_output(), '(a)') &
+                    "fortad: could not infer Tapenade dependent; use --dep NAME"
+            end if
             stop 2, quiet=.true.
         end if
     end if
@@ -1250,11 +1256,11 @@ contains
         end if
     end function lower_cli_char
 
-    subroutine infer_tapenade_dependent(source, from_name, dependent, stat)
+    subroutine infer_tapenade_dependent(source, from_name, dependent, candidates, stat)
         !! Infer a legacy subroutine's output from its first write.
         character(len=*), intent(in) :: source
         character(len=*), intent(in) :: from_name
-        character(len=:), allocatable, intent(out) :: dependent
+        character(len=:), allocatable, intent(out) :: dependent, candidates
         integer, intent(out) :: stat
         type(fad_proc_t) :: primal
         type(lower_status_t) :: lower_status
@@ -1262,6 +1268,7 @@ contains
         character(len=:), allocatable :: name
 
         dependent = ""
+        candidates = ""
         stat = 0
         if (len_trim(from_name) > 0) then
             call lower_source(source, primal, lower_status, trim(from_name))
@@ -1287,6 +1294,9 @@ contains
             if (legacy_output_candidate(primal, name)) then
                 n_outputs = n_outputs + 1
                 dependent = name
+                if (.not. independent_list_contains(candidates, name)) then
+                    call append_independent_name(candidates, name)
+                end if
             end if
         end do
         if (n_outputs == 0) then
@@ -1304,6 +1314,11 @@ contains
                 else if (.not. same_cli_name(dependent, &
                         primal%stmts(i)%target)) then
                     n_outputs = n_outputs + 1
+                end if
+                if (.not. independent_list_contains(candidates, &
+                    primal%stmts(i)%target)) then
+                    call append_independent_name(candidates, &
+                        primal%stmts(i)%target)
                 end if
             end do
         end if
