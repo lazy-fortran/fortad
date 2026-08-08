@@ -14,6 +14,8 @@ module fortad_lower_statements
         binding_hierarchy_query_t, query_type_binding_hierarchy, &
         generic_call_query_t, query_generic_call, resolved_type_query_t, &
         query_resolved_type, &
+        procedure_call_target_query_t, query_procedure_call_target, &
+        procedure_target_query_t, query_procedure_target, &
         get_source_line
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_call, fad_base_name, copy_decl, &
@@ -27,7 +29,10 @@ module fortad_lower_statements
     use fortad_emit, only: emit_expr
     use frontend_compiler_queries, only: storage_query_t, query_storage, &
         array_slice_query_t, array_bounds_query_t, range_expression_query_t, &
-        query_array_slice, query_array_bounds, query_range_expression
+        query_array_slice, query_array_bounds, query_range_expression, &
+        nullify_query_t, query_nullify
+    use frontend_compiler_resolution, only: BINDING_DECLARATION, &
+        BINDING_FUNCTION, BINDING_SUBROUTINE
     implicit none
     private
 
@@ -108,6 +113,8 @@ contains
         type(lower_status_t), intent(out) :: status
         type(fad_stmt_t) :: s
         type(fad_decl_t) :: d
+        type(procedure_target_query_t) :: callback_target
+        type(nullify_query_t) :: nullify_info
         integer :: ignored, k
 
         status%ok = .true.
@@ -115,6 +122,13 @@ contains
         if (.not. arena%has_node_at(idx)) return
         if (trim(arena%entries(idx)%node_type) == "select_type") then
             call lower_select_type(arena, idx, proc, status)
+            return
+        end if
+        nullify_info = query_nullify(arena, idx)
+        if (nullify_info%found) then
+            status%ok = .false.
+            status%message = "unsupported NULLIFY at line "//itoa(node_line(arena, idx))// &
+                ": callback target flow is not tracked"
             return
         end if
         select type (n => arena%entries(idx)%node)
@@ -126,6 +140,15 @@ contains
 
             type is (declaration_node)
             if (n%is_pointer .or. n%is_target) then
+                if (n%is_pointer) then
+                    if (is_procedure_pointer_type(n)) then
+                        ! A resolved callback assignment is passive metadata;
+                        ! the call is rewritten to its concrete target below.
+                        ! No procedure-pointer declaration belongs in the AD
+                        ! procedure interface or IR.
+                        return
+                    end if
+                end if
                 if (allocated(n%var_names)) then
                     if (size(n%var_names) > 0) then
                         call refuse_alias_declaration(n%var_names(1), n%line, &
@@ -236,10 +259,25 @@ contains
                 s%kind = FAD_CALL_STMT
                 call resolve_generic_call(arena, idx, n%name, s%target, status)
                 if (.not. status%ok) return
+                call resolve_callback_call(arena, idx, n%name, &
+                    size(n%arg_indices), .true., s%target, status)
+                if (.not. status%ok) return
             end if
             ignored = proc%add_stmt(s)
 
             type is (pointer_assignment_node)
+            callback_target = query_procedure_target(arena, idx)
+            if (callback_target%found) then
+                if (callback_target%is_resolved) return
+                status%ok = .false.
+                status%message = "unsupported procedure-pointer callback assignment at line "// &
+                    itoa(n%line)//": target flow is unresolved"
+                if (callback_target%is_null) then
+                    status%message = "unsupported procedure-pointer callback assignment at line "// &
+                        itoa(n%line)//": NULL() callback targets are not differentiated"
+                end if
+                return
+            end if
             status%ok = .false.
             status%message = "unsupported pointer association at line "// &
                 itoa(n%line)//": storage identity is not tracked"
@@ -521,6 +559,25 @@ contains
             end if
         end if
     end subroutine fill_decl
+
+    logical function is_procedure_pointer_type(n) result(is_callback)
+        !! Whether a declaration is a procedure pointer, rather than a data
+        !! pointer whose storage identity still belongs to the aliasing
+        !! refusal boundary.
+        type(declaration_node), intent(in) :: n
+        character(len=:), allocatable :: normalized
+        integer :: i
+
+        is_callback = .false.
+        if (.not. n%is_pointer) return
+        if (.not. allocated(n%type_name)) return
+        normalized = ""
+        do i = 1, len_trim(n%type_name)
+            if (n%type_name(i:i) == " ") cycle
+            normalized = normalized//lower_char(n%type_name(i:i))
+        end do
+        if (index(normalized, "procedure") == 1) is_callback = .true.
+    end function is_procedure_pointer_type
 
     subroutine lower_allocate_statement(arena, node, proc, s, status)
         !! Lower one-owner ALLOCATE.  Multiple allocation objects, STAT=,
@@ -973,6 +1030,7 @@ contains
         type(fad_expr_t) :: e
         integer :: i
         character(len=:), allocatable :: call_name
+        character(len=:), allocatable :: callback_name
 
         out = 0
         if (idx <= 0 .or. idx > arena%size) then
@@ -1026,6 +1084,10 @@ contains
                 arg_names, status)
             if (.not. status%ok) return
             call resolve_generic_call(arena, idx, n%name, call_name, status)
+            if (.not. status%ok) return
+            callback_name = call_name
+            call resolve_callback_call(arena, idx, callback_name, &
+                size(n%arg_indices), .false., call_name, status)
             if (.not. status%ok) return
             if (n%base_expr_index == 0) then
                 if (is_array_name(proc, n%name)) then
@@ -1141,6 +1203,93 @@ contains
         end if
         out = lower_expr(arena, value_idx, proc, status)
     end function lower_actual
+
+    subroutine resolve_callback_call(arena, idx, fallback, actual_count, &
+            is_subroutine, name, status)
+        !! Consume FortFront's bounded callback identity fact.  A resolved
+        !! callback is reduced to an ordinary same-file call so existing
+        !! lowering, inlining, and differentiation paths remain unchanged.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx, actual_count
+        character(len=*), intent(in) :: fallback
+        logical, intent(in) :: is_subroutine
+        character(len=:), allocatable, intent(out) :: name
+        type(lower_status_t), intent(inout) :: status
+        type(procedure_call_target_query_t) :: query
+        type(program_unit_query_t) :: target_unit
+        type(declaration_query_t) :: target_declaration
+        integer :: expected_kind, formal_count
+        logical :: interface_matches
+
+        name = trim(fallback)
+        query = query_procedure_call_target(arena, idx)
+        if (.not. query%found) then
+            if (.not. query%is_unresolved) return
+            status%ok = .false.
+            status%message = "unsupported procedure-pointer callback call '"// &
+                trim(query%pointer_name)//"' at line "//itoa(node_line(arena, idx))// &
+                ": target flow is unresolved; require one preceding unconditional "// &
+                "same-scope direct assignment"
+            return
+        end if
+
+        expected_kind = BINDING_FUNCTION
+        if (is_subroutine) expected_kind = BINDING_SUBROUTINE
+        interface_matches = query%target_binding_kind == expected_kind
+        if (.not. interface_matches) then
+            ! An external procedure is represented by its EXTERNAL
+            ! declaration, not a procedure node.  A nonempty type spec is the
+            ! frontend's function-result fact; a blank one is the bounded
+            ! external-subroutine fact.
+            if (query%target_binding_kind == BINDING_DECLARATION .and. &
+                query%target_declaration_index > 0) then
+                target_declaration = query_declaration(arena, &
+                    query%target_declaration_index)
+                if (target_declaration%found) then
+                    if (is_subroutine) then
+                        interface_matches = .true.
+                        if (allocated(target_declaration%type_name)) then
+                            interface_matches = len_trim(target_declaration%type_name) == 0
+                        end if
+                    else
+                        interface_matches = allocated(target_declaration%type_name)
+                        if (interface_matches) then
+                            interface_matches = len_trim(target_declaration%type_name) > 0
+                        end if
+                    end if
+                end if
+            end if
+        end if
+        if (.not. interface_matches) then
+            status%ok = .false.
+            status%message = "procedure-pointer callback interface mismatch for '"// &
+                trim(query%pointer_name)//"' at line "//itoa(node_line(arena, idx))
+            return
+        end if
+
+        ! For targets defined in this source, require the actual count to
+        ! agree with the concrete procedure. External declarations have no
+        ! formal list in this arena; FortFront has nevertheless proved their
+        ! procedure kind and external identity, which is the available
+        ! interface fact for this bounded consumer.
+        if (query%target_procedure_index > 0) then
+            target_unit = query_program_unit(arena, query%target_procedure_index)
+            if (target_unit%found) then
+                formal_count = 0
+                if (allocated(target_unit%parameter_indices)) then
+                    formal_count = size(target_unit%parameter_indices)
+                end if
+                if (formal_count /= actual_count) then
+                    status%ok = .false.
+                    status%message = "procedure-pointer callback interface mismatch for '"// &
+                        trim(query%procedure_name)//"' at line "// &
+                        itoa(node_line(arena, idx))//": argument count differs"
+                    return
+                end if
+            end if
+        end if
+        name = trim(query%procedure_name)
+    end subroutine resolve_callback_call
 
     subroutine resolve_generic_call(arena, idx, fallback, name, status)
         !! Replace one same-arena generic call by its unique exact procedure.
