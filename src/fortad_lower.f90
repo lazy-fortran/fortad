@@ -10,6 +10,8 @@ module fortad_lower
         ast_arena_t, program_unit_query_t, query_program_unit, &
         query_declaration, declaration_query_t, INPUT_MODE_STANDARD
     use fortfront, only: generic_call_query_t, query_generic_call
+    use fortad_call_boundaries, only: has_same_file_call, &
+        validate_direct_call_boundaries
     use frontend_compiler_queries, only: global_reference_query_t, &
         query_active_global_references
     use fortad_ir, only: fad_proc_t
@@ -213,6 +215,24 @@ contains
             end if
         end if
 
+        ! Direct same-file calls need FortFront's semantic actual/formal
+        ! mapping. Keep the parse-only fast path for sources without one.
+        if (has_same_file_call(res%arena)) then
+            opts%run_semantics = .true.
+            call compile_frontend_from_string(source, res, opts)
+            if (.not. res%parse_ok) then
+                status%ok = .false.
+                status%message = "parse failed while resolving a procedure call boundary"
+                if (allocated(res%error_msg)) then
+                    if (len_trim(res%error_msg) > 0) then
+                        status%message = "parse failed while resolving a procedure call boundary: "// &
+                            trim(res%error_msg)
+                    end if
+                end if
+                return
+            end if
+        end if
+
         ! Procedure-pointer target flow is a semantic fact.  Keep the
         ! parse-only fast path for ordinary sources, but give FortFront's
         ! bounded callback query the semantic arena whenever a procedure
@@ -378,6 +398,11 @@ contains
             return
         end if
         if (.not. status%ok) return
+
+        if (has_same_file_call(res%arena)) then
+            call validate_direct_call_boundaries(res%arena, chosen, status)
+            if (.not. status%ok) return
+        end if
 
         global_refs = query_active_global_references(res%arena, chosen)
         do i = 1, size(global_refs)

@@ -1,5 +1,21 @@
 # Procedure interfaces
 
+## Direct same-file call boundaries
+
+FortAD differentiates a bounded modern-Fortran call slice automatically. A
+direct call to a procedure defined in the same source is accepted when
+FortFront proves an exact formal/actual type, kind, and rank match and a
+non-aliased scalar or whole-array storage mapping. Positional and keyword
+actuals, omitted optional dummies, scalar values, and assumed-shape whole
+arrays use that mapping. The callee is then inlined before differentiation.
+
+The boundary refuses ambiguous or unresolved calls, procedure callbacks,
+active global mutable state, pointer or allocatable storage, repeated actual
+aliases, incomplete facts, mismatches, and writable formals bound to
+expressions or sections. Refusals name the call line and reason. The
+independent numerical and refusal oracle is
+[`test_procedure_call_boundary_oracle.f90`](../../test/test_procedure_call_boundary_oracle.f90).
+
 FortAD keeps an optional dummy optional in generated code.  That makes both
 forms of a call valid:
 
