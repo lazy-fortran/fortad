@@ -17,6 +17,7 @@ module fortad_lower_statements
         procedure_call_target_query_t, query_procedure_call_target, &
         procedure_target_query_t, query_procedure_target, &
         type_bound_call_query_t, query_type_bound_call, &
+        procedure_callback_flow_query_t, query_procedure_callback_flow, &
         get_source_line, TREAL
     use ast_nodes_control, only: associate_node
     use frontend_compiler_control_queries, only: control_statement_query_t, &
@@ -125,6 +126,7 @@ contains
         type(fad_decl_t) :: d
         type(type_bound_call_query_t) :: type_bound
         type(procedure_target_query_t) :: callback_target
+        type(procedure_callback_flow_query_t) :: callback_flow
         type(nullify_query_t) :: nullify_info
         integer :: ignored, k
 
@@ -203,6 +205,21 @@ contains
             ignored = proc%add_stmt(s)
 
             type is (assignment_node)
+            if (callback_has_preceding_if(arena, n%value_index)) then
+                callback_flow = query_procedure_callback_flow(arena, &
+                    n%value_index)
+                if (callback_flow%found) then
+                    call lower_callback_flow_assignment(arena, n, callback_flow, &
+                        proc, status)
+                    return
+                end if
+                if (callback_flow%is_refused) then
+                    status%ok = .false.
+                    status%message = callback_flow_refusal(callback_flow, &
+                        node_line(arena, idx))
+                    return
+                end if
+            end if
             s%kind = FAD_ASSIGN
             s%line = n%line
             s%is_automatic_reallocation = .false.
@@ -221,6 +238,18 @@ contains
             ignored = proc%add_stmt(s)
 
             type is (if_node)
+            callback_flow = callback_flow_for_if(arena, idx)
+            if (callback_flow%found) then
+                call lower_callback_flow_branch(arena, n, callback_flow, proc, &
+                    status)
+                return
+            end if
+            if (callback_flow%is_refused) then
+                status%ok = .false.
+                status%message = callback_flow_refusal(callback_flow, &
+                    node_line(arena, idx))
+                return
+            end if
             if (allocated(n%elseif_blocks)) then
                 if (size(n%elseif_blocks) > 0) then
                     status%ok = .false.
@@ -258,6 +287,20 @@ contains
 
             type is (subroutine_call_node)
             s%line = n%line
+            if (callback_has_preceding_if(arena, idx)) then
+                callback_flow = query_procedure_callback_flow(arena, idx)
+                if (callback_flow%found) then
+                    call lower_callback_flow_subroutine_call(arena, n, &
+                        callback_flow, proc, status)
+                    return
+                end if
+                if (callback_flow%is_refused) then
+                    status%ok = .false.
+                    status%message = callback_flow_refusal(callback_flow, &
+                        node_line(arena, idx))
+                    return
+                end if
+            end if
             type_bound = query_type_bound_call(arena, idx)
             if (type_bound%found .or. type_bound%is_unresolved .or. &
                 index(n%name, "%") > 0) then
@@ -339,6 +382,536 @@ contains
             status%message = "unsupported statement at line "//itoa(node_line(arena, idx))
         end select
     end subroutine lower_stmt
+
+    subroutine lower_callback_flow_branch(arena, node, flow, proc, status)
+        !! Lower the proven callback-selection branch to a passive integer tag.
+        !! The source IF is evaluated exactly once; the call site below uses
+        !! the tag to select the already-resolved direct target.  This keeps
+        !! both generated AD modes on the ordinary branch and call/inlining
+        !! machinery rather than emitting a procedure pointer in derivative
+        !! code.
+        type(ast_arena_t), intent(in) :: arena
+        type(if_node), intent(in) :: node
+        type(procedure_callback_flow_query_t), intent(in) :: flow
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(out) :: status
+        type(fad_stmt_t) :: s
+        character(len=:), allocatable :: tag
+        integer :: condition, ignored
+
+        status%ok = .true.
+        if (.not. callback_flow_shape_is_supported(arena, node, flow, status)) &
+            return
+        tag = callback_tag_name(flow%pointer_name)
+        ignored = proc%add_decl_fields(tag, "integer", FAD_INTENT_NONE, &
+            .false., .false., .false., .false., "")
+        condition = lower_expr(arena, node%condition_index, proc, status)
+        if (.not. status%ok) return
+
+        s%kind = FAD_IF
+        s%line = node%line
+        s%value = condition
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_ASSIGN
+        s%target = tag
+        s%value = proc%add_expr(expr_const("1"))
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_ELSE
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_ASSIGN
+        s%target = tag
+        s%value = proc%add_expr(expr_const("2"))
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_END_IF
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        ignored = proc%add_stmt(s)
+    end subroutine lower_callback_flow_branch
+
+    subroutine lower_callback_flow_assignment(arena, node, flow, proc, status)
+        !! Expand `lhs = callback(scalar)` into a tagged direct-call branch.
+        !! Once the target names are ordinary FAD_CALL expressions, the normal
+        !! sibling-procedure inliner makes the JVP and VJP path arithmetic.
+        type(ast_arena_t), intent(in) :: arena
+        type(assignment_node), intent(in) :: node
+        type(procedure_callback_flow_query_t), intent(in) :: flow
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(out) :: status
+        type(fad_stmt_t) :: s
+        integer, allocatable :: args(:)
+        character(len=64), allocatable :: arg_names(:)
+        integer :: condition, ignored
+        character(len=:), allocatable :: tag, target_text
+
+        status%ok = .true.
+        if (.not. callback_call_shape_is_supported(arena, node, flow, status)) &
+            return
+        tag = callback_tag_name(flow%pointer_name)
+        call lower_target(arena, node%target_index, proc, s, status)
+        if (.not. status%ok) return
+        target_text = s%target
+        call lower_callback_call_arguments(arena, node%value_index, proc, args, &
+            arg_names, status)
+        if (.not. status%ok) return
+
+        condition = proc%add_expr(expr_binop("==", proc%add_expr( &
+            expr_var(tag)), proc%add_expr(expr_const("1"))))
+        s%kind = FAD_IF
+        s%line = node%line
+        s%value = condition
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_ASSIGN
+        s%target = target_text
+        s%value = proc%add_expr(expr_call(flow%targets(1)%procedure_name, args, &
+            arg_names))
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_ELSE
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_ASSIGN
+        s%target = target_text
+        s%value = proc%add_expr(expr_call(flow%targets(2)%procedure_name, args, &
+            arg_names))
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_END_IF
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        ignored = proc%add_stmt(s)
+    end subroutine lower_callback_flow_assignment
+
+    subroutine lower_callback_flow_subroutine_call(arena, node, flow, proc, &
+            status)
+        !! Expand `call callback(...)` into tagged direct calls.  The direct
+        !! names are ordinary FAD_CALL_STMT records, so existing subroutine
+        !! inlining and both derivative sweeps remain unchanged.
+        type(ast_arena_t), intent(in) :: arena
+        type(subroutine_call_node), intent(in) :: node
+        type(procedure_callback_flow_query_t), intent(in) :: flow
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(out) :: status
+        type(fad_stmt_t) :: s
+        integer, allocatable :: args(:)
+        character(len=64), allocatable :: arg_names(:)
+        integer :: condition, ignored
+        character(len=:), allocatable :: tag
+
+        status%ok = .true.
+        if (.not. callback_subroutine_shape_is_supported(arena, node, flow, &
+                status)) return
+        tag = callback_tag_name(flow%pointer_name)
+        call lower_call_arguments(arena, node%arg_indices, proc, args, &
+            arg_names, status)
+        if (.not. status%ok) return
+        condition = proc%add_expr(expr_binop("==", proc%add_expr( &
+            expr_var(tag)), proc%add_expr(expr_const("1"))))
+        s%kind = FAD_IF
+        s%line = node%line
+        s%value = condition
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_CALL_STMT
+        s%target = flow%targets(1)%procedure_name
+        s%call_args = args
+        s%call_arg_names = arg_names
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_ELSE
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        if (allocated(s%call_args)) deallocate (s%call_args)
+        if (allocated(s%call_arg_names)) deallocate (s%call_arg_names)
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_CALL_STMT
+        s%target = flow%targets(2)%procedure_name
+        s%call_args = args
+        s%call_arg_names = arg_names
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_END_IF
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        if (allocated(s%call_args)) deallocate (s%call_args)
+        if (allocated(s%call_arg_names)) deallocate (s%call_arg_names)
+        ignored = proc%add_stmt(s)
+    end subroutine lower_callback_flow_subroutine_call
+
+    function callback_flow_for_if(arena, if_index) result(flow)
+        !! Find the FortFront callback fact whose merge branch is IF_INDEX.
+        !! The query is deliberately asked from the call node: this keeps all
+        !! flow-sensitive proof in FortFront instead of duplicating it here.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: if_index
+        type(procedure_callback_flow_query_t) :: flow, candidate
+        integer :: i
+
+        candidate = query_procedure_callback_flow(arena, 0)
+        flow = candidate
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            candidate = query_procedure_callback_flow(arena, i)
+            if (candidate%call_node_index <= 0) cycle
+            if (candidate%if_node_index /= if_index) cycle
+            if (.not. allocated(candidate%pointer_name)) cycle
+            if (len_trim(candidate%pointer_name) == 0) cycle
+            flow = candidate
+            return
+        end do
+        if (contains_callback_assignment(arena, if_index)) then
+            flow%if_node_index = if_index
+            flow%is_unresolved = .true.
+            flow%is_refused = .true.
+            flow%has_missing_branch = .true.
+        end if
+    end function callback_flow_for_if
+
+    logical function callback_has_preceding_if(arena, call_index) result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: call_index
+        integer :: i
+
+        found = .false.
+        do i = 1, arena%size
+            if (i >= call_index) exit
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) /= "if" .and. &
+                    trim(arena%entries(i)%node_type) /= "if_statement") cycle
+            found = .true.
+            return
+        end do
+    end function callback_has_preceding_if
+
+    logical function contains_callback_assignment(arena, if_index) result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: if_index
+        type(procedure_target_query_t) :: target
+        integer :: i, current
+
+        found = .false.
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            current = i
+            do while (current > 0)
+                if (current == if_index) then
+                    target = query_procedure_target(arena, i)
+                    if (target%found) then
+                        found = .true.
+                        return
+                    end if
+                    exit
+                end if
+                if (.not. arena%has_node_at(current)) exit
+                current = arena%entries(current)%parent_index
+            end do
+        end do
+    end function contains_callback_assignment
+
+    logical function callback_flow_shape_is_supported(arena, node, flow, &
+            status) result(supported)
+        type(ast_arena_t), intent(in) :: arena
+        type(if_node), intent(in) :: node
+        type(procedure_callback_flow_query_t), intent(in) :: flow
+        type(lower_status_t), intent(inout) :: status
+        integer :: i
+
+        supported = .false.
+        if (.not. flow%found .or. flow%is_refused .or. flow%is_unresolved .or. &
+                flow%has_loop .or. flow%has_nested_branch .or. &
+                flow%has_missing_branch .or. flow%has_reassignment .or. &
+                flow%has_null_assignment .or. flow%has_nullify .or. &
+                flow%has_generic_target .or. flow%has_ambiguous_target .or. &
+                flow%has_incompatible_signature .or. flow%has_branch_call) then
+            status%ok = .false.
+            status%message = callback_flow_refusal(flow, node%line)
+            return
+        end if
+        if (.not. allocated(flow%targets)) then
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
+                itoa(node%line)//": target facts are missing"
+            return
+        end if
+        if (size(flow%targets) /= 2) then
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
+                itoa(node%line)//": require exactly two callback targets"
+            return
+        end if
+        if (.not. allocated(node%then_body_indices) .or. &
+                .not. allocated(node%else_body_indices)) then
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
+                itoa(node%line)//": both IF arms are required"
+            return
+        end if
+        if (.not. callback_arm_is_single_assignment(arena, &
+                node%then_body_indices, flow%targets(1)%branch_assignment_node_index)) then
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
+                itoa(node%line)//": THEN arm must contain one direct pointer assignment"
+            return
+        end if
+        if (.not. callback_arm_is_single_assignment(arena, &
+                node%else_body_indices, flow%targets(2)%branch_assignment_node_index)) then
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
+                itoa(node%line)//": ELSE arm must contain one direct pointer assignment"
+            return
+        end if
+        do i = 1, 2
+            if (.not. callback_target_signature_supported(flow%targets(i))) then
+                status%ok = .false.
+                status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
+                    itoa(node%line)//": callback targets require same-file scalar REAL(8) functions"
+                return
+            end if
+        end do
+        supported = .true.
+    end function callback_flow_shape_is_supported
+
+    logical function callback_arm_is_single_assignment(arena, body, &
+            assignment_index) result(supported)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: body(:), assignment_index
+        integer :: i, executable_count
+
+        supported = .false.
+        executable_count = 0
+        do i = 1, size(body)
+            if (body(i) <= 0) cycle
+            if (body(i) > arena%size) cycle
+            if (.not. arena%has_node_at(body(i))) cycle
+            if (trim(arena%entries(body(i))%node_type) == "comment") cycle
+            executable_count = executable_count + 1
+            if (body(i) /= assignment_index) return
+            if (trim(arena%entries(body(i))%node_type) /= &
+                    "pointer_assignment") return
+        end do
+        supported = executable_count == 1
+    end function callback_arm_is_single_assignment
+
+    logical function callback_target_signature_supported(target) result(supported)
+        use frontend_compiler_queries, only: procedure_callback_target_query_t
+        type(procedure_callback_target_query_t), intent(in) :: target
+        integer :: i
+
+        supported = .false.
+        if (.not. target%is_resolved) return
+        if (.not. target%is_signature_compatible) return
+        if (target%target_procedure_index <= 0) return
+        if (.not. target%signature%found) return
+        if (target%signature%is_function) then
+            if (.not. target%signature%result_category_known) return
+            if (.not. same_callback_name(target%signature%result_category, "real")) return
+            if (.not. target%signature%result_kind_known) return
+            if (target%signature%result_kind_value /= 8) return
+            if (.not. target%signature%result_rank_known) return
+            if (target%signature%result_rank /= 0) return
+        end if
+        do i = 1, target%signature%dummy_count
+            if (.not. target%signature%dummies(i)%type_known) return
+            if (.not. target%signature%dummies(i)%category_known) return
+            if (.not. same_callback_name( &
+                    target%signature%dummies(i)%type_category, "real")) return
+            if (.not. target%signature%dummies(i)%kind_known) return
+            if (target%signature%dummies(i)%kind_value /= 8) return
+            if (.not. target%signature%dummies(i)%rank_known) return
+            if (target%signature%dummies(i)%rank /= 0) return
+            if (target%signature%dummies(i)%is_optional) return
+            if (target%signature%dummies(i)%is_value) return
+        end do
+        supported = .true.
+    end function callback_target_signature_supported
+
+    logical function callback_subroutine_shape_is_supported(arena, node, flow, &
+            status) result(supported)
+        type(ast_arena_t), intent(in) :: arena
+        type(subroutine_call_node), intent(in) :: node
+        type(procedure_callback_flow_query_t), intent(in) :: flow
+        type(lower_status_t), intent(inout) :: status
+        integer :: i, argument_count
+
+        supported = .false.
+        if (.not. arena%has_node_at(flow%if_node_index)) then
+            status%ok = .false.
+            status%message = callback_flow_refusal(flow, node%line)
+            return
+        end if
+        select type (branch => arena%entries(flow%if_node_index)%node)
+            type is (if_node)
+            if (.not. callback_flow_shape_is_supported(arena, branch, flow, &
+                    status)) return
+            class default
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback at line "// &
+                itoa(node%line)//": branch identity is not an IF construct"
+            return
+        end select
+        do i = 1, 2
+            if (flow%targets(i)%signature%is_function) then
+                status%ok = .false.
+                status%message = "unsupported branch-merged procedure-pointer callback at line "// &
+                    itoa(node%line)//": subroutine callback targets are required"
+                return
+            end if
+        end do
+        if (.not. allocated(node%arg_indices)) then
+            argument_count = 0
+        else
+            argument_count = size(node%arg_indices)
+        end if
+        if (argument_count /= flow%targets(1)%signature%dummy_count) then
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback at line "// &
+                itoa(node%line)//": callback argument count differs from its internal targets"
+            return
+        end if
+        supported = .true.
+    end function callback_subroutine_shape_is_supported
+
+    logical function callback_call_shape_is_supported(arena, node, flow, &
+            status) result(supported)
+        type(ast_arena_t), intent(in) :: arena
+        type(assignment_node), intent(in) :: node
+        type(procedure_callback_flow_query_t), intent(in) :: flow
+        type(lower_status_t), intent(inout) :: status
+        integer :: argument_count
+
+        supported = .false.
+        if (.not. callback_flow_shape_is_supported(arena, &
+                node_as_if(arena, flow%if_node_index), flow, status)) return
+        if (.not. arena%has_node_at(node%value_index)) then
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback at line "// &
+                itoa(node%line)//": call expression is missing"
+            return
+        end if
+        select type (call => arena%entries(node%value_index)%node)
+            type is (call_or_subscript_node)
+            if (call%base_expr_index /= 0) then
+                status%ok = .false.
+                status%message = "unsupported branch-merged procedure-pointer callback at line "// &
+                    itoa(node%line)//": only a direct scalar pointer call is supported"
+                return
+            end if
+            if (.not. same_callback_name(call%name, flow%pointer_name)) then
+                status%ok = .false.
+                status%message = "unsupported branch-merged procedure-pointer callback at line "// &
+                    itoa(node%line)//": call identity does not match the proven pointer"
+                return
+            end if
+            if (.not. allocated(call%arg_indices)) then
+                argument_count = 0
+            else
+                argument_count = size(call%arg_indices)
+            end if
+            if (argument_count /= flow%targets(1)%signature%dummy_count) then
+                status%ok = .false.
+                status%message = "unsupported branch-merged procedure-pointer callback at line "// &
+                    itoa(node%line)//": callback argument count differs from its internal targets"
+                return
+            end if
+            supported = .true.
+        class default
+            status%ok = .false.
+            status%message = "unsupported branch-merged procedure-pointer callback at line "// &
+                itoa(node%line)//": only a direct scalar pointer call is supported"
+        end select
+    end function callback_call_shape_is_supported
+
+    function node_as_if(arena, index) result(node)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: index
+        type(if_node) :: node
+
+        if (.not. arena%has_node_at(index)) return
+        select type (candidate => arena%entries(index)%node)
+            type is (if_node)
+            node = candidate
+        class default
+        end select
+    end function node_as_if
+
+    subroutine lower_callback_call_arguments(arena, value_index, proc, args, &
+            names, status)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: value_index
+        type(fad_proc_t), intent(inout) :: proc
+        integer, allocatable, intent(out) :: args(:)
+        character(len=64), allocatable, intent(out) :: names(:)
+        type(lower_status_t), intent(inout) :: status
+
+        select type (call => arena%entries(value_index)%node)
+            type is (call_or_subscript_node)
+            call lower_call_arguments(arena, call%arg_indices, proc, args, &
+                names, status)
+        class default
+            status%ok = .false.
+            status%message = "callback call arguments are not a direct expression"
+        end select
+    end subroutine lower_callback_call_arguments
+
+    function callback_tag_name(pointer_name) result(name)
+        character(len=*), intent(in) :: pointer_name
+        character(len=:), allocatable :: name
+
+        name = "fad_callback_"//trim(pointer_name)//"_tag"
+    end function callback_tag_name
+
+    logical function same_callback_name(first, second) result(equal)
+        character(len=*), intent(in) :: first, second
+        integer :: i
+
+        equal = len_trim(first) == len_trim(second)
+        if (.not. equal) return
+        do i = 1, len_trim(first)
+            if (callback_lower_char(first(i:i)) /= &
+                    callback_lower_char(second(i:i))) then
+                equal = .false.
+                return
+            end if
+        end do
+    end function same_callback_name
+
+    character function callback_lower_char(value)
+        character, intent(in) :: value
+
+        callback_lower_char = value
+        if (value >= "A" .and. value <= "Z") then
+            callback_lower_char = achar(iachar(value) + iachar("a") - iachar("A"))
+        end if
+    end function callback_lower_char
+
+    function callback_flow_refusal(flow, line) result(message)
+        type(procedure_callback_flow_query_t), intent(in) :: flow
+        integer, intent(in) :: line
+        character(len=:), allocatable :: message
+
+        message = "unsupported branch-merged procedure-pointer callback flow at line "// &
+            itoa(line)//": "
+        if (flow%has_loop) then
+            message = message//"loops are not supported"
+        else if (flow%has_nested_branch) then
+            message = message//"nested branches are not supported"
+        else if (flow%has_missing_branch) then
+            message = message//"both direct IF arms are required; target flow is unresolved"
+        else if (flow%has_reassignment) then
+            message = message//"reassignment or a missing arm is unresolved"
+        else if (flow%has_null_assignment) then
+            message = message//"NULL() targets are not supported"
+        else if (flow%has_nullify) then
+            message = message//"NULLIFY is not supported"
+        else if (flow%has_generic_target) then
+            message = message//"generic targets are not supported"
+        else if (flow%has_ambiguous_target) then
+            message = message//"ambiguous targets are not supported"
+        else if (flow%has_incompatible_signature) then
+            message = message//"target signatures are incompatible"
+        else if (flow%has_branch_call) then
+            message = message//"calls inside callback arms are not supported"
+        else
+            message = message//"target flow is unresolved"
+        end if
+    end function callback_flow_refusal
 
     subroutine refuse_alias_declaration(name, line, is_pointer, is_target, status)
         !! Refuse declarations whose storage may be reached through aliases.
