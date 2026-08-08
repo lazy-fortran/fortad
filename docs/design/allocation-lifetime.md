@@ -18,7 +18,18 @@ module-owned allocatable state. Global mutable ownership would require a
 shared lifetime and alias model, so it is a product boundary rather than an
 implicit side effect. It also refuses allocation status side channels
 (`stat=`/`errmsg=`), rank greater than two, polymorphic ownership, pointer or
-target aliasing, and allocatable components.
+target aliasing, and array-valued allocatable component reads.
+
+The forward/JVP slice also accepts one whole assignment to a concrete scalar
+REAL allocatable component of a local or dummy derived owner. The generated
+tangent repeats that ordinary assignment, so the Fortran compiler performs the
+component descriptor transition for both owners. Reverse mode deliberately
+refuses this case until component lifetime replay can retain and restore the
+component descriptor safely:
+
+```text
+reverse mode: whole allocatable component automatic reallocation requires component lifetime replay
+```
 
 Reverse mode now has a bounded retention slice for one explicit lifetime of a
 simple local or allocatable dummy array, including one explicit
@@ -46,7 +57,8 @@ reverse mode: move_alloc requires one straight-line allocation owner and one mat
 ```
 
 Repeated or path-dependent automatic reallocation, mixing automatic and
-explicit lifetime operations, allocatable components, polymorphic ownership,
+explicit lifetime operations, array-valued component assignment/read,
+allocatable component explicit lifetime operations, polymorphic ownership,
 pointer/target aliases, and active module-owned state remain refused. A
 `MOVE_ALLOC` outside the one-owner, straight-line, matching-final-deallocation
 shape is also refused. Those cases require storage identity, dynamic ownership,
@@ -67,3 +79,8 @@ It compiles the primal and generated derivatives with gfortran, checks scalar,
 rank-one, and rank-two hand derivatives against central differences, checks
 scalar and rank-two JVP/VJP adjoint identities, and verifies repeated-lifetime
 and rank-three boundary refusals.
+
+The scalar allocatable-component reallocation oracle is
+[`test_allocatable_component_reallocation_oracle.f90`](../../test/test_allocatable_component_reallocation_oracle.f90).
+It compiles and runs the primal and generated JVP, checks the hand derivative,
+and verifies the reverse lifetime-replay refusal.

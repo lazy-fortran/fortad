@@ -234,6 +234,10 @@ contains
                 end if
                 s%is_automatic_reallocation = .true.
             end if
+            if (s%target_component_is_allocatable .and. &
+                index(trim(s%target), "(") == 0) then
+                s%is_automatic_reallocation = .true.
+            end if
             s%value = lower_expr(arena, n%value_index, proc, status)
             if (.not. status%ok) return
             ignored = proc%add_stmt(s)
@@ -495,7 +499,7 @@ contains
 
         status%ok = .true.
         if (.not. callback_subroutine_shape_is_supported(arena, node, flow, &
-                status)) return
+            status)) return
         tag = callback_tag_name(flow%pointer_name)
         call lower_call_arguments(arena, node%arg_indices, proc, args, &
             arg_names, status)
@@ -569,7 +573,7 @@ contains
             if (i >= call_index) exit
             if (.not. arena%has_node_at(i)) cycle
             if (trim(arena%entries(i)%node_type) /= "if" .and. &
-                    trim(arena%entries(i)%node_type) /= "if_statement") cycle
+                trim(arena%entries(i)%node_type) /= "if_statement") cycle
             found = .true.
             return
         end do
@@ -610,11 +614,11 @@ contains
 
         supported = .false.
         if (.not. flow%found .or. flow%is_refused .or. flow%is_unresolved .or. &
-                flow%has_loop .or. flow%has_nested_branch .or. &
-                flow%has_missing_branch .or. flow%has_reassignment .or. &
-                flow%has_null_assignment .or. flow%has_nullify .or. &
-                flow%has_generic_target .or. flow%has_ambiguous_target .or. &
-                flow%has_incompatible_signature .or. flow%has_branch_call) then
+            flow%has_loop .or. flow%has_nested_branch .or. &
+            flow%has_missing_branch .or. flow%has_reassignment .or. &
+            flow%has_null_assignment .or. flow%has_nullify .or. &
+            flow%has_generic_target .or. flow%has_ambiguous_target .or. &
+            flow%has_incompatible_signature .or. flow%has_branch_call) then
             status%ok = .false.
             status%message = callback_flow_refusal(flow, node%line)
             return
@@ -632,21 +636,21 @@ contains
             return
         end if
         if (.not. allocated(node%then_body_indices) .or. &
-                .not. allocated(node%else_body_indices)) then
+            .not. allocated(node%else_body_indices)) then
             status%ok = .false.
             status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
                 itoa(node%line)//": both IF arms are required"
             return
         end if
         if (.not. callback_arm_is_single_assignment(arena, &
-                node%then_body_indices, flow%targets(1)%branch_assignment_node_index)) then
+            node%then_body_indices, flow%targets(1)%branch_assignment_node_index)) then
             status%ok = .false.
             status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
                 itoa(node%line)//": THEN arm must contain one direct pointer assignment"
             return
         end if
         if (.not. callback_arm_is_single_assignment(arena, &
-                node%else_body_indices, flow%targets(2)%branch_assignment_node_index)) then
+            node%else_body_indices, flow%targets(2)%branch_assignment_node_index)) then
             status%ok = .false.
             status%message = "unsupported branch-merged procedure-pointer callback flow at line "// &
                 itoa(node%line)//": ELSE arm must contain one direct pointer assignment"
@@ -679,7 +683,7 @@ contains
             executable_count = executable_count + 1
             if (body(i) /= assignment_index) return
             if (trim(arena%entries(body(i))%node_type) /= &
-                    "pointer_assignment") return
+                "pointer_assignment") return
         end do
         supported = executable_count == 1
     end function callback_arm_is_single_assignment
@@ -706,7 +710,7 @@ contains
             if (.not. target%signature%dummies(i)%type_known) return
             if (.not. target%signature%dummies(i)%category_known) return
             if (.not. same_callback_name( &
-                    target%signature%dummies(i)%type_category, "real")) return
+                target%signature%dummies(i)%type_category, "real")) return
             if (.not. target%signature%dummies(i)%kind_known) return
             if (target%signature%dummies(i)%kind_value /= 8) return
             if (.not. target%signature%dummies(i)%rank_known) return
@@ -734,8 +738,8 @@ contains
         select type (branch => arena%entries(flow%if_node_index)%node)
             type is (if_node)
             if (.not. callback_flow_shape_is_supported(arena, branch, flow, &
-                    status)) return
-            class default
+                status)) return
+        class default
             status%ok = .false.
             status%message = "unsupported branch-merged procedure-pointer callback at line "// &
                 itoa(node%line)//": branch identity is not an IF construct"
@@ -773,7 +777,7 @@ contains
 
         supported = .false.
         if (.not. callback_flow_shape_is_supported(arena, &
-                node_as_if(arena, flow%if_node_index), flow, status)) return
+            node_as_if(arena, flow%if_node_index), flow, status)) return
         if (.not. arena%has_node_at(node%value_index)) then
             status%ok = .false.
             status%message = "unsupported branch-merged procedure-pointer callback at line "// &
@@ -860,7 +864,7 @@ contains
         if (.not. equal) return
         do i = 1, len_trim(first)
             if (callback_lower_char(first(i:i)) /= &
-                    callback_lower_char(second(i:i))) then
+                callback_lower_char(second(i:i))) then
                 equal = .false.
                 return
             end if
@@ -1995,6 +1999,9 @@ contains
         integer, allocatable :: subs(:)
         integer :: section_expr
 
+        ! A scalar whole allocatable component target uses ordinary Fortran
+        ! assignment for the descriptor transition. Array-valued operations
+        ! remain refused by the component validator.
         call validate_component_reference(arena, idx, status)
         if (.not. status%ok) return
 
@@ -4457,7 +4464,6 @@ contains
         type(declaration_query_t) :: component_declaration
         integer :: path_idx, terminal_idx, component_rank
         logical :: is_component, whole
-
         call component_reference_parts(arena, idx, path_idx, whole, is_component)
         if (.not. is_component) return
 
@@ -4548,7 +4554,7 @@ contains
                 "allocatable component rank greater than four is not supported", status)
             return
         end if
-        if (whole) then
+        if (whole .and. component_rank > 0) then
             call refuse_component(arena, idx, &
                 "whole allocatable component assignment/read is not supported; use one element", &
                 status)
