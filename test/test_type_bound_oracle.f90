@@ -49,7 +49,12 @@ program test_type_bound_oracle
     call check_pass_case(nopass_source(), "nopass_case")
     call check_pass_case(nopass_scope_source(), "nopass_scope_case")
     call expect_refusal(ambiguous_source(), "ambiguous type", "ambiguous")
-    call expect_active_receiver_refusal(active_receiver_source())
+    call check_active_receiver(active_receiver_source())
+    call check_active_receiver_subroutine(active_receiver_subroutine_source())
+    call expect_refusal(allocatable_receiver_source(), "allocatable receiver", &
+        "allocatable receivers")
+    call expect_refusal(array_receiver_source(), "array receiver", &
+        "array receivers")
     call check_inherited(inherited_source(), "inherited_case")
     call expect_refusal(generic_source(), "generic", "generic")
     call expect_refusal(deferred_source(), "deferred", "deferred")
@@ -167,38 +172,180 @@ contains
         end if
     end subroutine expect_refusal
 
-    subroutine expect_active_receiver_refusal(case_source)
+    subroutine check_active_receiver(case_source)
         character(len=*), intent(in) :: case_source
-        type(fad_result_t) :: result
+        type(fad_result_t) :: jvp_case, vjp_case
+        character(len=:), allocatable :: case_dir, case_driver
+        integer :: case_unit, case_stat
 
-        result = fad_jvp(case_source, ["model"], from="top")
-        if (result%ok) then
-            print *, "FAIL active receiver: JVP was accepted"
+        jvp_case = fad_jvp(case_source, [character(len=12) :: "model%scale", "x"], &
+            from="top", name="top_active_receiver_jvp")
+        if (.not. jvp_case%ok) then
+            print *, "FAIL active receiver JVP generation: ", jvp_case%message
             error stop 1
         end if
-        if (.not. allocated(result%message)) then
-            print *, "FAIL active receiver: JVP refusal was not named"
-            error stop 1
-        else if (index(result%message, "active derived object") == 0) then
-            print *, "FAIL active receiver: JVP refusal was not named: ", &
-                result%message
+        vjp_case = fad_vjp(case_source, [character(len=12) :: "model%scale", "x"], &
+            dependent="y", from="top", name="top_active_receiver_vjp")
+        if (.not. vjp_case%ok) then
+            print *, "FAIL active receiver VJP generation: ", vjp_case%message
             error stop 1
         end if
 
-        result = fad_vjp(case_source, ["model"], dependent="y", from="top")
-        if (result%ok) then
-            print *, "FAIL active receiver: VJP was accepted"
+        case_dir = "build/oracle/type_bound_active_receiver"
+        call execute_command_line("mkdir -p "//case_dir, exitstat=case_stat)
+        if (case_stat /= 0) error stop "could not create active-receiver oracle directory"
+
+        open (newunit=case_unit, file=case_dir//"/primal.f90", status="replace", &
+            action="write")
+        write (case_unit, '(a)') case_source
+        close (case_unit)
+        open (newunit=case_unit, file=case_dir//"/derivatives.f90", &
+            status="replace", action="write")
+        write (case_unit, '(a)') "module type_bound_active_derivatives"
+        write (case_unit, '(a)') "    use active_receiver_case, only: box_t"
+        write (case_unit, '(a)') "contains"
+        write (case_unit, '(a)') jvp_case%code
+        write (case_unit, '(a)') vjp_case%code
+        write (case_unit, '(a)') "end module type_bound_active_derivatives"
+        close (case_unit)
+
+        case_driver = &
+            "program driver"//nl// &
+            "    use active_receiver_case, only: box_t, top"//nl// &
+            "    use type_bound_active_derivatives, only: "// &
+            "top_active_receiver_jvp, top_active_receiver_vjp"//nl// &
+            "    implicit none"//nl// &
+            "    type(box_t) :: model, model_d, model_b, plus, minus"//nl// &
+            "    real(8) :: x, x_d, y, y_d, y_b, x_b, h, fp, fm, fd"//nl// &
+            "    model%scale = 2.0d0"//nl// &
+            "    model_d%scale = -0.7d0"//nl// &
+            "    x = 1.5d0"//nl// &
+            "    x_d = 0.4d0"//nl// &
+            "    y_b = 1.3d0"//nl// &
+            "    call top_active_receiver_jvp(model, model_d, x, x_d, y, y_d)"//nl// &
+            "    if (abs(y - 3.0d0) > 1.0d-13) error stop 2"//nl// &
+            "    if (abs(y_d - (-0.25d0)) > 1.0d-13) error stop 3"//nl// &
+            "    h = 1.0d-6"//nl// &
+            "    plus = model"//nl// &
+            "    plus%scale = model%scale + h*model_d%scale"//nl// &
+            "    minus = model"//nl// &
+            "    minus%scale = model%scale - h*model_d%scale"//nl// &
+            "    fp = top(plus, x + h*x_d)"//nl// &
+            "    fm = top(minus, x - h*x_d)"//nl// &
+            "    fd = (fp - fm)/(2.0d0*h)"//nl// &
+            "    if (abs(y_d - fd) > 1.0d-7) error stop 4"//nl// &
+            "    call top_active_receiver_vjp(model, x, y, y_b, model_b, x_b)"//nl// &
+            "    if (abs(model_b%scale - 1.95d0) > 1.0d-13) error stop 5"//nl// &
+            "    if (abs(x_b - 2.6d0) > 1.0d-13) error stop 6"//nl// &
+            "    if (abs(y_b*y_d - (model_b%scale*model_d%scale + x_b*x_d)) > "// &
+            "1.0d-13) error stop 7"//nl// &
+            "    print *, 'active receiver type-bound oracle pass'"//nl// &
+            "end program driver"//nl
+        open (newunit=case_unit, file=case_dir//"/driver.f90", status="replace", &
+            action="write")
+        write (case_unit, '(a)') case_driver
+        close (case_unit)
+
+        call execute_command_line("gfortran -std=f2018 -O2 -o "//case_dir//"/run "// &
+            case_dir//"/primal.f90 "//case_dir//"/derivatives.f90 "// &
+            case_dir//"/driver.f90 > "//case_dir//"/build.log 2>&1", &
+            exitstat=case_stat)
+        if (case_stat /= 0) then
+            print *, "FAIL active receiver: generated code did not compile"
+            call show_file(case_dir//"/build.log")
             error stop 1
         end if
-        if (.not. allocated(result%message)) then
-            print *, "FAIL active receiver: VJP refusal was not named"
-            error stop 1
-        else if (index(result%message, "active derived object") == 0) then
-            print *, "FAIL active receiver: VJP refusal was not named: ", &
-                result%message
+        call execute_command_line("./"//case_dir//"/run > "//case_dir//"/out.txt 2>&1", &
+            exitstat=case_stat)
+        if (case_stat /= 0) then
+            print *, "FAIL active receiver: independent oracle failed"
+            call show_file(case_dir//"/out.txt")
             error stop 1
         end if
-    end subroutine expect_active_receiver_refusal
+    end subroutine check_active_receiver
+
+    subroutine check_active_receiver_subroutine(case_source)
+        character(len=*), intent(in) :: case_source
+        type(fad_result_t) :: jvp_case, vjp_case
+        character(len=:), allocatable :: case_dir, case_driver
+        integer :: case_unit, case_stat
+
+        jvp_case = fad_jvp(case_source, [character(len=12) :: "model%scale", "x"], &
+            from="top", name="top_sub_jvp")
+        if (.not. jvp_case%ok) then
+            print *, "FAIL active receiver subroutine JVP generation: ", &
+                jvp_case%message
+            error stop 1
+        end if
+        vjp_case = fad_vjp(case_source, [character(len=12) :: "model%scale", "x"], &
+            dependent="y", from="top", name="top_sub_vjp")
+        if (.not. vjp_case%ok) then
+            print *, "FAIL active receiver subroutine VJP generation: ", &
+                vjp_case%message
+            error stop 1
+        end if
+
+        case_dir = "build/oracle/type_bound_active_subroutine"
+        call execute_command_line("mkdir -p "//case_dir, exitstat=case_stat)
+        if (case_stat /= 0) error stop "could not create active-subroutine oracle directory"
+
+        open (newunit=case_unit, file=case_dir//"/primal.f90", status="replace", &
+            action="write")
+        write (case_unit, '(a)') case_source
+        close (case_unit)
+        open (newunit=case_unit, file=case_dir//"/derivatives.f90", &
+            status="replace", action="write")
+        write (case_unit, '(a)') "module type_bound_active_sub_derivatives"
+        write (case_unit, '(a)') "    use active_receiver_subroutine_case, only: box_t"
+        write (case_unit, '(a)') "contains"
+        write (case_unit, '(a)') jvp_case%code
+        write (case_unit, '(a)') vjp_case%code
+        write (case_unit, '(a)') "end module type_bound_active_sub_derivatives"
+        close (case_unit)
+
+        case_driver = &
+            "program driver"//nl// &
+            "    use active_receiver_subroutine_case, only: box_t, top"//nl// &
+            "    use type_bound_active_sub_derivatives, only: top_sub_jvp, "// &
+            "top_sub_vjp"//nl// &
+            "    implicit none"//nl// &
+            "    type(box_t) :: model, model_d, model_b"//nl// &
+            "    real(8) :: x, x_d, y, y_d, y_b, x_b"//nl// &
+            "    model%scale = 2.0d0"//nl// &
+            "    model_d%scale = -0.7d0"//nl// &
+            "    x = 1.5d0"//nl// &
+            "    x_d = 0.4d0"//nl// &
+            "    y_b = 1.3d0"//nl// &
+            "    call top_sub_jvp(model, model_d, x, x_d, y, y_d)"//nl// &
+            "    if (abs(y - 3.0d0) > 1.0d-13) error stop 2"//nl// &
+            "    if (abs(y_d - (-0.25d0)) > 1.0d-13) error stop 3"//nl// &
+            "    call top_sub_vjp(model, x, y, y_b, model_b, x_b)"//nl// &
+            "    if (abs(model_b%scale - 1.95d0) > 1.0d-13) error stop 4"//nl// &
+            "    if (abs(x_b - 2.6d0) > 1.0d-13) error stop 5"//nl// &
+            "    print *, 'active receiver type-bound subroutine oracle pass'"//nl// &
+            "end program driver"//nl
+        open (newunit=case_unit, file=case_dir//"/driver.f90", status="replace", &
+            action="write")
+        write (case_unit, '(a)') case_driver
+        close (case_unit)
+
+        call execute_command_line("gfortran -std=f2018 -O2 -o "//case_dir//"/run "// &
+            case_dir//"/primal.f90 "//case_dir//"/derivatives.f90 "// &
+            case_dir//"/driver.f90 > "//case_dir//"/build.log 2>&1", &
+            exitstat=case_stat)
+        if (case_stat /= 0) then
+            print *, "FAIL active receiver subroutine: generated code did not compile"
+            call show_file(case_dir//"/build.log")
+            error stop 1
+        end if
+        call execute_command_line("./"//case_dir//"/run > "//case_dir//"/out.txt 2>&1", &
+            exitstat=case_stat)
+        if (case_stat /= 0) then
+            print *, "FAIL active receiver subroutine: independent oracle failed"
+            call show_file(case_dir//"/out.txt")
+            error stop 1
+        end if
+    end subroutine check_active_receiver_subroutine
 
     subroutine check_pass_case(case_source, case_module)
         character(len=*), intent(in) :: case_source, case_module
@@ -498,6 +645,74 @@ contains
             "    end function top"//nl// &
             "end module active_receiver_case"//nl
     end function active_receiver_source
+
+    function allocatable_receiver_source() result(text)
+        character(len=:), allocatable :: text
+        text = "module allocatable_receiver_case"//nl// &
+            "    type :: box_t"//nl// &
+            "        real(8) :: scale"//nl// &
+            "    contains"//nl// &
+            "        procedure :: value"//nl// &
+            "    end type box_t"//nl// &
+            "contains"//nl// &
+            "    pure real(8) function value(self, x) result(y)"//nl// &
+            "        class(box_t), intent(in) :: self"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = self%scale*x"//nl// &
+            "    end function value"//nl// &
+            "    pure real(8) function top(model, x) result(y)"//nl// &
+            "        type(box_t), allocatable, intent(in) :: model"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = model%value(x)"//nl// &
+            "    end function top"//nl// &
+            "end module allocatable_receiver_case"//nl
+    end function allocatable_receiver_source
+
+    function array_receiver_source() result(text)
+        character(len=:), allocatable :: text
+        text = "module array_receiver_case"//nl// &
+            "    type :: box_t"//nl// &
+            "        real(8) :: scale"//nl// &
+            "    contains"//nl// &
+            "        procedure :: value"//nl// &
+            "    end type box_t"//nl// &
+            "contains"//nl// &
+            "    pure real(8) function value(self, x) result(y)"//nl// &
+            "        class(box_t), intent(in) :: self"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = self%scale*x"//nl// &
+            "    end function value"//nl// &
+            "    pure real(8) function top(model, x) result(y)"//nl// &
+            "        type(box_t), intent(in) :: model(:)"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        y = model%value(x)"//nl// &
+            "    end function top"//nl// &
+            "end module array_receiver_case"//nl
+    end function array_receiver_source
+
+    function active_receiver_subroutine_source() result(text)
+        character(len=:), allocatable :: text
+        text = "module active_receiver_subroutine_case"//nl// &
+            "    type :: box_t"//nl// &
+            "        real(8) :: scale"//nl// &
+            "    contains"//nl// &
+            "        procedure :: apply"//nl// &
+            "    end type box_t"//nl// &
+            "contains"//nl// &
+            "    pure subroutine apply(self, x, y)"//nl// &
+            "        class(box_t), intent(in) :: self"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        real(8), intent(out) :: y"//nl// &
+            "        y = self%scale*x"//nl// &
+            "    end subroutine apply"//nl// &
+            "    pure subroutine top(model, x, y)"//nl// &
+            "        type(box_t), intent(in) :: model"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        real(8), intent(out) :: y"//nl// &
+            "        call model%apply(x, y)"//nl// &
+            "    end subroutine top"//nl// &
+            "end module active_receiver_subroutine_case"//nl
+    end function active_receiver_subroutine_source
 
     function inherited_source() result(text)
         character(len=:), allocatable :: text
