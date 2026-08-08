@@ -133,8 +133,8 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 61 runnable pure-Fortran cases, 130 deliberate refusals, 31
-invalid-upstream closures, 2 dependency-blocked cases, 1,282 queued
+candidate files: 61 runnable pure-Fortran cases, 130 deliberate refusals, 32
+invalid-upstream closures, 2 dependency-blocked cases, 1,281 queued
 candidates, and 508 non-Fortran or source-absent cases. The completed
 compiler-only triage
 covers the 1,286 rows that entered the queue before measured closures (1,992
@@ -176,7 +176,7 @@ The following row, `nonRegressions/set02/lh198`, is a valid fixed-form COMMON
 case, not an invalid-upstream closure. Strict and legacy compilation and fresh
 Tapenade parser, tangent, and reverse products pass. The evidence is pinned to
 FortAD `6a33d31`, which refuses the active `AAA` call because no derivative
-rule is registered. Current FortAD `aa9453b` retains that deliberate boundary.
+rule is registered. Current FortAD `e13b43a` retains that deliberate boundary.
 The independent shared-COMMON oracle checks the primal, JVP, finite differences,
 and adjoint identity. No repaired port is claimed.
 
@@ -204,6 +204,16 @@ reverse conversion at the assignment to undeclared `t`. An independent
 analytical JVP/VJP, central-difference sweep, and adjoint identity pass. The
 case is classified as `expected-refusal`, not `unsupported-invalid-upstream-
 fortran`, in fortad-bench `main`.
+
+The next measured row, `examples/big01/B04`, is an invalid-upstream closure.
+The exact fixed-form source and stored references fail both strict and legacy
+compiler gates because of duplicate main programs, malformed legacy syntax,
+and a missing `DIFFSIZES.inc` in the stored derivative references. Fresh
+Tapenade generates all three products, but its parser product fails the same
+source gate and its reverse product lacks that include. FortAD refuses all
+three exact requests at the malformed token on line 20599. The case is
+classified as `unsupported-invalid-upstream-fortran`, with no repaired source
+or derivative oracle claim, in fortad-bench `main`.
 
 ## Hard execution rules
 
@@ -253,7 +263,7 @@ split it into smaller checkboxes before writing code.
 Phases 0 through 6 contain 43 completed items. The arithmetic core works, but
 the current integration gate is still open:
 
-FortFront source `main` is currently `06f6d678`. This handoff includes the
+FortFront source `main` is currently `f60d697e`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -263,7 +273,8 @@ procedure-pointer target facts for direct assignments, and a bounded
 procedure-pointer call-target query for one unconditional same-scope
 assignment, and nested receiver component-path facts for type-bound calls. It
 also exposes ownership-event paths, explicit `MOVE_ALLOC` transfer facts, and
-automatic-reallocation candidates. The earlier
+automatic-reallocation candidates, including owner paths, ranks, assignment
+kind, reallocation kind, and shape-expression indices. The earlier
 procedure-name, #2980, public array-query, nested
 substring, and issue-1968 assumed-shape fixes.
 The focused `test_ownership_dispatch_metadata`,
@@ -274,7 +285,7 @@ The focused procedure-call oracle passes. The Windows and downstream
 multi-compiler gates remain open. `test_module_distribution` is parallel
 fragile in the full gate but passes standalone.
 
-The compiler-path handoff is ffc docs `f7664d5` over code `b7ec636`, which
+The compiler-path handoff is ffc docs `f7664d5` over code `b6f5822`, which
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, GOTO, FORALL, WHERE,
 SELECT, complex, intrinsic-extra, and reduction-expression extractions,
@@ -291,7 +302,10 @@ compiler oracle passes.
 The procedure-pointer lane now also lowers the bounded same-unit scalar
 default-real call in GCC `proc_ptr_25.f90` (#448), with a compiled behavioral
 oracle. Other result kinds and flow-sensitive targets remain explicit
-boundaries.
+boundaries. The rank-one integer, real, and logical whole-allocatable
+assignment slice now reallocates from a runtime descriptor and copies through a
+counted loop, with an independent gfortran differential oracle. Rank greater
+than one remains open.
 Clean
 validation is `fo clean && fo build` 447/447 on the prior structured-control
 handoff. The FORALL/WHERE/SELECT slices add independent compiler and runtime
@@ -329,7 +343,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `06f6d678`, which includes the
+The current FortFront `main` handoff is `f60d697e`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths, plus formal-ordered actual-to-formal call
@@ -370,8 +384,8 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `aa9453b`. Its GNU behavioral
-gate is green (408 build targets, 407 derivative targets, 55/55 tests).
+The implementation snapshot is FortAD code at `e13b43a`. Its GNU behavioral
+gate is green (408 build targets, 407 derivative targets, 56/56 tests).
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
@@ -385,9 +399,12 @@ nested receiver and dispatch-signature facts (`7017e709`), the ffc same-unit
 scalar procedure-pointer call (`b7ec636`), and the `set02/lh193` plus
 `set02/lh194` dependency classifications in fortad-bench `main`. The latest
 additions are FortAD's bounded reverse `MOVE_ALLOC` lifetime slice (code
-`aa9453b`, implementation commit `41cb5ba`), FortFront's ownership-event
-facts (main `06f6d678`, implementation commit `22c697d2`), and the measured
-`set02/v067` boundary. These are narrow support claims. General callback flow,
+`aa9453b`, implementation commit `41cb5ba`), bounded automatic reallocation
+(code `e13b43a`), FortFront's ownership-event facts (main `f60d697e`,
+implementation commit `eac9fa63`), FFC's rank-one runtime-descriptor
+reallocation slice (main `b6f5822`), and the measured `set02/v067` and
+`examples/big01/B04` corpus boundaries in fortad-bench `main`. These are
+narrow support claims. General callback flow, repeated or rank-greater-than-one
 automatic reallocation, polymorphic ownership replay, and runtime dispatch
 whose target set is unresolved remain open.
 
@@ -488,7 +505,7 @@ six-test list is superseded. `test_module_distribution` also remains
 parallel-fragile because it invokes the repository Makefile and cleans shared
 artifacts, although it passes alone and in the final bare gate.
 
-`fo` must consume FortFront `06f6d678` (the ownership/storage and dispatch
+`fo` must consume FortFront `f60d697e` (the ownership/storage and dispatch
 metadata handoff plus the merged procedure-name, #2980, public array-query,
 nested-substring, issue-1968, call-argument mapping, exact generic candidate,
 bounded type-binding hierarchy, type-bound call dispatch, procedure-pointer
@@ -985,23 +1002,13 @@ of selected child ends the fixed-path derivative contract.
         path-dependent lifetimes, active `source=` value copies, implicit
         reallocation, allocatable components, and polymorphic ownership remain
         explicit refusals pending a storage-aware replay tape.
-      - [x] **P7.2b ownership-event facts.** FortFront `06f6d678` exposes
+      - [x] **P7.2b ownership-event facts.** FortFront `f60d697e` exposes
         `SOURCE=` and `MOLD=` expression indices on allocation events,
         ownership paths, explicit `MOVE_ALLOC` source and destination paths,
         and automatic-reallocation candidates. Its independent API oracle
         checks owning allocatables and negative ordinary/pointer components.
         FortAD consumes the explicit transfer facts for the bounded P7.2c
         reverse lifetime slice. General lifetime replay remains open.
-      - [x] **P7.2d whole-assignment automatic reallocation.** FortAD accepts
-        one concrete scalar or rank-one local/dummy allocatable owner assigned
-        as a whole, preserving compiler automatic reallocation in the primal,
-        JVP, and bounded VJP. The independent
-        [`test_auto_realloc_assignment_oracle.f90`](test/test_auto_realloc_assignment_oracle.f90)
-        checks compiler execution, hand derivatives, central differences, and
-        the scalar adjoint identity. Repeated or path-dependent assignments,
-        mixed explicit lifetimes, rank greater than one, components,
-        polymorphic ownership, aliases, and global state remain named
-        refusals.
       - [x] **P7.2c bounded reverse `move_alloc` lifetime.** FortAD `aa9453b`
         differentiates one straight-line concrete local or dummy allocatable
         owner with exactly one `ALLOCATE`, one `MOVE_ALLOC` to a distinct
@@ -1012,6 +1019,16 @@ of selected child ends the fixed-path derivative contract.
         repeated or path-dependent lifetimes, multiple owners, `SOURCE=` value
         copies, automatic reallocation, components, polymorphism, aliases,
         and module-owned state remain named refusals.
+      - [x] **P7.2d whole-assignment automatic reallocation.** FortAD `e13b43a`
+        accepts one concrete scalar or rank-one local/dummy allocatable owner
+        assigned as a whole, preserving compiler automatic reallocation in the
+        primal, JVP, and bounded VJP. The independent
+        [`test_auto_realloc_assignment_oracle.f90`](test/test_auto_realloc_assignment_oracle.f90)
+        checks compiler execution, hand derivatives, central differences, and
+        the scalar adjoint identity. Repeated or path-dependent assignments,
+        mixed explicit lifetimes, rank greater than one, components,
+        polymorphic ownership, aliases, and global state remain named
+        refusals.
 - [ ] **P7.3 Aliasing and sections.** Track `pointer`, `target`, association,
       overlapping actual arguments, noncontiguous sections, and component
       aliases by storage identity. Test aliases that share a target and aliases
@@ -1259,7 +1276,7 @@ problem-specific rule.
             central differences, and the adjoint identity. The measured bench
             case is
             [`itpplasma_polymorphic_select_type_validation.txt`](https://github.com/lazy-fortran/fortad-bench/blob/main/results/itpplasma_polymorphic_select_type_validation.txt).
-      - [x] **P8.4c upstream hierarchy facts.** FortFront `06f6d678` exposes a
+      - [x] **P8.4c upstream hierarchy facts.** FortFront `f60d697e` exposes a
             bounded local-to-parent type-binding hierarchy query with declaring
             type, inherited status, PASS metadata, deferred and generic flags,
             ambiguity, and resolved implementation facts. Its independent API
@@ -1323,7 +1340,7 @@ problem-specific rule.
       passive runtime choice and pair each active callback with its JVP and VJP.
       Cover pointer reassignment, `associated`, null callbacks, passed
       procedures, and `class(*)` context objects. FortFront now provides
-      bounded assignment and call-target facts in `06f6d678`. The bounded
+      bounded assignment and call-target facts in `f60d697e`. The bounded
       same-scope callback call and derivative slice is delivered by FortAD
       `1080a62` with finite-difference and adjoint oracles. Reassignment,
       null callbacks, passed procedures, `class(*)` context objects, general
