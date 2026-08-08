@@ -15,14 +15,18 @@ The bounded active forward case is also supported when a local
 exactly once with `allocate(owner, source=child)`, where `child` is a concrete,
 declared `type(child_t)` object. The existing allocation IR carries the source
 expression, and activity lowering emits the paired
-`allocate(owner_d, source=child_d)` before the copied `select type` path. The
-`allocate(owner_d, source=child_d)` before the copied `select type` path. The
-bounded reverse case narrows this to scalar `class(base_t)` ownership:
-lowering materializes a concrete source-typed owner shadow, transposes the one
-value-copy component into the concrete source shadow, and then performs the
-matching cleanup. The independent oracle covers both forward declared
-polymorphic forms, plus the reverse hand values, central finite differences, and
-JVP/VJP adjoint identity for `class(base_t)`.
+`allocate(owner_d, source=child_d)` before the copied `select type` path.
+
+The new reverse slice is one level more specific: a scalar polymorphic
+allocatable component such as `box%field%payload` may be acquired once from
+that same concrete `child`, selected in exactly one concrete `TYPE IS` arm, and
+finally deallocated. FortAD creates the matching concrete shadow component
+`box_b%field%payload`, initializes its real payload under `SELECT TYPE`,
+accumulates the selected receiver cotangent there, transfers it back to
+`child_b`, and destroys both descriptors after the reverse sweep. The
+independent oracle covers the hand derivative, central finite differences,
+VJP values, and the JVP/VJP adjoint identity; `x_b` remains caller-owned
+derivative storage.
 
 An active component of a polymorphic allocatable outside that fixed-source
 shape remains a named forward and reverse refusal. FortFront's `query_storage` facts (`is_polymorphic`,
@@ -42,12 +46,13 @@ unallocated, select a different child, or fail to expose the active component
 inside the guard. The refusal therefore protects both derivative correctness
 and allocation safety.
 
-The bounded reverse slice deliberately refuses factories and polymorphic
-sources, repeated or path-dependent acquisition, aliases, `move_alloc`, whole
-object assignment, finalization replay, and `class(*)` sources. It also does not
-weaken the existing refusals for global mutable state, pointer/target aliases,
-implicit reallocation, or allocatable components. Negative cases verify that
-these boundaries return no derivative output.
+The bounded reverse slice deliberately refuses component array elements and
+sections, factories and polymorphic sources, `MOLD=`, repeated or
+path-dependent acquisition, aliases, `move_alloc`, whole-object assignment,
+finalization replay, and unresolved or multi-arm dispatch. It also does not
+weaken the existing refusals for descriptor changes, reallocation, global
+mutable state, pointer/target aliases, or unsupported allocatable components.
+Negative cases verify that these boundaries return no derivative output.
 
 The next implementation boundary is a paired dynamic-type/ownership record:
 it must carry type identity through polymorphic factories, repeated

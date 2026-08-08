@@ -85,7 +85,8 @@ contains
         call independent_component_paths(spec%independents, active_paths)
         call refuse_active_polymorphic_dispatch(primal, active_paths, status)
         if (.not. status%ok) return
-        call refuse_active_nested_polymorphic_component(primal, active_paths, status)
+        call refuse_active_nested_polymorphic_component(primal, active_paths, active, &
+            status)
         if (.not. status%ok) return
         call refuse_active_polymorphic_ownership(primal, active, status)
         if (.not. status%ok) return
@@ -341,17 +342,19 @@ contains
         end do
     end subroutine refuse_active_polymorphic_dispatch
 
-    subroutine refuse_active_nested_polymorphic_component(primal, active_paths, status)
+    subroutine refuse_active_nested_polymorphic_component(primal, active_paths, &
+            active, status)
         !! A borrowed polymorphic component can be paired with its tangent
         !! only when its owner and dynamic path are fixed.  The tangent carries
         !! a caller-owned shadow of the concrete holder; it never owns or
         !! replays the component descriptor.
         type(fad_proc_t), intent(in) :: primal
         character(len=*), intent(in) :: active_paths(:)
+        logical, intent(in) :: active(:)
         type(forward_status_t), intent(inout) :: status
         character(len=:), allocatable :: selector, path
         integer :: i, j, k, depth, concrete, base_di
-        logical :: active_component, found
+        logical :: active_component, found, fixed_ownership
 
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
@@ -416,6 +419,19 @@ contains
                         "runtime path; unresolved dispatch is unsupported"
                     return
                 end if
+                fixed_ownership = .false.
+                do k = 1, primal%n_stmts
+                    if (primal%stmts(k)%kind /= FAD_ALLOCATE) cycle
+                    if (.not. allocated(primal%stmts(k)%allocation_args)) cycle
+                    if (size(primal%stmts(k)%allocation_args) < 1) cycle
+                    if (trim(emit_expr(primal, primal%stmts(k)%allocation_args(1))) /= &
+                        trim(selector)) cycle
+                    if (has_fixed_source_component(primal, k, active)) then
+                        fixed_ownership = .true.
+                        exit
+                    end if
+                end do
+                if (fixed_ownership) exit
                 do k = 1, primal%n_stmts
                     if (primal%stmts(k)%kind /= FAD_ALLOCATE .and. &
                         primal%stmts(k)%kind /= FAD_DEALLOCATE .and. &
@@ -504,6 +520,7 @@ contains
         if (source_di <= 0) return
         if (.not. expr_reads_active(primal, &
             primal%stmts(stmt_index)%allocation_source, active)) return
+        if (.not. source_activity_supported(primal, source_di)) return
         do i = 1, primal%n_stmts
             if (i == stmt_index) cycle
             if (primal%stmts(i)%kind /= FAD_ALLOCATE) cycle
@@ -513,6 +530,48 @@ contains
         end do
         supported = .true.
     end function has_fixed_source_component
+
+    logical function source_activity_supported(primal, source_di) result(ok)
+        !! Keep ownership support from masking an unrelated unsupported
+        !! active initializer such as ``seed = child_t(...)``.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: source_di
+        integer :: i
+
+        ok = .true.
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (primal%decl_index(fad_base_name(primal%stmts(i)%target)) /= &
+                source_di) cycle
+            if (.not. expression_calls_supported(primal, &
+                primal%stmts(i)%value)) then
+                ok = .false.
+                return
+            end if
+        end do
+    end function source_activity_supported
+
+    recursive logical function expression_calls_supported(primal, idx) result(ok)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        integer :: i
+
+        ok = .true.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind == FAD_CALL) then
+            if (.not. has_rule(primal%exprs(idx)%text)) then
+                ok = .false.
+                return
+            end if
+        end if
+        do i = 1, size(primal%exprs(idx)%args)
+            if (.not. expression_calls_supported(primal, &
+                primal%exprs(idx)%args(i))) then
+                ok = .false.
+                return
+            end if
+        end do
+    end function expression_calls_supported
 
     logical function has_fixed_source_owner(primal, owner_di, active) result(supported)
         !! The bounded active case is an allocatable polymorphic local whose
