@@ -26,6 +26,7 @@ program fortad_cli
     character(len=:), allocatable :: module_name
     character(len=:), allocatable :: inference_message, candidate_names
     character(len=:), allocatable :: explicit_indep
+    character(len=:), allocatable :: output_root_hint
     character(len=32), allocatable :: independents(:)
     type(fad_result_t) :: res
     logical :: roundtrip_only, with_primal, verbose, all_products
@@ -78,10 +79,13 @@ program fortad_cli
     if (.not. roundtrip_only .and. (len_trim(indep_list) == 0 .or. &
         source_first_inference)) then
         explicit_indep = indep_list
+        output_root_hint = output_stem
+        if (len_trim(output_root_hint) == 0) output_root_hint = output_path
         call infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
             output_path, module_name, indep_list, inference_message, verbose, stat, &
             legacy_compat=(tapenade_compat .or. mode == "reverse"), &
-            root_hint=output_stem, root_selection=tapenade_compat)
+            root_hint=output_root_hint, &
+            root_selection=(tapenade_compat .or. len_trim(output_path) > 0))
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
             stop 2, quiet=.true.
@@ -950,6 +954,42 @@ contains
         if (len_trim(indep_list) == 0) stat = 1
     end subroutine parse_head_spec
 
+    function procedure_hint_from_path(path, mode) result(candidate)
+        !! Extract a procedure hint from an explicit derivative output path.
+        !!
+        !! `--output selected_vjp.f90` is a useful zero-configuration spelling
+        !! for a multi-procedure source.  Only the basename is considered, and
+        !! callers still fall back to the first procedure when it is not found.
+        character(len=*), intent(in) :: path, mode
+        character(len=:), allocatable :: candidate, stem, suffix
+        integer :: separator, dot, first
+
+        candidate = ""
+        separator = max(scan(path, "/", back=.true.), &
+            scan(path, achar(92), back=.true.))
+        dot = scan(path, ".", back=.true.)
+        if (dot <= separator) dot = len_trim(path) + 1
+        if (dot <= separator + 1) return
+        stem = trim(path(separator + 1:dot - 1))
+        select case (trim(mode))
+        case ("forward")
+            suffix = "_jvp"
+        case ("reverse")
+            suffix = "_vjp"
+        case ("hessian")
+            suffix = "_hvp"
+        case ("parser")
+            suffix = "_p"
+        case default
+            suffix = ""
+        end select
+        if (len_trim(suffix) > 0 .and. len_trim(stem) > len_trim(suffix)) then
+            first = len_trim(stem) - len_trim(suffix) + 1
+            if (same_cli_name(stem(first:), suffix)) stem = trim(stem(:first - 1))
+        end if
+        candidate = trim(stem)
+    end function procedure_hint_from_path
+
     subroutine infer_cli_defaults(source, input_path, mode, from_name, proc_name, &
             output_path, module_name, indep_list, message, verbose, stat, legacy_compat, &
             root_hint, root_selection)
@@ -972,7 +1012,6 @@ contains
         type(fad_proc_t) :: primal
         type(lower_status_t) :: lower_status
         character(len=:), allocatable :: product, generated_name, candidate
-        integer :: separator, dot
         logical :: use_legacy_compat
 
         stat = 0
@@ -983,12 +1022,8 @@ contains
         if (len_trim(from_name) == 0 .and. present(root_hint)) then
             if (present(root_selection)) then
                 if (root_selection .and. len_trim(root_hint) > 0) then
-                    separator = max(scan(root_hint, "/", back=.true.), &
-                        scan(root_hint, achar(92), back=.true.))
-                    dot = scan(root_hint, ".", back=.true.)
-                    if (dot <= separator) dot = len_trim(root_hint) + 1
-                    if (dot > separator + 1) then
-                        candidate = trim(root_hint(separator + 1:dot - 1))
+                    candidate = procedure_hint_from_path(root_hint, mode)
+                    if (len_trim(candidate) > 0) then
                         call lower_source(source, primal, lower_status, candidate)
                         if (lower_status%ok) from_name = candidate
                     end if

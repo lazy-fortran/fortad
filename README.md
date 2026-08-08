@@ -186,6 +186,15 @@ written as `fortad kernel.f90 --mode reverse`. The explicit `jvp`, `vjp`, and
 `hvp` forms remain strict compact spellings: their product name already fixes
 the mode.
 
+In a multi-procedure source, an explicit derivative output name can select the
+procedure without a separate `--proc` flag. For example,
+`fortad vjp source.f90 --output selected_vjp.f90` tries `selected` as the
+procedure name, infers its inputs and output, and falls back to the first
+procedure if that basename is not present. An explicit `--proc` always wins;
+the output filename is only a conservative hint, never a guessed procedure.
+This inference applies when the independent-name list is omitted; supplying
+names explicitly keeps the existing selected-procedure behavior.
+
 Reverse-mode inference also handles a legacy subroutine with no `INTENT`
 annotations when it has one unambiguous output: `fortad vjp legacy.f90`
 infers the written dummy as the dependent and excludes it from the
@@ -202,8 +211,8 @@ accepted too. The procedure name is equivalent to `--proc`; the names inside
 the parentheses are equivalent to `--indep`, while omitted names still use
 FortAD's inference.
 
-The common Tapenade command shapes are also accepted directly.  `-O` must name
-an existing output directory; `-o` is the Tapenade output stem, so FortAD adds
+The common Tapenade command shapes are also accepted directly. `-O` names
+the output directory; `-o` is the Tapenade output stem, so FortAD adds
 `_p`, `_d`, or `_b` and `.f90`.
 
 | Tapenade command | FortAD command |
