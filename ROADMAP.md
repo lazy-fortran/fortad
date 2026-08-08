@@ -992,6 +992,16 @@ of selected child ends the fixed-path derivative contract.
         checks owning allocatables and negative ordinary/pointer components.
         FortAD consumes the explicit transfer facts for the bounded P7.2c
         reverse lifetime slice. General lifetime replay remains open.
+      - [x] **P7.2d whole-assignment automatic reallocation.** FortAD accepts
+        one concrete scalar or rank-one local/dummy allocatable owner assigned
+        as a whole, preserving compiler automatic reallocation in the primal,
+        JVP, and bounded VJP. The independent
+        [`test_auto_realloc_assignment_oracle.f90`](test/test_auto_realloc_assignment_oracle.f90)
+        checks compiler execution, hand derivatives, central differences, and
+        the scalar adjoint identity. Repeated or path-dependent assignments,
+        mixed explicit lifetimes, rank greater than one, components,
+        polymorphic ownership, aliases, and global state remain named
+        refusals.
       - [x] **P7.2c bounded reverse `move_alloc` lifetime.** FortAD `aa9453b`
         differentiates one straight-line concrete local or dummy allocatable
         owner with exactly one `ALLOCATE`, one `MOVE_ALLOC` to a distinct
