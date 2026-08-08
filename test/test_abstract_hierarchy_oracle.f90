@@ -2,8 +2,8 @@ program test_abstract_hierarchy_oracle
     !! Independent oracle for a bounded abstract/deferred hierarchy slice.
     !! A statically declared concrete child may override a deferred binding
     !! through one intermediate level.  The derivative follows that fixed
-    !! override path.  Runtime CLASS dispatch and direct deferred calls
-    !! remain named refusals.
+    !! override path.  Direct CLASS dispatch is covered by the separate
+    !! two-child runtime oracle; an unresolved deferred call remains refused.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -79,8 +79,7 @@ program test_abstract_hierarchy_oracle
     call require_ok(leaf_jvp, "leaf JVP")
     call require_ok(leaf_vjp, "leaf VJP")
 
-    call expect_refusal(runtime_source(), "runtime CLASS dispatch", &
-        "concrete type")
+    call expect_supported(runtime_source(), "runtime CLASS dispatch")
     call expect_refusal(deferred_source(), "deferred binding", "deferred")
 
     dir = "build/oracle/abstract_hierarchy"
@@ -212,6 +211,22 @@ contains
             error stop 1
         end if
     end subroutine expect_refusal
+
+    subroutine expect_supported(case_source, label)
+        character(len=*), intent(in) :: case_source, label
+        type(fad_result_t) :: result
+
+        result = fad_jvp(case_source, indep, from="top")
+        if (.not. result%ok) then
+            print *, "FAIL ", label, ": unexpected JVP refusal: ", result%message
+            error stop 1
+        end if
+        result = fad_vjp(case_source, indep, dependent="y", from="top")
+        if (.not. result%ok) then
+            print *, "FAIL ", label, ": unexpected VJP refusal: ", result%message
+            error stop 1
+        end if
+    end subroutine expect_supported
 
     function runtime_source() result(text)
         character(len=:), allocatable :: text

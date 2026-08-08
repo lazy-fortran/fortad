@@ -274,7 +274,7 @@ contains
                     size(n%arg_indices), .true., s%target, status)
                 if (.not. status%ok) return
             end if
-            ignored = proc%add_stmt(s)
+            if (s%kind > 0) ignored = proc%add_stmt(s)
 
             type is (pointer_assignment_node)
             callback_target = query_procedure_target(arena, idx)
@@ -1111,7 +1111,7 @@ contains
             if (n%base_expr_index > 0) then
                 if (is_component_base(arena, n%base_expr_index)) then
                     if (is_type_bound_reference(arena, n%base_expr_index, proc)) then
-                        out = lower_type_bound_call(arena, n, proc, status)
+                        out = lower_type_bound_call(arena, idx, n, proc, status)
                         if (.not. status%ok) return
                     else if (size(n%arg_indices) == 0) then
                         e%kind = FAD_VAR
@@ -1128,7 +1128,7 @@ contains
                         out = proc%add_expr(e)
                     end if
                 else
-                    out = lower_type_bound_call(arena, n, proc, status)
+                    out = lower_type_bound_call(arena, idx, n, proc, status)
                     if (.not. status%ok) return
                 end if
             else if (is_array_name(proc, n%name)) then
@@ -1703,7 +1703,7 @@ contains
             "tracked"
     end subroutine refuse_vector_subscript
 
-    recursive integer function lower_type_bound_call(arena, node, proc, status) &
+    recursive integer function lower_type_bound_call(arena, call_index, node, proc, status) &
             result(out)
         !! Lower one concrete same-file type-bound function call.
         !!
@@ -1711,9 +1711,11 @@ contains
         !! statically declared `type(t)` object, the binding uses PASS or
         !! NOPASS, and the implementation is a local function. A local
         !! override on an abstract/deferred parent and a statically resolved
-        !! inherited binding are also accepted. Runtime dispatch, generic,
-        !! deferred, and ambiguous bindings remain explicit refusals.
+        !! inherited binding are also accepted. A simple polymorphic receiver
+        !! is expanded from FortFront's concrete dispatch-target facts; generic,
+        !! unknown, empty, and incompatible target sets remain refusals.
         type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: call_index
         type(call_or_subscript_node), intent(in) :: node
         type(fad_proc_t), intent(inout) :: proc
         type(lower_status_t), intent(inout) :: status
@@ -1731,6 +1733,7 @@ contains
         integer :: type_matches, function_matches
         logical :: found_type, found_function
         logical :: named_pass
+        type(type_bound_call_query_t) :: dispatch
 
         out = 0
         access = query_component_access(arena, node%base_expr_index)
@@ -1772,6 +1775,12 @@ contains
         if (.not. allocated(object_type)) then
             call refuse_type_bound(status, node%name, &
                 "the receiver has no statically declared type")
+            return
+        end if
+        if (is_polymorphic_type(object_type)) then
+            dispatch = query_type_bound_call(arena, call_index)
+            call lower_polymorphic_function_dispatch(arena, node, proc, dispatch, &
+                status, out)
             return
         end if
         type_name = canonical_type_name(object_type)
@@ -1907,6 +1916,416 @@ contains
         out = proc%add_expr(expr_call(impl, args, arg_names))
     end function lower_type_bound_call
 
+    subroutine lower_polymorphic_function_dispatch(arena, node, proc, query, &
+            status, result_expr)
+        !! Materialize a direct CLASS receiver function call as a structural
+        !! SELECT TYPE.  The selector is passive; each concrete same-file
+        !! target remains visible to inlining and to both derivative modes.
+        type(ast_arena_t), intent(in) :: arena
+        type(call_or_subscript_node), intent(in) :: node
+        type(fad_proc_t), intent(inout) :: proc
+        type(type_bound_call_query_t), intent(in) :: query
+        type(lower_status_t), intent(inout) :: status
+        integer, intent(out) :: result_expr
+        type(derived_type_query_t) :: dtype
+        type(binding_hierarchy_query_t) :: target_binding
+        type(program_unit_query_t) :: unit
+        type(fad_stmt_t) :: s
+        type(fad_decl_t) :: d
+        integer, allocatable :: args(:)
+        character(len=64), allocatable :: arg_names(:)
+        character(len=:), allocatable :: receiver, method, implementation
+        character(len=:), allocatable :: result_type, temp
+        integer :: i, ignored
+        logical :: found_function
+
+        result_expr = 0
+        call validate_dispatch_query(query, status)
+        if (.not. status%ok) return
+        receiver = trim(query%receiver_name)
+        method = trim(query%binding_name)
+        if (len_trim(receiver) == 0) then
+            call refuse_type_bound(status, method, "the dispatch receiver is unresolved")
+            return
+        end if
+
+        result_type = ""
+        do i = 1, size(query%dispatch_target_type_indices)
+            dtype = query_derived_type(arena, query%dispatch_target_type_indices(i))
+            if (.not. dtype%found) then
+                call refuse_type_bound(status, method, "dispatch target type is unknown")
+                return
+            end if
+            if (.not. allocated(dtype%name)) then
+                call refuse_type_bound(status, method, "dispatch target type is unknown")
+                return
+            end if
+            if (len_trim(dtype%name) == 0) then
+                call refuse_type_bound(status, method, "dispatch target type is unknown")
+                return
+            end if
+            target_binding = query_type_binding_hierarchy(arena, dtype%node_index, method)
+            call validate_dispatch_target(arena, query, target_binding, &
+                query%dispatch_target_implementations(i), method, unit, &
+                found_function, status)
+            if (.not. status%ok) return
+            if (.not. found_function) then
+                call refuse_type_bound(status, method, &
+                    "the dispatch target is not a same-file function")
+                return
+            end if
+            if (i == 1) then
+                result_type = procedure_result_type(arena, unit)
+                if (len_trim(result_type) == 0) result_type = "real(8)"
+            end if
+        end do
+
+        temp = fresh_dispatch_name(proc)
+        d%name = temp
+        d%type_name = result_type
+        ignored = proc%add_decl(d)
+
+        s%kind = FAD_SELECT_TYPE
+        s%value = proc%add_expr(expr_var(receiver))
+        s%target = receiver
+        ignored = proc%add_stmt(s)
+        do i = 1, size(query%dispatch_target_type_indices)
+            dtype = query_derived_type(arena, query%dispatch_target_type_indices(i))
+            target_binding = query_type_binding_hierarchy(arena, dtype%node_index, method)
+            implementation = trim(query%dispatch_target_implementations(i))
+            call find_function_unit(arena, implementation, unit, found_function)
+            if (.not. found_function) then
+                call refuse_type_bound(status, method, &
+                    "the dispatch target is not a same-file function")
+                return
+            end if
+            call lower_dispatch_pass_arguments(arena, node%arg_indices, method, &
+                proc, unit, target_binding, receiver, args, arg_names, status)
+            if (.not. status%ok) return
+            s%kind = FAD_TYPE_IS
+            s%value = 0
+            s%target = dtype%name
+            ignored = proc%add_stmt(s)
+            s%kind = FAD_ASSIGN
+            s%target = temp
+            s%value = proc%add_expr(expr_call(implementation, args, arg_names))
+            ignored = proc%add_stmt(s)
+        end do
+        s%kind = FAD_CLASS_DEFAULT
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_ASSIGN
+        s%target = temp
+        s%value = proc%add_expr(expr_const("0.0d0"))
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_END_SELECT
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        ignored = proc%add_stmt(s)
+        result_expr = proc%add_expr(expr_var(temp))
+    end subroutine lower_polymorphic_function_dispatch
+
+    subroutine lower_dispatch_pass_arguments(arena, actual_indices, method, proc, &
+            unit, binding, receiver, args, names, status)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: actual_indices(:)
+        character(len=*), intent(in) :: method, receiver
+        type(fad_proc_t), intent(inout) :: proc
+        type(program_unit_query_t), intent(in) :: unit
+        type(binding_hierarchy_query_t), intent(in) :: binding
+        integer, allocatable, intent(out) :: args(:)
+        character(len=64), allocatable, intent(out) :: names(:)
+        type(lower_status_t), intent(inout) :: status
+        logical :: named_pass
+        integer :: i
+
+        named_pass = binding%pass_arg .and. allocated(binding%pass_name)
+        if (named_pass) named_pass = len_trim(binding%pass_name) > 0
+        if (named_pass) then
+            call lower_named_pass_arguments(arena, actual_indices, method, proc, &
+                unit, binding%pass_name, proc%add_expr(expr_var(receiver)), &
+                args, names, status)
+            return
+        end if
+        if (binding%pass_arg) then
+            allocate (args(size(actual_indices) + 1), names(size(actual_indices) + 1))
+            args(1) = proc%add_expr(expr_var(receiver))
+            names(1) = ""
+            do i = 1, size(actual_indices)
+                args(i + 1) = lower_actual(arena, actual_indices(i), proc, &
+                    names(i + 1), status)
+                if (.not. status%ok) return
+            end do
+        else
+            call lower_dispatch_actuals(arena, actual_indices, proc, args, names, status)
+        end if
+    end subroutine lower_dispatch_pass_arguments
+
+    subroutine lower_polymorphic_subroutine_dispatch(arena, actual_indices, &
+            proc, query, status)
+        !! Materialize a direct CLASS receiver subroutine call as a structural
+        !! SELECT TYPE.  The caller's normal statement list then contains one
+        !! concrete same-file call per arm, ready for ordinary inlining.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: actual_indices(:)
+        type(fad_proc_t), intent(inout) :: proc
+        type(type_bound_call_query_t), intent(in) :: query
+        type(lower_status_t), intent(inout) :: status
+        type(derived_type_query_t) :: dtype
+        type(binding_hierarchy_query_t) :: target_binding
+        type(program_unit_query_t) :: unit
+        type(fad_stmt_t) :: s
+        integer, allocatable :: args(:)
+        character(len=64), allocatable :: arg_names(:)
+        character(len=:), allocatable :: receiver, method, implementation
+        integer :: i, ignored
+        logical :: found_subroutine
+
+        call validate_dispatch_query(query, status)
+        if (.not. status%ok) return
+        receiver = trim(query%receiver_name)
+        method = trim(query%binding_name)
+        s%kind = FAD_SELECT_TYPE
+        s%value = proc%add_expr(expr_var(receiver))
+        s%target = receiver
+        ignored = proc%add_stmt(s)
+        do i = 1, size(query%dispatch_target_type_indices)
+            dtype = query_derived_type(arena, query%dispatch_target_type_indices(i))
+            target_binding = query_type_binding_hierarchy(arena, dtype%node_index, method)
+            implementation = trim(query%dispatch_target_implementations(i))
+            call validate_dispatch_subroutine_target(arena, query, target_binding, &
+                implementation, method, unit, found_subroutine, status)
+            if (.not. status%ok) return
+            if (.not. found_subroutine) then
+                call refuse_type_bound(status, method, &
+                    "the dispatch target is not a same-file subroutine")
+                return
+            end if
+            call lower_dispatch_pass_arguments(arena, actual_indices, method, proc, &
+                unit, target_binding, receiver, args, arg_names, status)
+            if (.not. status%ok) return
+            s%kind = FAD_TYPE_IS
+            s%value = 0
+            s%target = dtype%name
+            ignored = proc%add_stmt(s)
+            s%kind = FAD_CALL_STMT
+            s%target = implementation
+            s%call_args = args
+            s%call_arg_names = arg_names
+            ignored = proc%add_stmt(s)
+        end do
+        s%kind = FAD_CLASS_DEFAULT
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        if (allocated(s%call_args)) deallocate (s%call_args)
+        if (allocated(s%call_arg_names)) deallocate (s%call_arg_names)
+        ignored = proc%add_stmt(s)
+        s%kind = FAD_END_SELECT
+        s%value = 0
+        if (allocated(s%target)) deallocate (s%target)
+        if (allocated(s%call_args)) deallocate (s%call_args)
+        if (allocated(s%call_arg_names)) deallocate (s%call_arg_names)
+        ignored = proc%add_stmt(s)
+    end subroutine lower_polymorphic_subroutine_dispatch
+
+    subroutine lower_dispatch_actuals(arena, actual_indices, proc, args, names, status)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: actual_indices(:)
+        type(fad_proc_t), intent(inout) :: proc
+        integer, allocatable, intent(out) :: args(:)
+        character(len=64), allocatable, intent(out) :: names(:)
+        type(lower_status_t), intent(inout) :: status
+        integer :: i
+
+        allocate (args(size(actual_indices)), names(size(actual_indices)))
+        names = ""
+        do i = 1, size(actual_indices)
+            args(i) = lower_actual(arena, actual_indices(i), proc, names(i), status)
+            if (.not. status%ok) return
+        end do
+    end subroutine lower_dispatch_actuals
+
+    subroutine validate_dispatch_query(query, status)
+        type(type_bound_call_query_t), intent(in) :: query
+        type(lower_status_t), intent(inout) :: status
+        character(len=:), allocatable :: method
+
+        method = trim(query%binding_name)
+        if (.not. query%found) then
+            call refuse_type_bound(status, method, &
+                "dispatch target set is unknown; concrete type is not defined in this source")
+            return
+        end if
+        if (query%is_generic .or. query%is_ambiguous) then
+            call refuse_type_bound(status, method, &
+                "generic or ambiguous dispatch targets are unsupported")
+            return
+        end if
+        if (query%is_unresolved) then
+            call refuse_type_bound(status, method, &
+                "dispatch target set is unknown; concrete type is not defined in this source")
+            return
+        end if
+        if (size(query%dispatch_target_type_indices) == 0) then
+            if (query%is_deferred) then
+                call refuse_type_bound(status, method, &
+                    "deferred binding has an empty dispatch target set")
+            else
+                call refuse_type_bound(status, method, &
+                    "dispatch target set is empty")
+            end if
+            return
+        end if
+        if (size(query%dispatch_target_type_indices) /= &
+            size(query%dispatch_target_implementations)) then
+            call refuse_type_bound(status, method, "dispatch target set is unknown")
+        end if
+    end subroutine validate_dispatch_query
+
+    subroutine validate_dispatch_target(arena, query, binding, implementation, &
+            method, unit, found_function, status)
+        type(ast_arena_t), intent(in) :: arena
+        type(type_bound_call_query_t), intent(in) :: query
+        type(binding_hierarchy_query_t), intent(in) :: binding
+        character(len=*), intent(in) :: implementation, method
+        type(program_unit_query_t), intent(out) :: unit
+        logical, intent(out) :: found_function
+        type(lower_status_t), intent(inout) :: status
+
+        found_function = .false.
+        if (.not. binding%found) then
+            call refuse_type_bound(status, method, "dispatch target binding is unknown")
+            return
+        end if
+        if (binding%is_generic .or. binding%is_ambiguous) then
+            call refuse_type_bound(status, method, &
+                "generic or ambiguous dispatch target is unsupported")
+            return
+        end if
+        if (binding%is_deferred) then
+            call refuse_type_bound(status, method, &
+                "deferred dispatch target is unsupported")
+            return
+        end if
+        if (binding%pass_arg .neqv. query%pass_arg) then
+            call refuse_type_bound(status, method, &
+                "unsupported PASS dummy compatibility across dispatch targets")
+            return
+        end if
+        call find_function_unit(arena, trim(implementation), unit, found_function)
+    end subroutine validate_dispatch_target
+
+    subroutine validate_dispatch_subroutine_target(arena, query, binding, &
+            implementation, method, unit, found_subroutine, status)
+        type(ast_arena_t), intent(in) :: arena
+        type(type_bound_call_query_t), intent(in) :: query
+        type(binding_hierarchy_query_t), intent(in) :: binding
+        character(len=*), intent(in) :: implementation, method
+        type(program_unit_query_t), intent(out) :: unit
+        logical, intent(out) :: found_subroutine
+        type(lower_status_t), intent(inout) :: status
+
+        found_subroutine = .false.
+        if (.not. binding%found) then
+            call refuse_type_bound(status, method, "dispatch target binding is unknown")
+            return
+        end if
+        if (binding%is_generic .or. binding%is_ambiguous) then
+            call refuse_type_bound(status, method, &
+                "generic or ambiguous dispatch target is unsupported")
+            return
+        end if
+        if (binding%is_deferred) then
+            call refuse_type_bound(status, method, &
+                "deferred dispatch target is unsupported")
+            return
+        end if
+        if (binding%pass_arg .neqv. query%pass_arg) then
+            call refuse_type_bound(status, method, &
+                "unsupported PASS dummy compatibility across dispatch targets")
+            return
+        end if
+        call find_subroutine_unit(arena, trim(implementation), unit, found_subroutine)
+    end subroutine validate_dispatch_subroutine_target
+
+    subroutine find_function_unit(arena, name, unit, found)
+        type(ast_arena_t), intent(in) :: arena
+        character(len=*), intent(in) :: name
+        type(program_unit_query_t), intent(out) :: unit
+        logical, intent(out) :: found
+        type(program_unit_query_t) :: candidate
+        integer :: i, matches
+
+        found = .false.
+        matches = 0
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) /= "function_def") cycle
+            candidate = query_program_unit(arena, i)
+            if (.not. candidate%found) cycle
+            if (.not. same_name(candidate%name, name)) cycle
+            matches = matches + 1
+            if (matches == 1) unit = candidate
+        end do
+        found = matches == 1
+    end subroutine find_function_unit
+
+    function procedure_result_type(arena, unit) result(type_name)
+        type(ast_arena_t), intent(in) :: arena
+        type(program_unit_query_t), intent(in) :: unit
+        type(declaration_query_t) :: declaration
+        character(len=:), allocatable :: type_name
+        integer :: i
+
+        type_name = ""
+        if (allocated(unit%return_type)) type_name = trim(unit%return_type)
+        if (.not. allocated(unit%declaration_indices)) return
+        do i = 1, size(unit%declaration_indices)
+            declaration = query_declaration(arena, unit%declaration_indices(i))
+            if (.not. declaration%found) cycle
+            if (.not. allocated(unit%result_name)) cycle
+            if (.not. allocated(declaration%name)) cycle
+            if (.not. same_name(declaration%name, unit%result_name)) cycle
+            if (allocated(declaration%type_name)) type_name = declaration%type_name
+            return
+        end do
+    end function procedure_result_type
+
+    subroutine find_subroutine_unit(arena, name, unit, found)
+        type(ast_arena_t), intent(in) :: arena
+        character(len=*), intent(in) :: name
+        type(program_unit_query_t), intent(out) :: unit
+        logical, intent(out) :: found
+        type(program_unit_query_t) :: candidate
+        integer :: i, matches
+
+        found = .false.
+        matches = 0
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) /= "subroutine_def") cycle
+            candidate = query_program_unit(arena, i)
+            if (.not. candidate%found) cycle
+            if (.not. same_name(candidate%name, name)) cycle
+            matches = matches + 1
+            if (matches == 1) unit = candidate
+        end do
+        found = matches == 1
+    end subroutine find_subroutine_unit
+
+    function fresh_dispatch_name(proc) result(name)
+        type(fad_proc_t), intent(in) :: proc
+        character(len=:), allocatable :: name
+        integer :: i
+
+        do i = 1, 10000
+            name = "fad_dispatch_result_"//itoa(i)
+            if (proc%decl_index(name) == 0) return
+        end do
+        name = "fad_dispatch_result"
+    end function fresh_dispatch_name
+
     subroutine lower_type_bound_subroutine(arena, idx, proc, s, status)
         !! Lower one concrete same-file type-bound subroutine call.  Explicit
         !! CALL nodes carry the receiver and binding as one designator name;
@@ -1928,6 +2347,7 @@ contains
         integer :: receiver, receiver_decl, i, matches, separator
         integer :: type_matches
         logical :: named_pass, found_subroutine
+        type(type_bound_call_query_t) :: dispatch
 
         select type (node => arena%entries(idx)%node)
             type is (subroutine_call_node)
@@ -1972,8 +2392,10 @@ contains
         end if
         object_type = proc%decls(receiver_decl)%type_name
         if (is_polymorphic_type(object_type)) then
-            call refuse_type_bound(status, method, &
-                "the receiver must be a concrete type(t) object")
+            dispatch = query_type_bound_call(arena, idx)
+            call lower_polymorphic_subroutine_dispatch(arena, actual_indices, &
+                proc, dispatch, status)
+            if (status%ok) s%kind = 0
             return
         end if
         type_name = canonical_type_name(object_type)
