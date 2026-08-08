@@ -277,18 +277,26 @@ the current integration gate is still open:
 
 The 2026-08-08 integration wave is recorded at these repository heads:
 
-- FortFront `2a493998`, including abstract/deferred hierarchy, concrete-only
+- FortFront `55c0c5b6`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
   one branch-merged callback target set query, and loop-sensitive callback
-  refusal facts.
+  refusal facts. It also accepts legal keyword-named subroutines and preserves
+  component ranks for modern derived-type sources.
 - FFC `f0ed424`, including rank-three and rank-four intrinsic
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
   oracles.
-- FortAD `ba50964`, including active concrete rank-four allocatable-component
+- FortAD includes the automatic derived-component CLI inference slice: when
+  `--indep` is omitted it selects only read concrete `REAL` component paths
+  from derived dummies, including array-element paths, and never widens a
+  whole derived object implicitly. The independent gfortran CLI oracle passes.
+  The exact legacy v290 spelling that uses old-style type declarations and
+  compound component declarations remains a FortFront metadata boundary; it
+  is not counted as modern runnable support.
+  FortAD `ba50964`, including active concrete rank-four allocatable-component
   JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded polymorphic reverse
   ownership replay, one-arm rank-one assumed-rank JVP/VJP, and branch-merged
   callback-flow JVP/VJP lowering with an independent oracle, plus fixed-shape
@@ -297,7 +305,7 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   statement arenas and lowers ordinary call arguments directly into the IR
   record. The GNU gate is green at 409 build targets, 408 derivative targets,
   and 66 tests.
-- fortad-bench `0e297af`, including the separate `next8` four-row exact-source
+- fortad-bench `1d30a0f`, including the separate `next8` four-row exact-source
   modern-feature queue shard and refreshed queue, batch, compiler, ledger, and
   provenance artifacts.
 
@@ -1006,7 +1014,10 @@ does not support a general build-time advantage.
       generated symbol, wrapper module, and sibling output file. `--verbose`
       prints those decisions. The compiled CLI oracle runs the generated JVP
       against the hand derivative `d(x*x)/dx = 2*x`. Names-first and flag
-      forms remain stable compatibility interfaces.
+      forms remain stable compatibility interfaces. For modern derived dummies,
+      the default now selects read concrete `REAL` component paths such as
+      `state%inner%q` and `models(2)%scale`; whole-object activity remains an
+      explicit refusal.
 - [x] **P6.4d Paired first-order products.** `fortad all kernel.f90` reuses the
       P6.4c inference policy to emit both checked JVP and VJP sibling modules,
       with an independent compiled square oracle covering both products. The

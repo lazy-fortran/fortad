@@ -188,6 +188,12 @@ an existing output directory; `-o` is the Tapenade output stem, so FortAD adds
 | `fortad -d -root kernel -multi -O out -o kernel source.f` | accepted directly; forward vector directions use `nd` |
 | `-head 'kernel(x)'` | `--head 'kernel(x)'` or `-head 'kernel(x)'` |
 
+When no `--indep` list is supplied, the CLI chooses concrete `REAL` component
+paths actually read from derived-type dummies, such as `state%inner%q` or
+`grid%x`. It never perturbs a whole derived object implicitly; whole-object
+activity remains an explicit refusal because it can change dynamic type and
+storage identity.
+
 For the usual single-procedure file, `fortad source.f90` is shorter still: it
 infers the active dummies, procedure name, wrapper module, and output path.
 Tapenade-style legacy subroutines without `INTENT` are handled by the direct
