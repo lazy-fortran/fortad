@@ -4,13 +4,14 @@ program test_polymorphic_ownership_oracle
     !! SELECT TYPE and differentiates an active scalar. The same path becomes
     !! an explicit refusal when a component of the polymorphic owner is active:
     !! the current IR has no paired dynamic-type tangent selector.
-    use fortad, only: fad_jvp, fad_result_t
+    use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
     character(len=1), parameter :: nl = achar(10)
     character(len=:), allocatable :: source, tangent, driver, dir
     type(fad_result_t) :: generated, generated_star, refused
     type(fad_result_t) :: allocated_generated, allocated_star_generated
+    type(fad_result_t) :: allocated_reverse, reverse_refused, reverse_star_refused
     integer :: stat, unit
 
     source = polymorphic_source("class(base_t)")
@@ -43,6 +44,25 @@ program test_polymorphic_ownership_oracle
             allocated_star_generated%message
         error stop 16
     end if
+    allocated_reverse = fad_vjp(source, [character(len=1) :: "x"], &
+        dependent="y", from="allocate_evaluate", name="allocate_evaluate_vjp")
+    if (.not. allocated_reverse%ok) then
+        print *, "FAIL fixed-source polymorphic ownership VJP: ", &
+            allocated_reverse%message
+        error stop 22
+    end if
+    reverse_refused = fad_vjp(unbounded_ownership_source(), &
+        [character(len=1) :: "x"], dependent="y", from="unbounded")
+    if (reverse_refused%ok .or. allocated(reverse_refused%code)) then
+        print *, "FAIL unbounded polymorphic reverse ownership was accepted"
+        error stop 23
+    end if
+    reverse_star_refused = fad_vjp(polymorphic_source("class(*)"), &
+        [character(len=1) :: "x"], dependent="y", from="allocate_star_evaluate")
+    if (reverse_star_refused%ok .or. allocated(reverse_star_refused%code)) then
+        print *, "FAIL class(*) polymorphic reverse ownership was accepted"
+        error stop 27
+    end if
 
     refused = fad_jvp(source, [character(len=11) :: "model%scale"], &
         from="evaluate")
@@ -68,6 +88,7 @@ program test_polymorphic_ownership_oracle
         generated_star%code// &
         allocated_generated%code// &
         allocated_star_generated%code// &
+        allocated_reverse%code// &
         "end module polymorphic_generated"//nl
     open (newunit=unit, file=dir//"/tangent.f90", status="replace", &
         action="write")
@@ -80,10 +101,11 @@ program test_polymorphic_ownership_oracle
         "allocate_evaluate, allocate_star_evaluate"//nl// &
         "    use polymorphic_generated, only: evaluate_jvp, evaluate_star_jvp, "// &
         "allocate_evaluate_jvp, allocate_star_evaluate_jvp"//nl// &
+        "    use polymorphic_generated, only: allocate_evaluate_vjp"//nl// &
         "    implicit none"//nl// &
         "    class(base_t), allocatable :: model"//nl// &
         "    class(*), allocatable :: universal"//nl// &
-        "    real(8) :: x, x_d, y, y_d, h, fp, fm, fd, scale"//nl// &
+        "    real(8) :: x, x_d, y, y_d, y_b, x_b, h, fp, fm, fd, scale"//nl// &
         "    allocate(child_t :: model)"//nl// &
         "    select type (model)"//nl// &
         "    type is (child_t)"//nl// &
@@ -119,6 +141,15 @@ program test_polymorphic_ownership_oracle
         "    call allocate_star_evaluate_jvp(x, x_d, y, y_d)"//nl// &
         "    if (abs(y - 2.0d0*x*x) > 1.0d-13) error stop 20"//nl// &
         "    if (abs(y_d - 4.0d0*x*x_d) > 1.0d-13) error stop 21"//nl// &
+        "    x = 1.25d0"//nl// &
+        "    y_b = -0.7d0"//nl// &
+        "    call allocate_evaluate_vjp(x, y, y_b, x_b)"//nl// &
+        "    if (abs(x_b - y_b*4.0d0*x) > 1.0d-12) error stop 24"//nl// &
+        "    if (abs(x_b*x_d - y_b*(4.0d0*x*x_d)) > 1.0d-12) error stop 25"//nl// &
+        "    fp = allocate_evaluate(x + h)"//nl// &
+        "    fm = allocate_evaluate(x - h)"//nl// &
+        "    fd = (fp - fm)/(2.0d0*h)"//nl// &
+        "    if (abs(x_b/y_b - fd) > 1.0d-7) error stop 26"//nl// &
         "    print *, 'polymorphic ownership passive JVP oracle pass'"//nl// &
         "end program driver"//nl
     open (newunit=unit, file=dir//"/driver.f90", status="replace", &
@@ -201,6 +232,33 @@ contains
             "    end function allocate_star_evaluate"//nl// &
             "end module polymorphic_ownership_case"//nl
     end function polymorphic_source
+
+    function unbounded_ownership_source() result(text)
+        character(len=:), allocatable :: text
+
+        text = "module unbounded_ownership_case"//nl// &
+            "    type :: base_t"//nl// &
+            "    end type base_t"//nl// &
+            "    type, extends(base_t) :: child_t"//nl// &
+            "        real(8) :: scale"//nl// &
+            "    end type child_t"//nl// &
+            "contains"//nl// &
+            "    function unbounded(model, x) result(y)"//nl// &
+            "        class(base_t), allocatable, intent(in) :: model"//nl// &
+            "        real(8), intent(in) :: x"//nl// &
+            "        real(8) :: y"//nl// &
+            "        class(base_t), allocatable :: holder"//nl// &
+            "        allocate(holder, source=model)"//nl// &
+            "        select type (holder)"//nl// &
+            "        type is (child_t)"//nl// &
+            "            y = holder%scale*x"//nl// &
+            "        class default"//nl// &
+            "            y = x"//nl// &
+            "        end select"//nl// &
+            "        deallocate(holder)"//nl// &
+            "    end function unbounded"//nl// &
+            "end module unbounded_ownership_case"//nl
+    end function unbounded_ownership_source
 
     subroutine require_refusal(result, type_label)
         type(fad_result_t), intent(in) :: result
