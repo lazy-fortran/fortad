@@ -18,7 +18,7 @@ module fortad_inline
     !!
     !! Inlining happens before differentiation, so every later pass sees one
     !! flat procedure and needs no notion of calls at all.
-    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
+    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, fad_copy_stmt, &
         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
         FAD_INDEX, FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_CALL_STMT, &
         FAD_IF, FAD_ELSE, FAD_END_IF, &
@@ -203,7 +203,10 @@ contains
         integer :: i
 
         do i = at, p%n_stmts - 1
-            p%stmts(i) = p%stmts(i + 1)
+            ! Component-wise: nvfortran raises an internal compiler error
+            ! on intrinsic assignment of this type, which blocked the
+            ! entire OpenACC build.
+            call fad_copy_stmt(p%stmts(i), p%stmts(i + 1))
         end do
         p%n_stmts = p%n_stmts - 1
     end subroutine drop_stmt

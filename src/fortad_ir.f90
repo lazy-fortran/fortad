@@ -113,6 +113,8 @@ module fortad_ir
         logical :: allocation_target_unlimited_polymorphic = .false.
     end type fad_stmt_t
 
+    public :: fad_copy_stmt
+
     type, public :: fad_decl_t
         !! A declared entity: dummy argument, result, or local.
         character(len=:), allocatable :: name
@@ -609,5 +611,44 @@ contains
         end if
         same = .true.
     end function fad_expr_equal
+
+    !! Copy one statement onto another, component by component.
+    !!
+    !! Fortran's intrinsic derived-type assignment does exactly this and is
+    !! what the code used. nvfortran 26.5 raises an internal compiler error on
+    !! it -- "Deferred-length character symbol must have descriptor" -- because
+    !! of the `character(len=:), allocatable` components, and that error
+    !! aborted the whole OpenACC build of the stack, so no GPU target could be
+    !! compiled at all.
+    !!
+    !! The workaround is mechanical and carries a cost worth naming: it must be
+    !! kept in step with the type by hand, and a component added above without
+    !! a line here would be silently dropped. `test_fortad_ir_copy` guards
+    !! that by round-tripping a statement with every component set.
+    subroutine fad_copy_stmt(destination, source)
+        type(fad_stmt_t), intent(out) :: destination
+        type(fad_stmt_t), intent(in) :: source
+
+        destination%kind = source%kind
+        destination%value = source%value
+        destination%is_automatic_reallocation = source%is_automatic_reallocation
+        destination%lo = source%lo
+        destination%hi = source%hi
+        destination%step = source%step
+        destination%line = source%line
+        destination%allocation_source = source%allocation_source
+        destination%allocation_mold = source%allocation_mold
+        destination%allocation_target_polymorphic = &
+            source%allocation_target_polymorphic
+        destination%allocation_target_unlimited_polymorphic = &
+            source%allocation_target_unlimited_polymorphic
+        if (allocated(source%target)) destination%target = source%target
+        if (allocated(source%call_args)) &
+            destination%call_args = source%call_args
+        if (allocated(source%call_arg_names)) &
+            destination%call_arg_names = source%call_arg_names
+        if (allocated(source%allocation_args)) &
+            destination%allocation_args = source%allocation_args
+    end subroutine fad_copy_stmt
 
 end module fortad_ir
