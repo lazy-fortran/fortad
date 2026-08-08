@@ -194,6 +194,11 @@ an existing output directory; `-o` is the Tapenade output stem, so FortAD adds
 | `fortad -d -root kernel -multi -O out -o kernel source.f` | accepted directly; forward vector directions use `nd` |
 | `-head 'kernel(x)'` | `--head 'kernel(x)'` or `-head 'kernel(x)'` |
 
+For a multi-procedure legacy file, `-root` can be omitted when `-o STEM`
+matches the desired procedure name: `fortad -b -O out -o kernel source.f` selects
+`kernel` automatically. If the stem does not match a procedure, the first
+procedure remains the default.
+
 When no `--indep` list is supplied, the CLI chooses concrete `REAL` component
 paths actually read from derived-type dummies, such as `state%inner%q` or
 `grid%x`. It never perturbs a whole derived object implicitly; whole-object
