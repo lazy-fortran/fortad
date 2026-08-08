@@ -233,6 +233,8 @@ contains
         if (.not. status%ok) return
         call refuse_active_nested_polymorphic_component(primal, active_paths, status)
         if (.not. status%ok) return
+        call refuse_active_polymorphic_ownership(primal, active, active_paths, status)
+        if (.not. status%ok) return
         call check_reverse_allocation_sources(primal, active, status)
         if (.not. status%ok) return
         if (complex_reverse_path(primal, dependent, active) .and. &
@@ -3609,6 +3611,47 @@ contains
         end do
     end subroutine refuse_active_polymorphic_dispatch
 
+    subroutine refuse_active_polymorphic_ownership(primal, active, active_paths, &
+            status)
+        !! Reverse mode needs the same dynamic-type boundary as forward mode.
+        !! A borrowed fixed-source owner is safe; an active polymorphic
+        !! allocatable without one would require replaying its descriptor.
+        type(fad_proc_t), intent(in) :: primal
+        logical, intent(in) :: active(:)
+        character(len=*), intent(in) :: active_paths(:)
+        type(reverse_status_t), intent(inout) :: status
+        integer :: i, j
+        character(len=:), allocatable :: type_label
+        logical :: owner_active
+
+        do i = 1, primal%n_decls
+            if (primal%decls(i)%is_select_alias) cycle
+            if (.not. primal%decls(i)%is_allocatable) cycle
+            if (.not. primal%decls(i)%is_polymorphic) cycle
+            owner_active = active(i)
+            if (.not. owner_active) then
+                do j = 1, size(active_paths)
+                    if (index(trim(active_paths(j)), "%") <= 0) cycle
+                    if (fad_base_name(active_paths(j)) == &
+                        trim(primal%decls(i)%name)) then
+                        owner_active = .true.
+                        exit
+                    end if
+                end do
+            end if
+            if (.not. owner_active) cycle
+            if (has_fixed_source_owner(primal, i)) cycle
+            type_label = "class(T)"
+            if (primal%decls(i)%is_unlimited_polymorphic) type_label = "class(*)"
+            status%ok = .false.
+            status%message = "reverse mode: active polymorphic allocatable "// &
+                "ownership '"//trim(primal%decls(i)%name)//"' ("// &
+                trim(type_label)//"): current IR cannot replay the primal "// &
+                "dynamic type descriptor without a fixed SOURCE= owner"
+            return
+        end do
+    end subroutine refuse_active_polymorphic_ownership
+
     subroutine refuse_active_nested_polymorphic_component(primal, active_paths, status)
         !! The reverse shadow for a nested polymorphic component is a paired
         !! selector in a caller-owned concrete holder.  Do not infer that
@@ -3934,13 +3977,14 @@ contains
             if (allocated(s%target)) deallocate (s%target)
             if (allocated(rec%arms(a)%target)) s%target = rec%arms(a)%target
             ignored = adjoint%add_stmt(s)
-            if (receiver_cotangent .and. rec%arms(a)%kind == FAD_TYPE_IS) then
+            if (receiver_cotangent .and. (rec%arms(a)%kind == FAD_TYPE_IS .or. &
+                rec%arms(a)%kind == FAD_CLASS_IS)) then
                 selector_expr = adjoint%add_expr(expr_var(cotangent_selector))
                 s%kind = FAD_SELECT_TYPE
                 s%value = selector_expr
                 s%target = cotangent_alias
                 ignored = adjoint%add_stmt(s)
-                s%kind = FAD_TYPE_IS
+                s%kind = rec%arms(a)%kind
                 s%value = 0
                 s%target = rec%arms(a)%target
                 ignored = adjoint%add_stmt(s)
@@ -3952,7 +3996,8 @@ contains
                     active)) cycle
                 seed_expr = adjoint%add_expr( &
                     expr_var(trim(rec%arms(a)%lhs(i))//suffix))
-                if (receiver_cotangent .and. rec%arms(a)%kind == FAD_TYPE_IS) then
+                if (receiver_cotangent .and. (rec%arms(a)%kind == FAD_TYPE_IS .or. &
+                    rec%arms(a)%kind == FAD_CLASS_IS)) then
                     call accumulate(primal, adjoint, rec%arms(a)%rhs(i), &
                         seed_expr, ssa, suffix, active, n_tmp, status, &
                         receiver_alias, cotangent_alias)
@@ -3962,7 +4007,8 @@ contains
                 end if
                 if (.not. status%ok) return
             end do
-            if (receiver_cotangent .and. rec%arms(a)%kind == FAD_TYPE_IS) then
+            if (receiver_cotangent .and. (rec%arms(a)%kind == FAD_TYPE_IS .or. &
+                rec%arms(a)%kind == FAD_CLASS_IS)) then
                 s%kind = FAD_CLASS_DEFAULT
                 s%value = 0
                 if (allocated(s%target)) deallocate (s%target)
@@ -4004,7 +4050,8 @@ contains
         if (.not. allocated(rec%selector_alias)) return
         concrete_targets = 0
         do i = 1, rec%n_arms
-            if (rec%arms(i)%kind == FAD_TYPE_IS) concrete_targets = &
+            if (rec%arms(i)%kind == FAD_TYPE_IS .or. &
+                rec%arms(i)%kind == FAD_CLASS_IS) concrete_targets = &
                 concrete_targets + 1
         end do
         if (concrete_targets /= 1) return
