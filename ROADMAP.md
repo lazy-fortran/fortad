@@ -127,16 +127,16 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files: 61 runnable pure-Fortran cases, 180 bounded refusal or
-feature/dependency classifications, 32 invalid-upstream closures, 1,159
+candidate files: 61 runnable pure-Fortran cases, 184 bounded refusal or
+feature/dependency classifications, 32 invalid-upstream closures, 1,155
 untriaged pure-Fortran candidates, and 508
-non-Fortran or source-absent cases. Thus 273 of 1,432 strict pure-Fortran
-candidates are classified (19.1%), while 1,159 remain in the pure-Fortran
-queue. Across the whole corpus, 781 of 2,014 candidates are accounted for
-(38.8%). The 74 mixed-language rows remain a separate dependency lane.
-The latest `next8` shard closes `set03/cmv07`, `set10/lh234`, `set06/v237`, and
-`set03/cm30` as global-state, derived-component, pointer-lifetime, and
-pointer-alias boundaries. Fresh
+non-Fortran or source-absent cases. Thus 277 of 1,432 strict pure-Fortran
+candidates are classified (19.3%), while 1,155 remain in the pure-Fortran
+queue. Across the whole corpus, 785 of 2,014 candidates are accounted for
+(39.0%). The 74 mixed-language rows remain a separate dependency lane.
+The latest `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
+`set03/cm26` as nested-procedure, module-state, and pointer-storage
+boundaries. Fresh
 Tapenade parser, forward, and reverse probes pass for all four. The shard has
 independent refusal oracles and makes no derivative-support claim for these
 rows. The preceding `next6` shard closes `set11/lh011`, `set04/lh156`,
@@ -1692,10 +1692,10 @@ An unsupported result is recorded as such and never counted as a runtime win.
       (`fortad-bench/docs/corpora/tapenade.toml`) pins the upstream tree and
       inventories 2,014 candidate cases. Automate parser, compiler, Tapenade,
       and FortAD probes across all rows. The queue-shard workflow is now
-      parallel and reproducible. Its latest `next8` shard closes four
-      exact-source rows as deliberate FortAD boundaries and leaves 1,233 rows
-      queued: `set03/cmv07`, `set10/lh234`, `set06/v237`, and `set03/cm30`.
-      The pure-Fortran queue contains 1,159 rows. Each shard row has an
+      parallel and reproducible. Its latest `next9` shard closes four
+      exact-source rows as deliberate FortAD boundaries and leaves 1,229 rows
+      queued: `set06/v290`, `set03/cm33`, `set03/lh056`, and `set03/cm26`.
+      The pure-Fortran queue contains 1,155 rows. Each shard row has an
       exact-source Tapenade/FortAD probe and an independent behavioral or
       refusal oracle. The preceding `next6` shard closed `set11/lh011`,
       `set04/lh156`, `set07/v521`, and `set11/vpf17`. `next5` closed
