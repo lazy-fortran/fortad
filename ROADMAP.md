@@ -289,12 +289,15 @@ The 2026-08-08 integration wave is recorded at these repository heads:
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
   oracles.
-- FortAD `48dec22`, including active concrete rank-four allocatable-component
+- FortAD `5d7281f`, including active concrete rank-four allocatable-component
   JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded polymorphic reverse
   ownership replay, one-arm rank-one assumed-rank JVP/VJP, and branch-merged
   callback-flow JVP/VJP lowering with an independent oracle, plus fixed-shape
-  array-element type-bound receiver JVP/VJP. The GNU gate is green at 409
-  build targets, 408 derivative targets, and 65 tests.
+  array-element type-bound receiver JVP/VJP. The latest NVIDIA compatibility
+  slice removes remaining intrinsic assignment of allocatable expression and
+  statement arenas and lowers ordinary call arguments directly into the IR
+  record. The GNU gate is green at 409 build targets, 408 derivative targets,
+  and 66 tests.
 - fortad-bench `f46bfe0`, including the separate `next7` four-row exact-source
   modern-feature queue shard and refreshed queue, batch, compiler, ledger, and
   provenance artifacts.
@@ -464,14 +467,14 @@ The current FortFront `main` handoff is `7139a946`, which includes the
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
-      GNU is current: `fo` builds 408 targets, checks 407 derivative
-      targets, and runs 63 tests.
+      GNU is current: `fo` builds 409 targets, checks 408 derivative
+      targets, and runs 66 tests.
       The cheap lint rules report zero unused imports and zero short-circuit
       hazards. 108 `-Warray-temporaries` diagnostics remain in compiler
       output, while `fo lint` passes. The other four lanes still rely on a run that
       predates the latest lowering work. `fo fmt --check` still reports
-      formatting debt in legacy files. The files touched by the current slices
-      pass the formatter check.
+      formatting debt in legacy files, including the two files touched by this
+      compatibility slice.
 - [ ] Every operator shared by fortnum and fortfem has same-machine FortAD and
       Enzyme measurements. The three vector-Newton routines have a FortAD-only
       record, and the tangent gaps below remain open.
@@ -482,13 +485,14 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `48dec22`. Its GNU behavioral
-gate is green (409 build targets, 408 derivative targets, 65/65 tests).
+The implementation snapshot is FortAD code at `5d7281f`. Its GNU behavioral
+gate is green (409 build targets, 408 derivative targets, 66/66 tests).
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
 scalar external-CALL refusal oracle. The complete multi-compiler gate remains
-open until the remaining lanes are rerun.
+open until the remaining lanes, including the latest IR ownership changes, are
+rerun.
 
 The 2026-08-08 wave landed bounded slices with independent oracles:
 FortAD callback lowering plus active concrete receiver differentiation
