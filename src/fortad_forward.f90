@@ -1569,8 +1569,8 @@ contains
     function resolve_component_alias(primal, text) result(mapped)
         type(fad_proc_t), intent(in) :: primal
         character(len=*), intent(in) :: text
-        character(len=:), allocatable :: mapped, base
-        integer :: di
+        character(len=:), allocatable :: mapped, base, tail
+        integer :: di, cut
 
         mapped = trim(text)
         base = fad_base_name(text)
@@ -1579,9 +1579,41 @@ contains
         if (.not. primal%decls(di)%is_select_alias) return
         if (.not. allocated(primal%decls(di)%alias_target)) return
         if (len_trim(text) <= len_trim(base)) return
-        mapped = trim(primal%decls(di)%alias_target)// &
-            text(len_trim(base) + 1:)
+        cut = len_trim(base) + 1
+        tail = text(cut:)
+        mapped = map_section_alias_path(primal%decls(di)%alias_target, tail)
     end function resolve_component_alias
+
+    function map_section_alias_path(alias_target, tail) result(mapped)
+        !! Map a literal element of a rank-one SELECT TYPE section back to the
+        !! original array.  For example, ``item(1)%scale`` selected from
+        !! ``model(2:3)`` denotes ``model(2)%scale``.  The IR has no descriptor
+        !! arithmetic, so open bounds, strides, vector subscripts, and nested
+        !! sections stay outside this bounded path.
+        character(len=*), intent(in) :: alias_target, tail
+        character(len=:), allocatable :: mapped, section, index_text
+        integer :: open, colon, relative, lower, ios, absolute
+        character(len=32) :: number
+
+        mapped = trim(alias_target)//trim(tail)
+        open = index(alias_target, "(")
+        colon = index(alias_target, ":")
+        if (open <= 1 .or. colon <= open) return
+        if (len_trim(tail) < 3) return
+        if (tail(1:1) /= "(") return
+        if (index(tail, ":") > 0 .or. index(tail, ",") > 0) return
+        if (index(tail, ")") <= 2) return
+        index_text = trim(tail(2:index(tail, ")") - 1))
+        read (index_text, *, iostat=ios) relative
+        if (ios /= 0) return
+        section = trim(alias_target(open + 1:colon - 1))
+        read (section, *, iostat=ios) lower
+        if (ios /= 0) return
+        absolute = lower + relative - 1
+        write (number, '(i0)') absolute
+        mapped = trim(alias_target(:open - 1))//"("//trim(number)//")"// &
+            tail(index(tail, ")") + 1:)
+    end function map_section_alias_path
 
     logical function target_path_active(primal, text, di, active, paths) &
             result(yes)

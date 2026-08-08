@@ -5164,8 +5164,38 @@ contains
         else
             tail = ""
         end if
-        path = trim(primal%decls(di)%alias_target)//trim(tail)
+        path = map_section_alias_path(primal%decls(di)%alias_target, tail)
     end function resolve_component_path
+
+    function map_section_alias_path(alias_target, tail) result(mapped)
+        !! Map a literal element of a rank-one SELECT TYPE section to the
+        !! original array element, e.g. item(1)%scale from model(2:3) to
+        !! model(2)%scale. Open bounds, strides, vectors, and nested sections
+        !! are deliberately outside this descriptor-free path.
+        character(len=*), intent(in) :: alias_target, tail
+        character(len=:), allocatable :: mapped, section, index_text
+        integer :: open, colon, relative, lower, ios, absolute
+        character(len=32) :: number
+
+        mapped = trim(alias_target)//trim(tail)
+        open = index(alias_target, "(")
+        colon = index(alias_target, ":")
+        if (open <= 1 .or. colon <= open) return
+        if (len_trim(tail) < 3) return
+        if (tail(1:1) /= "(") return
+        if (index(tail, ":") > 0 .or. index(tail, ",") > 0) return
+        if (index(tail, ")") <= 2) return
+        index_text = trim(tail(2:index(tail, ")") - 1))
+        read (index_text, *, iostat=ios) relative
+        if (ios /= 0) return
+        section = trim(alias_target(open + 1:colon - 1))
+        read (section, *, iostat=ios) lower
+        if (ios /= 0) return
+        absolute = lower + relative - 1
+        write (number, '(i0)') absolute
+        mapped = trim(alias_target(:open - 1))//"("//trim(number)//")"// &
+            tail(index(tail, ")") + 1:)
+    end function map_section_alias_path
 
     logical function is_select_alias_path(primal, text) result(yes)
         type(fad_proc_t), intent(in) :: primal
