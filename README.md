@@ -54,7 +54,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Derived components | bounded concrete scalar, nested, inherited, and array component paths |
 | Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known bindings and bounded direct polymorphic dispatch |
 | Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
-| Aliasing and sections | named refusal for `pointer`, `target`, pointer association, and noncontiguous sections |
+| Aliasing and sections | bounded rank-one/rank-two contiguous range sections. Named refusals cover `pointer`, `target`, pointer association, vector subscripts, and noncontiguous or computed sections |
 | GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |
 
 Forward vector mode places the direction index first. For an array `x(n)`, a
@@ -70,7 +70,8 @@ The bounded derived-component contract and its JVP/VJP oracle are in
 Allocatable components and lifetime-changing statements are currently refused
 with a source-line diagnostic. The boundary and primal oracle are in
 [the allocation-lifetime design note](docs/design/allocation-lifetime.md).
-The storage-identity boundary and its executable refusal oracle are in
+The bounded contiguous rank-one/rank-two section support, storage-identity
+proof, and executable refusal oracles are in
 [the aliasing and sections design note](docs/design/aliasing.md).
 The fixed-dispatch abstract/deferred hierarchy slice and its multi-level
 oracle are in [the abstract hierarchy design note](docs/design/abstract-hierarchy.md).

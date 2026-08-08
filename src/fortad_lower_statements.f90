@@ -33,7 +33,8 @@ module fortad_lower_statements
         query_array_slice, query_array_bounds, query_range_expression, &
         nullify_query_t, query_nullify
     use frontend_compiler_resolution, only: BINDING_DECLARATION, &
-        BINDING_FUNCTION, BINDING_SUBROUTINE
+        BINDING_FUNCTION, BINDING_SUBROUTINE, BINDING_ASSOCIATE_NAME, &
+        declaration_binding_t, resolve_identifier_binding
     implicit none
     private
 
@@ -1535,7 +1536,8 @@ contains
 
     recursive integer function lower_array_section(arena, idx, proc, status) &
             result(out)
-        !! Lower one proven-contiguous rank-one section into an indexed value.
+        !! Lower one proven-contiguous rank-one or rank-two section into an
+        !! indexed value.
         !!
         !! A range is kept as a passive textual IR argument because section
         !! bounds select storage; they are not differentiable values on the
@@ -1549,9 +1551,12 @@ contains
         type(array_slice_query_t) :: slice
         type(array_bounds_query_t) :: bounds
         type(range_expression_query_t) :: range
+        type(storage_query_t) :: storage
+        type(declaration_binding_t) :: binding
         type(fad_expr_t) :: e
         character(len=:), allocatable :: base_name
-        integer :: base_expr, decl_idx, bound_expr
+        character(len=:), allocatable :: binding_error
+        integer :: base_expr, decl_idx, bound_expr, section_rank, i
 
         out = 0
         status%ok = .true.
@@ -1575,9 +1580,14 @@ contains
             call refuse_section(arena, idx, "missing section bounds", status)
             return
         end if
-        if (size(slice%bounds_node_indices) /= 1) then
+        section_rank = size(slice%bounds_node_indices)
+        if (section_rank < 1) then
+            call refuse_section(arena, idx, "the section has no dimensions", status)
+            return
+        end if
+        if (section_rank > 2) then
             call refuse_section(arena, idx, &
-                "only rank-one sections have a storage proof", status)
+                "rank greater than two is not supported", status)
             return
         end if
         if (.not. arena%has_node_at(slice%base_node_index)) then
@@ -1594,6 +1604,22 @@ contains
             return
         end select
 
+        ! FortFront's storage query is keyed by the declaration node, while
+        ! the section fact points at the identifier use. Resolve that use
+        ! first so rank and alias facts are taken from the frontend rather
+        ! than reconstructed from rendered source text.
+        call resolve_identifier_binding(arena, slice%base_node_index, binding, &
+            binding_error)
+        if (binding%found) then
+            if (binding%binding_kind == BINDING_ASSOCIATE_NAME) then
+                call refuse_section(arena, idx, &
+                    "ASSOCIATE or computed bases have untracked storage identity", &
+                    status)
+                return
+            end if
+            storage = query_storage(arena, binding%declaration_node_index)
+        end if
+
         decl_idx = proc%decl_index(base_name)
         if (decl_idx <= 0) then
             call refuse_section(arena, idx, "the section base is not declared", status)
@@ -1602,6 +1628,24 @@ contains
         if (.not. proc%decls(decl_idx)%is_array) then
             call refuse_section(arena, idx, "the section base is not an array", status)
             return
+        end if
+        if (storage%found) then
+            if (storage%rank /= section_rank) then
+                call refuse_section(arena, idx, &
+                    "section rank disagrees with FortFront storage facts", status)
+                return
+            end if
+            if (storage%is_pointer .or. storage%is_target) then
+                call refuse_section(arena, idx, &
+                    "pointer/target alias storage identity is not tracked", status)
+                return
+            end if
+            if (storage%is_module_state .or. storage%is_save_state .or. &
+                storage%is_common_state) then
+                call refuse_section(arena, idx, &
+                    "global mutable storage identity is not tracked", status)
+                return
+            end if
         end if
         if (.not. section_base_contiguous(proc, decl_idx)) then
             call refuse_section(arena, idx, &
@@ -1613,38 +1657,71 @@ contains
         if (.not. status%ok) return
         e%kind = FAD_INDEX
         e%text = emit_expr(proc, base_expr)
-        allocate (e%args(1))
-        bounds = query_array_bounds(arena, slice%bounds_node_indices(1))
-        if (bounds%found) then
-            if (bounds%stride_node_index > 0) then
-                call refuse_section(arena, idx, &
-                    "a stride makes the section noncontiguous", status)
+        allocate (e%args(section_rank))
+        do i = 1, section_rank
+            if (section_bound_is_vector(arena, &
+                slice%bounds_node_indices(i), proc)) then
+                call refuse_vector_subscript(arena, idx, status)
                 return
             end if
-            if (bounds%is_assumed_size .or. bounds%is_assumed_rank) then
-                call refuse_section(arena, idx, &
-                    "assumed-size or assumed-rank storage is not proven", status)
-                return
+            bounds = query_array_bounds(arena, slice%bounds_node_indices(i))
+            if (bounds%found) then
+                if (bounds%stride_node_index > 0) then
+                    call refuse_section(arena, idx, &
+                        "a stride makes the section noncontiguous", status)
+                    return
+                end if
+                if (bounds%is_assumed_size .or. bounds%is_assumed_rank) then
+                    call refuse_section(arena, idx, &
+                        "assumed-size or assumed-rank storage is not proven", status)
+                    return
+                end if
+                bound_expr = lower_section_bound(arena, bounds, proc, status)
+            else
+                range = query_range_expression(arena, &
+                    slice%bounds_node_indices(i))
+                if (.not. range%found) then
+                    call refuse_section(arena, idx, &
+                        "the frontend did not provide bound facts", status)
+                    return
+                end if
+                if (range%stride_node_index > 0) then
+                    call refuse_section(arena, idx, &
+                        "a stride makes the section noncontiguous", status)
+                    return
+                end if
+                bound_expr = lower_range_bound(arena, range, proc, status)
             end if
-            bound_expr = lower_section_bound(arena, bounds, proc, status)
-        else
-            range = query_range_expression(arena, slice%bounds_node_indices(1))
-            if (.not. range%found) then
-                call refuse_section(arena, idx, &
-                    "the frontend did not provide bound facts", status)
-                return
-            end if
-            if (range%stride_node_index > 0) then
-                call refuse_section(arena, idx, &
-                    "a stride makes the section noncontiguous", status)
-                return
-            end if
-            bound_expr = lower_range_bound(arena, range, proc, status)
-        end if
-        if (.not. status%ok) return
-        e%args(1) = bound_expr
+            if (.not. status%ok) return
+            e%args(i) = bound_expr
+        end do
         out = proc%add_expr(e)
     end function lower_array_section
+
+    logical function section_bound_is_vector(arena, idx, proc) result(found)
+        !! Whether a slice dimension is an array-valued vector subscript.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(in) :: proc
+        integer :: decl_idx
+
+        found = .false.
+        if (idx <= 0 .or. idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        select type (node => arena%entries(idx)%node)
+            type is (identifier_node)
+            decl_idx = proc%decl_index(node%name)
+            if (decl_idx > 0) found = proc%decls(decl_idx)%is_array
+            type is (call_or_subscript_node)
+            if (node%base_expr_index == 0) then
+                decl_idx = proc%decl_index(node%name)
+                if (decl_idx > 0) then
+                    found = proc%decls(decl_idx)%is_array
+                end if
+            end if
+        class default
+        end select
+    end function section_bound_is_vector
 
     integer function lower_section_bound(arena, bounds, proc, status) result(out)
         !! Keep a non-strided range as one passive IR argument, e.g. `2:n`.
@@ -1722,7 +1799,10 @@ contains
         dims = trim(proc%decls(decl_idx)%dims)
         if (len_trim(dims) == 0) return
         if (index(dims, ":") > 0 .or. index(dims, "*") > 0) return
-        yes = index(dims, ",") == 0
+        ! Explicit shape is contiguous in every rank.  Assumed/deferred shape
+        ! remains rejected unless FortFront copied an explicit CONTIGUOUS or
+        ! allocatable ownership fact above.
+        yes = .true.
     end function section_base_contiguous
 
     subroutine refuse_array_section(arena, idx, status)
