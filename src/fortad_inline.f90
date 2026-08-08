@@ -67,6 +67,12 @@ contains
                 yes = .true.
                 return
             end if
+            if (allocated(p%exprs(i)%callback_target)) then
+                if (same_name(p%exprs(i)%callback_target, name)) then
+                    yes = .true.
+                    return
+                end if
+            end if
         end do
         do i = 1, p%n_stmts
             if (.not. allocated(p%stmts(i)%target)) cycle
@@ -190,7 +196,8 @@ contains
         if (.not. status%ok) return
 
         call declare_locals(target, callee, binds, n_binds)
-        call splice_body(target, callee, binds, n_binds, at, status)
+        call splice_body(target, callee, binds, n_binds, at, status, &
+            target%stmts(at)%callback_formal, target%stmts(at)%callback_target)
         if (.not. status%ok) return
         ! The body now stands where the call did.
         call drop_stmt(target, at + callee%n_stmts)
@@ -289,7 +296,8 @@ contains
             target%exprs(site)%call_arg_names, binds, n_binds, .false., tag, status)
         if (.not. status%ok) return
         call declare_locals(target, callee, binds, n_binds)
-        call splice_body(target, callee, binds, n_binds, at, status)
+        call splice_body(target, callee, binds, n_binds, at, status, &
+            target%exprs(site)%callback_formal, target%exprs(site)%callback_target)
         if (.not. status%ok) return
 
         ! The call now stands for whatever the callee left in its result.
@@ -566,15 +574,18 @@ contains
         end do
     end subroutine declare_locals
 
-    subroutine splice_body(target, callee, binds, n_binds, at, status)
+    subroutine splice_body(target, callee, binds, n_binds, at, status, &
+            callback_formal, callback_target)
         !! Copy the callee's statements in ahead of the call site.
         type(fad_proc_t), intent(inout) :: target
         type(fad_proc_t), intent(in) :: callee
         type(binding_t), intent(in) :: binds(:)
         integer, intent(in) :: n_binds, at
         type(inline_status_t), intent(inout) :: status
+        character(len=:), allocatable, intent(in) :: callback_formal
+        character(len=:), allocatable, intent(in) :: callback_target
         type(fad_stmt_t) :: s
-        integer :: i, where_at
+        integer :: i, j, where_at
         logical :: guard_known, guard_present
 
         where_at = at
@@ -596,7 +607,7 @@ contains
                 s%kind = FAD_ASSIGN
                 s%target = renamed_target(binds, n_binds, callee%stmts(i)%target)
                 s%value = import(target, callee, callee%stmts(i)%value, binds, &
-                    n_binds)
+                    n_binds, callback_formal, callback_target)
                 s%line = callee%stmts(i)%line
             case (FAD_IF, FAD_ELSE, FAD_END_IF)
                 s = callee%stmts(i)
@@ -607,18 +618,49 @@ contains
                         s%value = target%add_expr(expr_const(".true."))
                     else
                         s%value = import(target, callee, callee%stmts(i)%value, &
-                            binds, n_binds)
+                            binds, n_binds, callback_formal, callback_target)
                     end if
                 end if
             case (FAD_DO, FAD_END_DO)
                 s = callee%stmts(i)
                 if (callee%stmts(i)%kind == FAD_DO) then
                     s%target = renamed_target(binds, n_binds, callee%stmts(i)%target)
-                    s%lo = import(target, callee, callee%stmts(i)%lo, binds, n_binds)
-                    s%hi = import(target, callee, callee%stmts(i)%hi, binds, n_binds)
+                    s%lo = import(target, callee, callee%stmts(i)%lo, binds, n_binds, &
+                        callback_formal, callback_target)
+                    s%hi = import(target, callee, callee%stmts(i)%hi, binds, n_binds, &
+                        callback_formal, callback_target)
                     if (callee%stmts(i)%step > 0) &
                         s%step = import(target, callee, callee%stmts(i)%step, &
-                        binds, n_binds)
+                        binds, n_binds, callback_formal, callback_target)
+                end if
+            case (FAD_CALL_STMT)
+                if (.not. allocated(callback_formal) .or. &
+                    .not. allocated(callback_target)) then
+                    status%ok = .false.
+                    status%message = "inlining "//trim(callee%name)// &
+                        " would need an unresolved subroutine callback"
+                    return
+                end if
+                s%kind = FAD_CALL_STMT
+                s%target = callee%stmts(i)%target
+                if (same_name(s%target, callback_formal)) then
+                    s%target = callback_target
+                else
+                    status%ok = .false.
+                    status%message = "inlining "//trim(callee%name)// &
+                        " would need an unsupported nested call"
+                    return
+                end if
+                if (allocated(callee%stmts(i)%call_args)) then
+                    allocate (s%call_args(size(callee%stmts(i)%call_args)))
+                    do j = 1, size(s%call_args)
+                        s%call_args(j) = import(target, callee, &
+                            callee%stmts(i)%call_args(j), binds, n_binds, &
+                            callback_formal, callback_target)
+                    end do
+                end if
+                if (allocated(callee%stmts(i)%call_arg_names)) then
+                    s%call_arg_names = callee%stmts(i)%call_arg_names
                 end if
             case default
                 status%ok = .false.
@@ -798,7 +840,8 @@ contains
         end block
     end function renamed_of
 
-    recursive integer function import(target, callee, idx, binds, n_binds) &
+    recursive integer function import(target, callee, idx, binds, n_binds, &
+            callback_formal, callback_target) &
             result(out)
         !! Rebuild one of the callee's expressions in the caller's arena.
         type(fad_proc_t), intent(inout) :: target
@@ -806,6 +849,8 @@ contains
         integer, intent(in) :: idx
         type(binding_t), intent(in) :: binds(:)
         integer, intent(in) :: n_binds
+        character(len=:), allocatable, intent(in) :: callback_formal
+        character(len=:), allocatable, intent(in) :: callback_target
         type(fad_expr_t) :: e
         integer :: i, k
 
@@ -854,6 +899,10 @@ contains
         ! the callee's own name for the caller's array in the emitted code.
         e%kind = callee%exprs(idx)%kind
         e%text = callee%exprs(idx)%text
+        if (e%kind == FAD_CALL .and. allocated(callback_formal) .and. &
+            allocated(callback_target)) then
+            if (same_name(e%text, callback_formal)) e%text = callback_target
+        end if
         if (callee%exprs(idx)%kind == FAD_INDEX) then
             do k = 1, n_binds
                 if (.not. same_name(binds(k)%name, callee%exprs(idx)%text)) cycle
@@ -873,7 +922,7 @@ contains
             allocate (e%args(size(callee%exprs(idx)%args)))
             do i = 1, size(callee%exprs(idx)%args)
                 e%args(i) = import(target, callee, callee%exprs(idx)%args(i), &
-                    binds, n_binds)
+                    binds, n_binds, callback_formal, callback_target)
             end do
         end if
         out = target%add_expr(e)

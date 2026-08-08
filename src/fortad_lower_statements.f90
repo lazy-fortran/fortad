@@ -14,6 +14,9 @@ module fortad_lower_statements
         binding_hierarchy_query_t, query_type_binding_hierarchy, &
         generic_call_query_t, query_generic_call, resolved_type_query_t, &
         query_resolved_type, &
+        call_arguments_query_t, query_call_arguments, &
+        procedure_actual_argument_query_t, query_procedure_actual_argument, &
+        procedure_signature_query_t, procedure_dummy_query_t, &
         procedure_call_target_query_t, query_procedure_call_target, &
         procedure_target_query_t, query_procedure_target, &
         type_bound_call_query_t, query_type_bound_call, &
@@ -40,9 +43,11 @@ module fortad_lower_statements
         nullify_query_t, query_nullify, STORAGE_POINTER, STORAGE_MODULE, &
         STORAGE_SAVE, STORAGE_COMMON, associate_selector_query_t, &
         query_associate_selectors, STORAGE_LOCAL, STORAGE_BORROWED
+    use frontend_compiler_queries, only: global_reference_query_t, &
+        query_active_global_references
     use frontend_compiler_resolution, only: BINDING_DECLARATION, &
         BINDING_FUNCTION, BINDING_SUBROUTINE, BINDING_ASSOCIATE_NAME, &
-        BINDING_DUMMY_ARGUMENT, &
+        BINDING_DUMMY_ARGUMENT, BINDING_GENERIC_INTERFACE, &
         declaration_binding_t, resolve_identifier_binding
     implicit none
     private
@@ -336,6 +341,8 @@ contains
                 call resolve_callback_call(arena, idx, n%name, &
                     size(n%arg_indices), .true., s%target, status)
                 if (.not. status%ok) return
+                call annotate_passed_procedure_statement(arena, idx, s, status)
+                if (.not. status%ok) return
             end if
             if (s%kind > 0) ignored = proc%add_stmt(s)
 
@@ -343,6 +350,13 @@ contains
             callback_target = query_procedure_target(arena, idx)
             if (callback_target%found) then
                 if (callback_target%is_resolved) return
+                if (procedure_pointer_has_passed_use(arena, &
+                    callback_target%pointer_name)) then
+                    ! Keep the assignment passive until its passed-procedure
+                    ! use site, where FortFront can name generic, NULL,
+                    ! reassignment, and dynamic-target refusals precisely.
+                    return
+                end if
                 status%ok = .false.
                 status%message = "unsupported procedure-pointer callback assignment at line "// &
                     itoa(n%line)//": target flow is unresolved"
@@ -2225,7 +2239,10 @@ contains
                 e%args = args
                 out = proc%add_expr(e)
             else
-                out = proc%add_expr(expr_call(call_name, args, arg_names))
+                e = expr_call(call_name, args, arg_names)
+                call annotate_passed_procedure_expression(arena, idx, e, status)
+                if (.not. status%ok) return
+                out = proc%add_expr(e)
             end if
         class default
             status%ok = .false.
@@ -2233,6 +2250,304 @@ contains
                 itoa(node_line(arena, idx))
         end select
     end function lower_expr
+
+    subroutine annotate_passed_procedure_expression(arena, idx, expr, status)
+        !! Attach one proven passed-procedure target to a function call.  The
+        !! target is consumed only by the same-file inliner; it is never
+        !! emitted as a procedure-pointer value in a derivative.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_expr_t), intent(inout) :: expr
+        type(lower_status_t), intent(inout) :: status
+        character(len=:), allocatable :: formal, target
+
+        call resolve_passed_procedure(arena, idx, formal, target, status)
+        if (.not. status%ok) return
+        if (allocated(formal)) expr%callback_formal = formal
+        if (allocated(target)) expr%callback_target = target
+    end subroutine annotate_passed_procedure_expression
+
+    subroutine annotate_passed_procedure_statement(arena, idx, stmt, status)
+        !! Statement-call counterpart of the expression callback metadata.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_stmt_t), intent(inout) :: stmt
+        type(lower_status_t), intent(inout) :: status
+        character(len=:), allocatable :: formal, target
+
+        call resolve_passed_procedure(arena, idx, formal, target, status)
+        if (.not. status%ok) return
+        if (allocated(formal)) stmt%callback_formal = formal
+        if (allocated(target)) stmt%callback_target = target
+    end subroutine annotate_passed_procedure_statement
+
+    subroutine resolve_passed_procedure(arena, idx, formal, target, status)
+        !! Prove the one P8.6 callback slice: one supplied procedure dummy,
+        !! backed by one unconditional same-scope procedure-pointer assignment
+        !! to a same-arena scalar REAL(8) function with the exact supported
+        !! signature.  Every other target flow is a named refusal.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        character(len=:), allocatable, intent(out) :: formal, target
+        type(lower_status_t), intent(inout) :: status
+        type(call_arguments_query_t) :: call_query
+        type(procedure_actual_argument_query_t) :: actual
+        type(procedure_target_query_t) :: pointer_target
+        type(declaration_query_t) :: declaration
+        integer :: i, callback_count, line
+        character(len=:), allocatable :: reason
+
+        formal = ""
+        target = ""
+        call_query = query_call_arguments(arena, idx)
+        if (.not. call_query%found) return
+
+        line = node_line(arena, idx)
+        if (call_query%has_global_mutable_state) then
+            call refuse_passed_callback(line, &
+                "callee reads active global mutable state", status)
+            return
+        end if
+
+        callback_count = 0
+        do i = 1, size(call_query%arguments)
+            declaration = query_declaration(arena, &
+                call_query%arguments(i)%formal_node_index)
+            if (.not. is_procedure_dummy_declaration(declaration)) cycle
+            callback_count = callback_count + 1
+            if (callback_count > 1) then
+                call refuse_passed_callback(line, &
+                    "more than one procedure callback is outside this bounded slice", &
+                    status)
+                return
+            end if
+            if (.not. call_query%arguments(i)%is_supplied) then
+                call refuse_passed_callback(line, &
+                    "an omitted or optional callback target is not differentiated", &
+                    status)
+                return
+            end if
+            actual = query_procedure_actual_argument(arena, idx, &
+                call_query%arguments(i)%formal_name)
+            if (.not. actual%found) then
+                call refuse_passed_callback(line, &
+                    "FortFront did not expose the callback actual/formal mapping", &
+                    status)
+                return
+            end if
+            if (actual%has_reassignment) then
+                call refuse_passed_callback(line, &
+                    "procedure-pointer callback target is reassigned", status)
+                return
+            end if
+            if (actual%has_branch_target) then
+                call refuse_passed_callback(line, &
+                    "procedure-pointer callback target depends on a branch or loop", &
+                    status)
+                return
+            end if
+            if (actual%has_null_target) then
+                call refuse_passed_callback(line, &
+                    "NULL() procedure-pointer callback targets are not differentiated", &
+                    status)
+                return
+            end if
+            if (actual%target_assignment_node_index > 0) then
+                pointer_target = query_procedure_target(arena, &
+                    actual%target_assignment_node_index)
+                if (pointer_target%found) then
+                    if (pointer_target%binding_kind == BINDING_GENERIC_INTERFACE) then
+                        call refuse_passed_callback(line, &
+                            "procedure-pointer callback target is generic or ambiguous", &
+                            status)
+                        return
+                    end if
+                end if
+                if (actual%has_ambiguous_target) then
+                    if (pointer_target%binding_kind == BINDING_DECLARATION) then
+                        call refuse_passed_callback(line, &
+                            "procedure-pointer callback target is aliased or unresolved", &
+                            status)
+                    else
+                        call refuse_passed_callback(line, &
+                            "procedure-pointer callback target is generic or ambiguous", &
+                            status)
+                    end if
+                    return
+                end if
+            end if
+            if (actual%has_ambiguous_target) then
+                call refuse_passed_callback(line, &
+                    "procedure-pointer callback target is unresolved or dynamic", status)
+                return
+            end if
+            if (actual%has_unresolved_target .or. .not. actual%is_resolved) then
+                call refuse_passed_callback(line, &
+                    "procedure-pointer callback target is unresolved or dynamic", status)
+                return
+            end if
+            if (actual%target_assignment_node_index <= 0) then
+                call refuse_passed_callback(line, &
+                    "require one direct same-scope procedure-pointer assignment", status)
+                return
+            end if
+            if (.not. passed_callback_signature_supported(actual%signature)) then
+                call refuse_passed_callback(line, &
+                    "callback target signature must be exactly scalar REAL(8) "// &
+                    "function(REAL(8), intent(in))", status)
+                return
+            end if
+            call callback_target_state(arena, actual%target_procedure_index, &
+                reason)
+            if (len_trim(reason) > 0) then
+                call refuse_passed_callback(line, reason, status)
+                return
+            end if
+            formal = call_query%arguments(i)%formal_name
+            target = actual%procedure_name
+        end do
+    end subroutine resolve_passed_procedure
+
+    logical function procedure_pointer_has_passed_use(arena, pointer_name) &
+            result(found)
+        !! Whether an unresolved pointer assignment is consumed as a
+        !! procedure actual.  This lets the later actual/formal query own the
+        !! diagnostic without weakening direct pointer-call refusals.
+        type(ast_arena_t), intent(in) :: arena
+        character(len=*), intent(in) :: pointer_name
+        type(call_arguments_query_t) :: call_query
+        type(procedure_actual_argument_query_t) :: actual
+        type(declaration_query_t) :: declaration
+        integer :: i, j
+
+        found = .false.
+        if (len_trim(pointer_name) == 0) return
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            call_query = query_call_arguments(arena, i)
+            if (.not. call_query%found) cycle
+            do j = 1, size(call_query%arguments)
+                declaration = query_declaration(arena, &
+                    call_query%arguments(j)%formal_node_index)
+                if (.not. is_procedure_dummy_declaration(declaration)) cycle
+                actual = query_procedure_actual_argument(arena, i, &
+                    call_query%arguments(j)%formal_name)
+                if (.not. actual%found) cycle
+                if (same_callback_name(actual%actual_name, pointer_name)) then
+                    found = .true.
+                    return
+                end if
+            end do
+        end do
+    end function procedure_pointer_has_passed_use
+
+    logical function is_procedure_dummy_declaration(declaration) result(found)
+        type(declaration_query_t), intent(in) :: declaration
+        character(len=:), allocatable :: normalized
+        integer :: i
+
+        found = .false.
+        if (.not. declaration%found) return
+        if (.not. allocated(declaration%type_name)) return
+        normalized = ""
+        do i = 1, len_trim(declaration%type_name)
+            if (declaration%type_name(i:i) == " ") cycle
+            normalized = normalized//callback_lower_char( &
+                declaration%type_name(i:i))
+        end do
+        found = index(normalized, "procedure") == 1
+    end function is_procedure_dummy_declaration
+
+    logical function passed_callback_signature_supported(signature) result(ok)
+        type(procedure_signature_query_t), intent(in) :: signature
+        type(procedure_dummy_query_t) :: dummy
+
+        ok = .false.
+        if (.not. signature%found) return
+        if (.not. signature%is_function) return
+        if (.not. signature%result_category_known .or. &
+            .not. same_callback_name(signature%result_category, "real")) return
+        if (.not. signature%result_kind_known .or. &
+            signature%result_kind_value /= 8) return
+        if (.not. signature%result_rank_known .or. &
+            signature%result_rank /= 0) return
+        if (signature%dummy_count /= 1) return
+        if (.not. allocated(signature%dummies)) return
+        if (size(signature%dummies) /= 1) return
+        dummy = signature%dummies(1)
+        if (.not. dummy%type_known .or. .not. dummy%category_known) return
+        if (.not. same_callback_name(dummy%type_category, "real")) return
+        if (.not. dummy%kind_known .or. dummy%kind_value /= 8) return
+        if (.not. dummy%rank_known .or. dummy%rank /= 0) return
+        if (.not. dummy%has_intent .or. &
+            .not. same_callback_name(dummy%intent, "in")) return
+        if (dummy%is_optional .or. dummy%is_value) return
+        ok = .true.
+    end function passed_callback_signature_supported
+
+    subroutine callback_target_state(arena, procedure_index, reason)
+        !! Reject mutable ownership or global state inside the fixed callback
+        !! target before it is pulled into the caller by inlining.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: procedure_index
+        character(len=:), allocatable, intent(out) :: reason
+        type(global_reference_query_t), allocatable :: globals(:)
+        type(program_unit_query_t) :: unit
+        type(declaration_query_t) :: declaration
+        integer :: i, node_index
+        character(len=:), allocatable :: kind
+
+        reason = ""
+        globals = query_active_global_references(arena, procedure_index)
+        do i = 1, size(globals)
+            declaration = query_declaration(arena, &
+                globals(i)%declaration_node_index)
+            if (.not. declaration%found) cycle
+            if (declaration%is_parameter) cycle
+            reason = "callback target reads active global mutable state"
+            return
+        end do
+        unit = query_program_unit(arena, procedure_index)
+        if (.not. unit%found) then
+            reason = "callback target procedure scope is unresolved"
+            return
+        end if
+        if (.not. allocated(unit%body_indices)) return
+        do i = 1, size(unit%body_indices)
+            node_index = unit%body_indices(i)
+            if (node_index <= 0 .or. node_index > arena%size) cycle
+            if (.not. arena%has_node_at(node_index)) cycle
+            kind = lower_callback_text(arena%entries(node_index)%node_type)
+            if (index(kind, "allocate") > 0 .or. &
+                index(kind, "deallocate") > 0 .or. &
+                index(kind, "move_alloc") > 0 .or. &
+                index(kind, "pointer_assignment") > 0) then
+                reason = "callback target changes ownership or pointer association"
+                return
+            end if
+        end do
+    end subroutine callback_target_state
+
+    subroutine refuse_passed_callback(line, reason, status)
+        integer, intent(in) :: line
+        character(len=*), intent(in) :: reason
+        type(lower_status_t), intent(inout) :: status
+
+        status%ok = .false.
+        status%message = "unsupported passed-procedure callback at line "// &
+            itoa(line)//": "//trim(reason)
+    end subroutine refuse_passed_callback
+
+    function lower_callback_text(text) result(out)
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: out
+        integer :: i
+
+        out = ""
+        do i = 1, len_trim(text)
+            out = out//callback_lower_char(text(i:i))
+        end do
+    end function lower_callback_text
 
     subroutine lower_call_arguments(arena, arg_indices, proc, args, names, status)
         !! Lower actuals while retaining the formal name of keyword actuals.
