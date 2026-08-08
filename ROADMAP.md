@@ -324,13 +324,21 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD `main` at `10f4779`. Its GNU behavioral
+The implementation snapshot is FortAD `main` at `33aab82`. Its GNU behavioral
 gate is green (408 build targets, 407 derivative targets, 53/53 tests).
 `fo lint` still has 108 array-temporary warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
 after `a85aab9` moves lowering to FortFront's parse/query boundary and adds a
 scalar external-CALL refusal oracle. The complete multi-compiler gate remains
 open until the remaining lanes are rerun.
+
+The next execution wave is deliberately split across repositories: FortAD is
+consuming the bounded procedure-pointer call-target fact, FortFront is adding a
+call-site dispatch fact for polymorphic bindings, ffc is extending scalar
+runtime type-bound override dispatch, and fortad-bench is measuring the next
+pure-Fortran Tapenade candidate. These are implementation lanes, not completed
+support claims. Each must land with an independent oracle before its checkbox
+changes.
 
 ## Current integration gate
 
