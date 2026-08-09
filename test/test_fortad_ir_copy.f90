@@ -12,14 +12,16 @@ program test_fortad_ir_copy
     !! representative: checking a few fields would pass while a forgotten one
     !! is exactly the defect being guarded against.
 
-    use fortad_ir, only: fad_stmt_t, fad_copy_stmt, fad_expr_t, fad_proc_t, &
-        fad_expr_equal, FAD_CALL, FAD_CALL_STMT
+    use fortad_ir, only: fad_stmt_t, fad_copy_stmt, fad_expr_t, fad_decl_t, &
+        fad_proc_t, fad_expr_equal, FAD_CALL, FAD_CALL_STMT, FAD_INTENT_IN
     implicit none
 
     type(fad_stmt_t) :: original, copy, arena_stmt
     type(fad_expr_t) :: arena_expr, filler_expr
-    type(fad_proc_t) :: proc
+    type(fad_decl_t) :: arena_decl
+    type(fad_proc_t) :: proc, field_proc
     integer :: failures, expr_index, duplicate_index, stmt_index, call_index, i
+    integer :: decl_index, field_index
     character(len=16) :: label
 
     failures = 0
@@ -172,6 +174,44 @@ program test_fortad_ir_copy
         "statement callback target after arena growth", failures)
     call expect(all(proc%stmts(64)%call_args == [64, 65]), &
         "statement arguments after arena growth", failures)
+
+    ! Declaration arenas contain the same deferred-length fields as the
+    ! declarations being transformed.  Cross the initial capacity through
+    ! both append paths; intrinsic array assignment here used to lose or alias
+    ! names under nvfortran 26.5.
+    do i = 1, 40
+        write (label, '("decl_", i0)') i
+        arena_decl%name = trim(label)
+        arena_decl%type_name = "real(8)"
+        arena_decl%dims = ":"
+        arena_decl%intent = FAD_INTENT_IN
+        arena_decl%line = 1000 + i
+        arena_decl%is_array = .true.
+        arena_decl%is_allocatable = mod(i, 2) == 0
+        arena_decl%is_polymorphic = mod(i, 3) == 0
+        arena_decl%alias_target = "owner%payload"
+        decl_index = proc%add_decl(arena_decl)
+    end do
+    call expect(proc%n_decls == 40, "declaration arena size", failures)
+    call expect(proc%decls(1)%name == "decl_1", &
+        "first declaration after arena growth", failures)
+    call expect(proc%decls(40)%name == "decl_40", &
+        "last declaration after arena growth", failures)
+    call expect(proc%decls(40)%line == 1040 .and. &
+        proc%decls(40)%is_allocatable .and. .not. proc%decls(40)%is_polymorphic, &
+        "declaration metadata after arena growth", failures)
+
+    do i = 1, 40
+        write (label, '("field_", i0)') i
+        field_index = field_proc%add_decl_fields(trim(label), "integer", &
+            FAD_INTENT_IN, .false., .false., .false., .false., "", &
+            is_allocatable=mod(i, 2) == 0)
+    end do
+    call expect(field_proc%n_decls == 40, &
+        "field declaration arena size", failures)
+    call expect(field_proc%decls(1)%name == "field_1" .and. &
+        field_proc%decls(40)%name == "field_40", &
+        "field declarations after arena growth", failures)
 
     if (failures == 0) then
         print *, "test_fortad_ir_copy: PASS"

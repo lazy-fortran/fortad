@@ -31,7 +31,7 @@ module fortad_reverse
         FAD_CLASS_DEFAULT, FAD_END_SELECT, &
         FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC, &
         FAD_INTENT_OUT, &
-        FAD_INTENT_INOUT, FAD_INTENT_NONE
+        FAD_INTENT_INOUT, FAD_INTENT_NONE, copy_decl
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
         fad_add, fad_mul, fad_div, fad_neg, fad_real, fad_fn1, fad_fn3
     use fortad_registry, only: call_rule_has, call_rule_lines, &
@@ -488,7 +488,7 @@ contains
 
         di = primal%decl_index(fad_base_name(path))
         if (di > 0) then
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
         end if
         d%name = trim(name)
         d%type_name = "real(8)"
@@ -1724,9 +1724,16 @@ contains
                         allocated(primal%stmts(j)%allocation_args)) then
                         di = call_arg_decl_index(primal, &
                             primal%stmts(j)%allocation_args(1))
-                        if (di > 0 .and. useful(di) .and. &
-                            mark_reads(primal, primal%stmts(j)%allocation_source, &
-                            useful)) changed = .true.
+                        ! Mark SOURCE= reads in a separate statement.  The
+                        ! recursive helper updates `useful`; putting it in a
+                        ! compound .AND. expression made the result depend on
+                        ! compiler evaluation order (GNU marked `child`, NVHPC
+                        ! short-circuited it), which dropped the component
+                        ! shadow only under NVHPC.
+                        if (di > 0) then
+                            if (mark_reads(primal, primal%stmts(j)%allocation_source, &
+                                useful)) changed = .true.
+                        end if
                     end if
                     cycle
                 end if
@@ -2372,7 +2379,7 @@ contains
             names(n) = trim(primal%params(i))
             di = primal%decl_index(trim(primal%params(i)))
             if (di == 0) cycle
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
             ! The adjoint routine recomputes the primal, so an argument the
             ! primal only wrote is still only written here.
             ignored = adjoint%add_decl(d)
@@ -2387,14 +2394,14 @@ contains
             if (.not. is_dummy(primal, dependent) .and. spec%with_primal) then
                 n = n + 1
                 names(n) = dependent
-                d = primal%decls(di)
+                call copy_decl(d, primal%decls(di))
                 d%intent = FAD_INTENT_OUT
                 d%is_result = .false.
                 ignored = adjoint%add_decl(d)
             end if
             n = n + 1
             names(n) = dependent//suffix
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
             d%name = dependent//suffix
             d%intent = FAD_INTENT_IN
             d%is_result = .false.
@@ -2424,7 +2431,7 @@ contains
             if (seen) cycle
             n = n + 1
             names(n) = trim(base)//suffix
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
             d%name = trim(base)//suffix
             ! VALUE belongs to the primal argument. An outgoing adjoint is
             ! written by this routine and must remain a normal dummy.
@@ -2592,12 +2599,12 @@ contains
                     primal%stmts(i)%target)
                 if (is_element(n_rec + 1)) then
                     fresh = primal%stmts(i)%target
-                    d = primal%decls(di)
+                    call copy_decl(d, primal%decls(di))
                     d%is_result = .false.
                     ignored = adjoint%add_decl(d)
                 else
                     call ssa_fresh(ssa, primal%stmts(i)%target, fresh)
-                    d = primal%decls(di)
+                    call copy_decl(d, primal%decls(di))
                     d%name = fresh
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
@@ -2783,7 +2790,7 @@ contains
             return
         end if
 
-        d = primal%decls(di)
+        call copy_decl(d, primal%decls(di))
         if (adjoint%decl_index(trim(owner)) == 0) then
             ignored = adjoint%add_decl(d)
         end if
@@ -3096,7 +3103,7 @@ contains
             return
         end if
 
-        d = primal%decls(target_di)
+        call copy_decl(d, primal%decls(target_di))
         if (component_owner) d%name = fad_base_name(target)
         d%intent = FAD_INTENT_NONE
         d%is_result = .false.
@@ -3670,7 +3677,7 @@ contains
             call ssa_advance_to(ssa, primal%decls(i)%name, &
                 ssa_version(after_then, primal%decls(i)%name))
             call ssa_fresh(ssa, primal%decls(i)%name, merged)
-            d = primal%decls(i)
+            call copy_decl(d, primal%decls(i))
             d%name = merged
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
@@ -3727,7 +3734,7 @@ contains
             s%value = copy_renamed(primal, adjoint, primal%stmts(i)%value, ssa)
             call ssa_fresh(ssa, primal%stmts(i)%target, fresh)
             s%target = fresh
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
             d%name = fresh
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
@@ -3820,7 +3827,7 @@ contains
         ! The loop index needs a declaration in the generated procedure.
         di = primal%decl_index(rec%var)
         if (di > 0) then
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
             d%is_optional = .false.
@@ -3840,7 +3847,7 @@ contains
             call ssa_lookup(ssa, trim(shape%accumulators(k)), incoming)
             call ssa_fresh(ssa, trim(shape%accumulators(k)), fresh)
             di = primal%decl_index(trim(shape%accumulators(k)))
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
             d%name = fresh
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
@@ -3858,7 +3865,7 @@ contains
             call ssa_set(ssa, trim(shape%temporaries(k)), &
                 trim(shape%temporaries(k)))
             di = primal%decl_index(trim(shape%temporaries(k)))
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
             d%intent = FAD_INTENT_NONE
             d%is_result = .false.
             d%is_optional = .false.
@@ -3910,7 +3917,7 @@ contains
                     if (.not. is_real_type(primal%decls(di))) cycle
                     if (.not. worth_taping(primal, shape, &
                         trim(shape%temporaries(k)))) cycle
-                    d = primal%decls(di)
+                    call copy_decl(d, primal%decls(di))
                     d%name = trim(shape%temporaries(k))//"_tape"
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
@@ -3927,7 +3934,7 @@ contains
                         trim(shape%carried(k)))) cycle
                     di = primal%decl_index(trim(shape%carried(k)))
                     if (di == 0) cycle
-                    d = primal%decls(di)
+                    call copy_decl(d, primal%decls(di))
                     d%name = trim(shape%carried(k))//"_tape"
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
@@ -3965,7 +3972,7 @@ contains
                 ! post-update one. Conflating them was the first bug here.
                 call ssa_set(ssa, trim(shape%carried(k)), &
                     trim(shape%carried(k)))
-                d = primal%decls(di)
+                call copy_decl(d, primal%decls(di))
                 d%intent = FAD_INTENT_NONE
                 d%is_result = .false.
                 d%is_optional = .false.
@@ -3988,7 +3995,7 @@ contains
                 end if
                 di = primal%decl_index(h%target)
                 if (di > 0) then
-                    d = primal%decls(di)
+                    call copy_decl(d, primal%decls(di))
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
                     d%is_optional = .false.
@@ -4044,7 +4051,7 @@ contains
                     type(fad_decl_t) :: cd
                     cdi = primal%decl_index_of( &
                         primal%stmts(i)%target)
-                    cd = primal%decls(cdi)
+                    call copy_decl(cd, primal%decls(cdi))
                     cd%name = fresh
                     cd%intent = FAD_INTENT_NONE
                     cd%is_result = .false.
@@ -4060,7 +4067,7 @@ contains
                     type(fad_decl_t) :: bd
                     base_di = primal%decl_index_of(fresh)
                     if (base_di > 0) then
-                        bd = primal%decls(base_di)
+                        call copy_decl(bd, primal%decls(base_di))
                         bd%is_result = .false.
                         ignored = adjoint%add_decl(bd)
                     end if
@@ -4080,7 +4087,7 @@ contains
                     tdi = primal%decl_index_of( &
                         primal%stmts(i)%target)
                     if (tdi > 0) then
-                        td = primal%decls(tdi)
+                        call copy_decl(td, primal%decls(tdi))
                         td%name = fresh
                         td%intent = FAD_INTENT_NONE
                         td%is_result = .false.
@@ -4674,7 +4681,7 @@ contains
                 block
                     type(fad_decl_t) :: d
                     integer :: dignored
-                    d = primal%decls(di)
+                    call copy_decl(d, primal%decls(di))
                     d%name = trim(base)//trim(suffix)
                     d%intent = FAD_INTENT_NONE
                     d%is_result = .false.
@@ -5546,7 +5553,7 @@ contains
         di = primal%decl_index(base)
         if (di == 0) return
         if (adjoint%decl_index(base//suffix) > 0) return
-        d = primal%decls(di)
+        call copy_decl(d, primal%decls(di))
         d%name = base//suffix
         d%intent = FAD_INTENT_NONE
         d%is_result = .false.
@@ -5572,7 +5579,7 @@ contains
         if (adjoint%decl_index(shadow_array_name(base, suffix)) > 0) return
         di = primal%decl_index(base)
         if (di == 0) return
-        d = primal%decls(di)
+        call copy_decl(d, primal%decls(di))
         d%name = shadow_array_name(base, suffix)
         d%intent = FAD_INTENT_NONE
         d%is_result = .false.
@@ -5658,7 +5665,7 @@ contains
         if (adjoint%decl_index(dependent//suffix//"_in") > 0) return
         di = primal%decl_index(dependent)
         if (di == 0) return
-        d = primal%decls(di)
+        call copy_decl(d, primal%decls(di))
         d%name = dependent//suffix//"_in"
         d%intent = FAD_INTENT_NONE
         d%is_result = .false.
@@ -6129,7 +6136,7 @@ contains
         call ssa_base_of(ssa, ssa_name, base)
         di = primal%decl_index_of(base)
         if (di == 0) return
-        d = primal%decls(di)
+        call copy_decl(d, primal%decls(di))
         d%name = ssa_name//suffix
         d%intent = FAD_INTENT_NONE
         d%is_result = .false.
@@ -6642,7 +6649,7 @@ contains
             di = primal%decl_index_of(primal%stmts(i)%target)
             if (di == 0) cycle
             call add_component_snapshot(ssa, primal%stmts(i)%target, snapshot)
-            d = primal%decls(di)
+            call copy_decl(d, primal%decls(di))
             d%name = snapshot
             d%type_name = "real(8)"
             d%is_array = .false.
