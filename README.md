@@ -75,8 +75,11 @@ assignment through paired concrete shadows; read-modify-write and ownership-
 changing forms remain refused. The boundary and oracle are in [the
 polymorphic ownership design note](docs/design/polymorphic-ownership.md).
 Literal indexed scalar allocatable components such as `boxes(2)%value` use the
-same bounded reallocation replay contract; dynamic indices and unsafe storage
-remain refused. Direct same-file subroutine calls use exact FortFront
+same bounded reallocation replay contract. Concrete rank-one and rank-two
+component lifetimes with literal extents also replay `ALLOCATE`, `MOVE_ALLOC`,
+and `DEALLOCATE` when active accesses remain scalar; dynamic shapes, whole
+component array accesses, and unsafe storage remain refused. Direct same-file
+subroutine calls use exact FortFront
 actual/formal storage facts and refuse aliases, callbacks, globals, pointers,
 allocatables, mismatches, and ambiguous mappings.
 The same fixed-path contract now covers scalar `class(*)` component assignment
