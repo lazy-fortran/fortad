@@ -33,7 +33,7 @@ module fortad_reverse
         FAD_INTENT_OUT, &
         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
-        fad_add, fad_mul, fad_neg, fad_real
+        fad_add, fad_mul, fad_neg, fad_real, fad_fn1, fad_fn3
     use fortad_registry, only: call_rule_has, call_rule_lines, &
         call_rule_substitute
     use fortad_emit, only: emit_expr
@@ -255,7 +255,7 @@ contains
             status%ok = .false.
             status%message = "reverse mode: active complex adjoints are not "// &
                 "supported for this expression; the bounded real-coordinate "// &
-                "projection path only accepts real(z) or dble(z)"
+                "projection path only accepts real(z), dble(z), or aimag(z)"
             return
         end if
         do i = 1, size(primal%params)
@@ -1899,7 +1899,8 @@ contains
         !! Recognise the first bounded real-coordinate reverse case.
         !!
         !! A complex input may feed a real-valued objective through a direct
-        !! `real(z)`/`dble(z)` projection and then ordinary real arithmetic.
+        !! `real(z)`, `dble(z)`, or `aimag(z)` projection and then ordinary
+        !! real arithmetic.
         !! Its adjoint is representable as a complex number whose real and
         !! imaginary parts are the two coordinate gradients.  Do not broaden
         !! this predicate to arbitrary complex expressions: a single forward
@@ -1955,7 +1956,8 @@ contains
 
     recursive logical function safe_real_projection_expr(primal, idx, active) &
             result(yes)
-        !! Verify that every active complex leaf is directly projected to real.
+        !! Verify that every active complex leaf is directly projected to real
+        !! coordinates.
         type(fad_proc_t), intent(in) :: primal
         integer, intent(in) :: idx
         logical, intent(in) :: active(:)
@@ -1968,14 +1970,14 @@ contains
 
         select case (primal%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
-            ! A complex leaf is only valid beneath a real/dble call.  Seeing
+            ! A complex leaf is only valid beneath a real/dble/aimag call. Seeing
             ! one here means the caller used complex arithmetic directly.
             yes = .false.
         case (FAD_CALL)
             name = lower_name(primal%exprs(idx)%text)
             if (.not. allocated(primal%exprs(idx)%args)) then
                 yes = .false.
-            else if ((name == "real" .or. name == "dble") .and. &
+            else if ((name == "real" .or. name == "dble" .or. name == "aimag") .and. &
                     size(primal%exprs(idx)%args) == 1) then
                 yes = simple_active_complex(primal, &
                     primal%exprs(idx)%args(1), active)
@@ -6021,6 +6023,29 @@ contains
                 status%message = "no derivative rule for '"//node_text// &
                     "'; register one with fad_add_rule, or keep it out of "// &
                     "the active path"
+                return
+            end if
+            if (lower_name(node_text) == "aimag") then
+                ! The forward tangent of AIMAG is real, but its transpose
+                ! maps a real seed to the imaginary coordinate of a complex
+                ! input. Build that coordinate explicitly instead of asking
+                ! the forward rule for AIMAG(1.0), which is compiler-invalid.
+                if (size(node_args) == 1) then
+                    if (carries_adjoint(primal, adjoint, node_args(1), ssa, &
+                        active)) then
+                        block
+                            integer :: zero_real, seed_kind, complex_seed
+                            zero_real = fad_real(adjoint, "0.0")
+                            seed_kind = fad_fn1(adjoint, "kind", seed)
+                            complex_seed = fad_fn3(adjoint, "cmplx", &
+                                zero_real, seed, seed_kind)
+                            call accumulate(primal, adjoint, node_args(1), &
+                                complex_seed, ssa, suffix, active, n_tmp, &
+                                status, reverse_receiver_alias, &
+                                reverse_cotangent_alias)
+                        end block
+                    end if
+                end if
                 return
             end if
             if (trim(node_text) == "sum") then
