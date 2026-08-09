@@ -37,6 +37,12 @@ indices/bounds, and any allocation, deallocation, `SOURCE=` acquisition, or
 `MOVE_ALLOC` lifetime change on the path. A caller must keep the payload
 allocated and type-compatible for every primal and derivative call.
 
+A direct type-bound call such as `box%payload%value(x)` is a separate boundary:
+FortAD routes it through FortFront's receiver and dispatch facts, then refuses
+it when the component's ownership or dynamic type is not tracked. It never
+emits a derivative that treats a polymorphic component call as an ordinary
+unresolved function reference.
+
 The independent analytic, central finite-difference, adjoint-identity, and
 boundary oracle is
 `test/test_polymorphic_nested_component_oracle.f90`. The unlimited-polymorphic
