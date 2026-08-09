@@ -5228,7 +5228,7 @@ contains
             allow_lifetime_owner)
         !! Validate a component designator using FortFront's resolved path and
         !! storage facts.  The bounded allocatable-component slice accepts only
-        !! scalar through rank-two REAL component accesses of a concrete,
+        !! scalar through rank-three REAL component accesses of a concrete,
         !! non-aliased object; one fixed owner index is allowed for a scalar
         !! descriptor transition.
         type(ast_arena_t), intent(in) :: arena
@@ -5330,9 +5330,9 @@ contains
                 "allocatable component rank greater than four is not supported", status)
             return
         end if
-        if (allow_lifetime_owner .and. component_rank > 2) then
+        if (allow_lifetime_owner .and. component_rank > 3) then
             call refuse_component(arena, idx, &
-                "component lifetime requires a scalar through rank-two concrete REAL "// &
+                "component lifetime requires a scalar through rank-three concrete REAL "// &
                 "allocatable component", status)
             return
         end if
