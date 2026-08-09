@@ -104,8 +104,8 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current main pins are FortAD `cc8987e`, FortFront `6c27ca86`, and
-fortad-bench `73f395c`. FortAD has bounded `SPREAD` JVP and direct array-valued
+The current feature pins are FortAD `cc8987e`, FortFront `6c27ca86`, and
+fortad-bench `4d0e463`. FortAD has bounded `SPREAD` JVP and direct array-valued
 reverse-transpose support, and now consumes FortFront's bounded
 procedure-pointer `ASSOCIATED` state facts for a fixed same-scope callback
 guard. The new independent oracle checks compiled JVP/VJP values, finite
@@ -135,12 +135,6 @@ pure-Fortran Tapenade candidates (30.2%); 1,073 total candidates remain in the
 queue, including 999 pure-Fortran cases. Its latest shard is `next48`, which
 records modern pointer, callback, and derived-type boundaries with independent
 behavioral and refusal oracles.
-
-The bench currently records 937 of 2,014 total candidates and 429 of 1,432
-pure-Fortran Tapenade candidates (30.0%); 1,077 total candidates remain in the
-queue, including 1,003 pure-Fortran cases. Its latest shard is `next47`, which
-records pointer/TARGET storage-identity boundaries with independent behavioral
-and refusal oracles.
 
 ## Repository responsibilities
 
