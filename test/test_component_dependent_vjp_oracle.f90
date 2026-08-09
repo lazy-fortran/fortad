@@ -19,7 +19,7 @@ program test_component_dependent_vjp_oracle
         '/component_dependent_case_b.f90'
     character(len=*), parameter :: cli_driver = dir//'/cli_driver.f90'
     character(len=*), parameter :: cli_exe = dir//'/cli_run'
-    character(len=64) :: independents(4)
+    character(len=64) :: independent_paths(4)
     character(len=:), allocatable :: cli, command
     character(len=:), allocatable :: source
     type(fad_result_t) :: vjp, bad
@@ -44,7 +44,7 @@ program test_component_dependent_vjp_oracle
         '    soldat(1)%a = soldat(2)%b * grddat%x + soldat(2)%c + '// &
         'grddat%y'//nl// &
         'end subroutine function'//nl
-    independents = [character(len=64) :: 'grddat%x', 'grddat%y', &
+    independent_paths = [character(len=64) :: 'grddat%x', 'grddat%y', &
         'soldat(2)%b', 'soldat(2)%c']
 
     call execute_command_line('mkdir -p '//dir, exitstat=stat)
@@ -53,7 +53,7 @@ program test_component_dependent_vjp_oracle
     write (unit, '(a)') source
     close (unit)
 
-    vjp = fad_vjp(source, independents, dependent='soldat(1)%a', &
+    vjp = fad_vjp(source, independent_paths, dependent='soldat(1)%a', &
         from='function', name='function_vjp', &
         module_name='component_dependent_derivatives')
     if (.not. vjp%ok) then

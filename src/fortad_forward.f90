@@ -642,28 +642,41 @@ contains
 
     logical function has_fixed_source_owner(primal, owner_di, active) result(supported)
         !! The bounded active case is an allocatable polymorphic local whose
-        !! only acquisition is ALLOCATE(owner, SOURCE=concrete_value).  The
-        !! declared type of the source is a fixed dynamic type, so the
-        !! existing tangent allocation descriptor can be paired by emitting
-        !! SOURCE=concrete_value_d.  No factory, polymorphic source, or
-        !! ownership transfer is inferred here.
+        !! only acquisition is ALLOCATE(owner, SOURCE=concrete_value).  A
+        !! one-dimensional allocatable owner array is admitted only when its
+        !! extent and selected element are literals, so the existing paired
+        !! allocation descriptor remains a fixed path.  No factory,
+        !! polymorphic source, or ownership transfer is inferred here.
         type(fad_proc_t), intent(in) :: primal
         integer, intent(in) :: owner_di
         logical, intent(in) :: active(:)
         integer :: i, target_di, source_di
-        character(len=:), allocatable :: owner
-        logical :: found
+        character(len=:), allocatable :: owner, selector
+        logical :: found, array_owner
 
         supported = .false.
         if (owner_di <= 0 .or. owner_di > primal%n_decls) return
         owner = primal%decls(owner_di)%name
+        if (.not. primal%decls(owner_di)%is_polymorphic) return
+        array_owner = primal%decls(owner_di)%is_array
+        if (array_owner) then
+            if (.not. primal%decls(owner_di)%is_allocatable) return
+            if (.not. allocated(primal%decls(owner_di)%dims)) return
+            if (index(trim(primal%decls(owner_di)%dims), ",") > 0) return
+        end if
         found = .false.
         do i = 1, primal%n_stmts
             if (primal%stmts(i)%kind == FAD_ALLOCATE) then
                 if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
-                if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) return
-                target_di = primal%decl_index_of( &
-                    primal%exprs(primal%stmts(i)%allocation_args(1))%text)
+                if (array_owner) then
+                    if (.not. fixed_literal_owner_shape(primal, i)) return
+                    target_di = primal%decl_index_of(fad_base_name( &
+                        emit_expr(primal, primal%stmts(i)%allocation_args(1))))
+                else
+                    if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) return
+                    target_di = primal%decl_index_of( &
+                        primal%exprs(primal%stmts(i)%allocation_args(1))%text)
+                end if
                 if (target_di /= owner_di) cycle
                 if (found) return
                 if (primal%stmts(i)%allocation_source <= 0) return
@@ -681,8 +694,80 @@ contains
                     primal%stmts(i)%call_args(2), owner)) return
             end if
         end do
-        supported = found
+        if (.not. found) return
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            selector = emit_expr(primal, primal%stmts(i)%value)
+            if (array_owner) then
+                if (.not. fixed_literal_owner_selector(selector, owner)) cycle
+            else
+                if (.not. same_component_name(selector, owner)) cycle
+            end if
+            supported = .true.
+            return
+        end do
     end function has_fixed_source_owner
+
+    logical function fixed_literal_owner_shape(primal, stmt_index) result(found)
+        !! One explicit literal extent is the only allocatable owner-array
+        !! shape retained by the current ownership replay model.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: stmt_index
+
+        found = .false.
+        if (stmt_index <= 0 .or. stmt_index > primal%n_stmts) return
+        if (.not. allocated(primal%stmts(stmt_index)%allocation_args)) return
+        if (size(primal%stmts(stmt_index)%allocation_args) >= 1) then
+            if (fixed_literal_owner_selector(emit_expr(primal, &
+                primal%stmts(stmt_index)%allocation_args(1)), &
+                fad_base_name(emit_expr(primal, &
+                primal%stmts(stmt_index)%allocation_args(1))))) then
+                found = .true.
+                return
+            end if
+        end if
+        if (size(primal%stmts(stmt_index)%allocation_args) /= 2) return
+        found = integer_literal_expr(primal, &
+            primal%stmts(stmt_index)%allocation_args(2))
+    end function fixed_literal_owner_shape
+
+    logical function fixed_literal_owner_selector(selector, owner) result(found)
+        !! Match one literal element such as ``owners(2)`` to its owner.
+        character(len=*), intent(in) :: selector, owner
+        character(len=:), allocatable :: index_text
+        integer :: open, close, i, digit
+
+        found = .false.
+        if (fad_base_name(selector) /= trim(owner)) return
+        open = index(trim(selector), "(")
+        close = index(trim(selector), ")")
+        if (open <= 1 .or. close <= open) return
+        if (len_trim(selector) /= close) return
+        index_text = trim(selector(open + 1:close - 1))
+        if (len_trim(index_text) == 0) return
+        do i = 1, len_trim(index_text)
+            digit = iachar(index_text(i:i))
+            if (digit < iachar("0") .or. digit > iachar("9")) return
+        end do
+        found = .true.
+    end function fixed_literal_owner_selector
+
+    logical function integer_literal_expr(primal, idx) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        integer :: i, digit
+
+        found = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind /= FAD_CONST) return
+        if (.not. allocated(primal%exprs(idx)%text)) return
+        if (len_trim(primal%exprs(idx)%text) == 0) return
+        do i = 1, len_trim(primal%exprs(idx)%text)
+            digit = iachar(primal%exprs(idx)%text(i:i))
+            if (digit < iachar("0") .or. digit > iachar("9")) return
+        end do
+        found = .true.
+    end function integer_literal_expr
 
     function fixed_source_type(primal, owner_di) result(type_name)
         !! Return the concrete declared source type for the one supported
@@ -1273,7 +1358,8 @@ contains
         shadow = tangent_name(base, suffix, vector)
         if (len_trim(base) == 0) return
         if (primal%decl_index(base) <= 0) return
-        if (primal%decls(primal%decl_index(base))%is_allocatable) return
+        if (primal%decls(primal%decl_index(base))%is_allocatable .and. &
+            .not. primal%decls(primal%decl_index(base))%is_array) return
         if (primal%decls(primal%decl_index(base))%is_associate_alias) return
         if (primal%decls(primal%decl_index(base))%is_select_alias) return
         if (.not. decl_active(primal, primal%decl_index(base), active)) return

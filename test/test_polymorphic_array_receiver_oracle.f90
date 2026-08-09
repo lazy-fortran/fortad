@@ -41,13 +41,13 @@ program test_polymorphic_array_receiver_oracle
         "    end function top"//nl// &
         "end module polymorphic_array_receiver_case"//nl
 
-    character(len=32) :: independents(3)
+    character(len=32) :: independent_paths(3)
     type(fad_result_t) :: jvp, vjp, active_vjp
     character(len=:), allocatable :: dir, driver
     integer :: unit, stat
 
-    independents = [character(len=32) :: "a(2)%scale", "a(2)%bias", "x"]
-    jvp = fad_jvp(source, independents, from="top", name="top_jvp")
+    independent_paths = [character(len=32) :: "a(2)%scale", "a(2)%bias", "x"]
+    jvp = fad_jvp(source, independent_paths, from="top", name="top_jvp")
     call require_ok(jvp, "JVP")
     vjp = fad_vjp(source, ["x"], dependent="y", from="top", &
         name="top_vjp")
@@ -159,13 +159,13 @@ contains
     subroutine expect_refusal(case_source, label, needle)
         character(len=*), intent(in) :: case_source, label, needle
         type(fad_result_t) :: result
-        result = fad_jvp(case_source, independents, from="top")
+        result = fad_jvp(case_source, independent_paths, from="top")
         if (result%ok .or. .not. allocated(result%message) .or. &
             index(result%message, needle) == 0) then
             print *, "FAIL ", trim(label), ": ", result%message
             error stop 1
         end if
-        result = fad_vjp(case_source, independents, dependent="y", from="top")
+        result = fad_vjp(case_source, independent_paths, dependent="y", from="top")
         if (result%ok .or. .not. allocated(result%message) .or. &
             index(result%message, needle) == 0) then
             print *, "FAIL active VJP ", trim(label), ": ", result%message

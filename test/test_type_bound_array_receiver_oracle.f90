@@ -43,32 +43,32 @@ program test_type_bound_array_receiver_oracle
         "    end subroutine top_sub"//nl// &
         "end module type_bound_array_receiver_case"//nl
 
-    character(len=32) :: independents(3)
+    character(len=32) :: independent_paths(3)
     type(fad_result_t) :: jvp, vjp, sub_jvp, sub_vjp
     type(fad_result_t) :: alloc_jvp, alloc_vjp
     character(len=:), allocatable :: dir, driver
     integer :: unit, stat
 
-    independents = [character(len=32) :: "models(2)%scale", &
+    independent_paths = [character(len=32) :: "models(2)%scale", &
         "models(2)%bias", "x"]
-    jvp = fad_jvp(source, independents, from="top", name="top_jvp")
+    jvp = fad_jvp(source, independent_paths, from="top", name="top_jvp")
     if (.not. jvp%ok) then
         print *, "FAIL array receiver function JVP generation: ", jvp%message
         error stop 1
     end if
-    vjp = fad_vjp(source, independents, dependent="y", from="top", &
+    vjp = fad_vjp(source, independent_paths, dependent="y", from="top", &
         name="top_vjp")
     if (.not. vjp%ok) then
         print *, "FAIL array receiver function VJP generation: ", vjp%message
         error stop 1
     end if
-    sub_jvp = fad_jvp(source, independents, from="top_sub", name="top_sub_jvp")
+    sub_jvp = fad_jvp(source, independent_paths, from="top_sub", name="top_sub_jvp")
     if (.not. sub_jvp%ok) then
         print *, "FAIL array receiver subroutine JVP generation: ", &
             sub_jvp%message
         error stop 1
     end if
-    sub_vjp = fad_vjp(source, independents, dependent="y", from="top_sub", &
+    sub_vjp = fad_vjp(source, independent_paths, dependent="y", from="top_sub", &
         name="top_sub_vjp")
     if (.not. sub_vjp%ok) then
         print *, "FAIL array receiver subroutine VJP generation: ", &
@@ -174,9 +174,9 @@ program test_type_bound_array_receiver_oracle
     call expect_refusal(dynamic_source(), "dynamic receiver indices", &
         "dynamic receiver indices")
     call expect_refusal(section_source(), "array sections", "array sections")
-    alloc_jvp = fad_jvp(allocatable_source(), independents, from="top", &
+    alloc_jvp = fad_jvp(allocatable_source(), independent_paths, from="top", &
         name="alloc_top_jvp")
-    alloc_vjp = fad_vjp(allocatable_source(), independents, dependent="y", &
+    alloc_vjp = fad_vjp(allocatable_source(), independent_paths, dependent="y", &
         from="top", name="alloc_top_vjp")
     if (.not. alloc_jvp%ok .or. .not. alloc_vjp%ok) then
         print *, "FAIL allocatable array receiver generation: ", &
