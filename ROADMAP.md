@@ -104,7 +104,7 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current main pins are FortAD `3a6d299`, FortFront `c86fdc75`, and
+The current main pins are FortAD `f42d6aa`, FortFront `c86fdc75`, and
 fortad-bench `37bbc9a`. The next49 evidence shard intentionally retains its
 historical probe pins (`2636206` and `35241746`), next50 retains
 (`65280f5` and `8cf7dde7`), next51 retains (`be82f5d` and `4f4d45fc`), and
