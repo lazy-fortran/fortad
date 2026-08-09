@@ -440,6 +440,16 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   assigned target/signature facts, with JVP/VJP, finite-difference, and adjoint
   checks. Reassignment, missing assignment, `NULL()`, generic, ambiguous,
   dynamic, alias, and active-global callback paths remain refusals.
+  **P8.6b bounded optional passed-procedure callback:** the same fixed target
+  may be supplied by keyword to an optional procedure dummy. An omitted
+  optional callback is also accepted when FortFront identifies exactly one
+  direct `PRESENT(callback)` guard with no `ELSE` or `ELSE IF`; FortAD removes
+  that unreachable arm before JVP/VJP generation. The independent
+  `test_optional_passed_callback_oracle.f90` checks both numerical paths,
+  finite differences, adjoint identity, and named refusals for unsafe omission,
+  reassignment, global mutable state, and ownership changes. Unguarded,
+  forwarded, multiply guarded, aliased, dynamically dispatched, and ownership-
+  changing callback paths remain outside the contract.
   Reverse mode also replays one scalar local or dummy `class(*)`, allocatable
   owner acquired from a declared concrete `SOURCE=` object, with one concrete
   `SELECT TYPE` arm and final deallocation. Ambiguous dispatch, polymorphic or

@@ -2322,10 +2322,21 @@ contains
                 return
             end if
             if (.not. call_query%arguments(i)%is_supplied) then
-                call refuse_passed_callback(line, &
-                    "an omitted or optional callback target is not differentiated", &
-                    status)
-                return
+                if (.not. call_query%arguments(i)%is_optional) then
+                    call refuse_passed_callback(line, &
+                        "a required callback actual is omitted", status)
+                    return
+                end if
+                if (.not. optional_callback_guard_supported(arena, &
+                    call_query%procedure_node_index, &
+                    call_query%arguments(i)%formal_name)) then
+                    call refuse_passed_callback(line, &
+                        "omitted optional callback requires one present(callback) "// &
+                        "guard without an ELSE branch", status)
+                    return
+                end if
+                formal = call_query%arguments(i)%formal_name
+                cycle
             end if
             actual = query_procedure_actual_argument(arena, idx, &
                 call_query%arguments(i)%formal_name)
@@ -2407,6 +2418,165 @@ contains
             target = actual%procedure_name
         end do
     end subroutine resolve_passed_procedure
+
+    logical function optional_callback_guard_supported(arena, procedure_index, &
+            formal_name) result(supported)
+        !! Prove the only safe omitted-callback shape in this slice.  The
+        !! optional callback must be referenced solely inside one direct
+        !! ``if (present(callback))`` arm with no ELSE or ELSE IF.  The
+        !! inliner can then discard that arm without inventing a procedure
+        !! value or changing the caller's control flow.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: procedure_index
+        character(len=*), intent(in) :: formal_name
+        type(program_unit_query_t) :: unit
+        integer, allocatable :: guard_then(:)
+        integer :: i, guard_count, guard_condition
+
+        supported = .false.
+        guard_count = 0
+        unit = query_program_unit(arena, procedure_index)
+        if (.not. unit%found) return
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (.not. inside_procedure(arena, i, procedure_index)) cycle
+            select type (node => arena%entries(i)%node)
+                type is (if_node)
+                if (.not. present_callback_condition(arena, &
+                    node%condition_index, formal_name)) cycle
+                guard_count = guard_count + 1
+                if (guard_count > 1) return
+                if (allocated(node%elseif_blocks)) then
+                    if (size(node%elseif_blocks) > 0) return
+                end if
+                if (allocated(node%else_body_indices)) then
+                    if (size(node%else_body_indices) > 0) return
+                end if
+                if (.not. allocated(node%then_body_indices)) return
+                if (allocated(guard_then)) deallocate (guard_then)
+                guard_then = node%then_body_indices
+                guard_condition = node%condition_index
+            class default
+            end select
+        end do
+        if (guard_count /= 1) return
+
+        ! Require a direct callback invocation in the guarded arm.  The
+        ! identifier scan below rejects forwarding, pointer association, and
+        ! any other use of the omitted procedure outside that arm.
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (.not. inside_procedure(arena, i, procedure_index)) cycle
+            select type (node => arena%entries(i)%node)
+                type is (call_or_subscript_node)
+                if (.not. same_callback_name(node%name, formal_name)) cycle
+                if (.not. descendant_of_body(arena, i, guard_then)) return
+                supported = .true.
+            class default
+            end select
+        end do
+        if (.not. supported) return
+
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (.not. inside_procedure(arena, i, procedure_index)) cycle
+            select type (node => arena%entries(i)%node)
+                type is (identifier_node)
+                if (.not. same_callback_name(node%name, formal_name)) cycle
+                if (descendant_of_body(arena, i, guard_then)) cycle
+                if (descendant_of_condition(arena, i, guard_condition)) cycle
+                return
+            class default
+            end select
+        end do
+    end function optional_callback_guard_supported
+
+    logical function present_callback_condition(arena, condition_index, &
+            formal_name) result(matches)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: condition_index
+        character(len=*), intent(in) :: formal_name
+        integer :: argument
+
+        matches = .false.
+        if (condition_index <= 0 .or. condition_index > arena%size) return
+        if (.not. arena%has_node_at(condition_index)) return
+        select type (condition => arena%entries(condition_index)%node)
+            type is (call_or_subscript_node)
+            if (.not. same_callback_name(condition%name, "present")) return
+            if (.not. allocated(condition%arg_indices)) return
+            if (size(condition%arg_indices) /= 1) return
+            argument = condition%arg_indices(1)
+            if (argument <= 0 .or. argument > arena%size) return
+            if (.not. arena%has_node_at(argument)) return
+            select type (actual => arena%entries(argument)%node)
+                type is (identifier_node)
+                matches = same_callback_name(actual%name, formal_name)
+            class default
+            end select
+        class default
+        end select
+    end function present_callback_condition
+
+    logical function inside_procedure(arena, node_index, procedure_index) &
+            result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: node_index, procedure_index
+        integer :: current
+
+        found = .false.
+        current = node_index
+        do while (current > 0)
+            if (current == procedure_index) then
+                found = .true.
+                return
+            end if
+            if (current > arena%size) return
+            if (.not. arena%has_node_at(current)) return
+            current = arena%entries(current)%parent_index
+        end do
+    end function inside_procedure
+
+    logical function descendant_of_body(arena, node_index, body_indices) &
+            result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: node_index
+        integer, intent(in) :: body_indices(:)
+        integer :: i, current
+
+        found = .false.
+        current = node_index
+        do while (current > 0)
+            do i = 1, size(body_indices)
+                if (current == body_indices(i)) then
+                    found = .true.
+                    return
+                end if
+            end do
+            if (current > arena%size) return
+            if (.not. arena%has_node_at(current)) return
+            current = arena%entries(current)%parent_index
+        end do
+    end function descendant_of_body
+
+    logical function descendant_of_condition(arena, node_index, condition_index) &
+            result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: node_index, condition_index
+        integer :: current
+
+        found = .false.
+        current = node_index
+        do while (current > 0)
+            if (current == condition_index) then
+                found = .true.
+                return
+            end if
+            if (current > arena%size) return
+            if (.not. arena%has_node_at(current)) return
+            current = arena%entries(current)%parent_index
+        end do
+    end function descendant_of_condition
 
     logical function procedure_pointer_has_passed_use(arena, pointer_name) &
             result(found)
