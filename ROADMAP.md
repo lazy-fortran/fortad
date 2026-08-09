@@ -104,11 +104,12 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current feature pins are FortAD `1326386`, FortFront `c48c3e8b`, and
-fortad-bench `25526ca`. The next49 evidence shard intentionally retains its
-historical probe pins (`2636206` and `6c27ca86`) so its result remains
-reproducible; current main heads are recorded here separately. FortAD has
-bounded `SPREAD` JVP and direct array-valued reverse-transpose support, and now consumes FortFront's bounded
+The current feature pins are FortAD `df99ec2`, FortFront `8da49474`, and
+fortad-bench `ea12ed8`. The next49 evidence shard intentionally retains its
+historical probe pins (`2636206` and `6c27ca86`), and next50 retains
+(`65280f5` and `c48c3e8b`), so those results remain reproducible; current main
+heads are recorded here separately. FortAD has bounded `SPREAD` JVP and direct
+array-valued reverse-transpose support, and now consumes FortFront's bounded
 procedure-pointer `ASSOCIATED` state facts for a fixed same-scope callback
 guard. The new independent oracle checks compiled JVP/VJP values, finite
 differences, the adjoint identity, and named refusals. Active global mutable
@@ -132,6 +133,12 @@ identity, and named dispatch, descriptor, alias, global-state, and unresolved
 fact refusals. Other runtime ranks, aliases, computed selectors, descriptor
 ownership, and mutable global state remain source-local refusals.
 
+FortFront `8da49474` also exposes formal procedure-interface signatures and
+explicit compatible, incompatible, and unresolved actual/formal states. FortAD
+has not yet consumed that contract for generic callback differentiation; the
+next interface slice must use these facts rather than infer a callback
+signature.
+
 FortAD also consumes the FortFront type-bound dispatch target set for direct
 abstract/deferred function calls only when it contains exactly one concrete
 same-file implementation. The selected child is lowered to one structural
@@ -149,9 +156,9 @@ facts and refused when ownership or dynamic type is not tracked; the
 independent nested-component oracle verifies that no derivative source is
 emitted for that boundary.
 
-The bench currently records 989 of 2,014 total candidates (49.1%) and 481 of
-1,432 pure-Fortran Tapenade candidates (33.6%); 1,025 total candidates remain
-in the queue, including 951 pure-Fortran cases. Its latest shard is `next49`,
+The bench currently records 1,037 of 2,014 total candidates (51.5%) and 529
+of 1,432 pure-Fortran Tapenade candidates (36.9%); 977 total candidates remain
+in the queue, including 903 pure-Fortran cases. Its latest shard is `next50`,
 which records 48 modern-feature procedure roots with independent source-map
 and refusal oracles.
 
