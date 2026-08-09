@@ -104,12 +104,14 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current feature pins are FortAD `8c764ff`, FortFront `a0e109d5`, and
-fortad-bench `33dff02`. The next49 evidence shard intentionally retains its
+The current main pins are FortAD `3a6d299`, FortFront `64c3f252`, and
+fortad-bench `37bbc9a`. The next49 evidence shard intentionally retains its
 historical probe pins (`2636206` and `6c27ca86`), next50 retains
-(`65280f5` and `c48c3e8b`), and next51 retains (`be82f5d` and `72bc7578`),
-so those results remain reproducible; current main heads are recorded here
-separately. FortAD has bounded `SPREAD` JVP and direct array-valued
+(`65280f5` and `c48c3e8b`), next51 retains (`be82f5d` and `72bc7578`), and
+next52 retains (`3a6d299` and `a0e109d5`), so those results remain
+reproducible. The latest semantic FortAD feature commit is `8c764ff`; the
+current main heads include the documentation refreshes and upstream diagnostic
+fix. FortAD has bounded `SPREAD` JVP and direct array-valued
 reverse-transpose support, and consumes FortFront's bounded procedure-pointer
 `ASSOCIATED` state facts for a fixed same-scope callback guard. It now also
 consumes exact formal/actual interface facts for a fixed same-file scalar
@@ -127,7 +129,7 @@ checks central differences and the adjoint identity. Optional arrays,
 components, ownership-bearing arguments, active global mutable state, and
 unsafe aliasing remain outside the slice and retain source-local refusals.
 
-FortFront `a0e109d5` exposes assumed-rank selector bounds identity and reports
+FortFront `64c3f252` exposes assumed-rank selector bounds identity and reports
 unknown source rank explicitly. FortAD now consumes those facts for one direct
 `real(8)` `RANK (1)` arm: it cross-checks the source `(..)` bounds node before
 using the rank-one IR contract, and emits both JVP and VJP code. The independent
@@ -136,7 +138,7 @@ identity, and named dispatch, descriptor, alias, global-state, and unresolved
 fact refusals. Other runtime ranks, aliases, computed selectors, descriptor
 ownership, and mutable global state remain source-local refusals.
 
-FortFront `a0e109d5` also exposes formal procedure-interface signatures and
+FortFront `64c3f252` also exposes formal procedure-interface signatures and
 explicit compatible, incompatible, and unresolved actual/formal states, plus
 per-specific `SELECT TYPE` generic/PASS metadata and concrete abstract/deferred
 binding provenance. FortAD consumes the interface facts for one fixed same-file
@@ -165,14 +167,14 @@ facts and refused when ownership or dynamic type is not tracked; the
 independent nested-component oracle verifies that no derivative source is
 emitted for that boundary.
 
-The bench currently records 1,085 of 2,014 total candidates (53.9%) and 577
-of 1,432 pure-Fortran Tapenade candidates (40.3%). The remaining queue is 929
-rows: 855 pure-Fortran and 74 mixed-language cases. Its latest shard is
-`next51`, which records 48 modern-feature procedure roots with four generated
-products, 44 explicit phase-specific refusals, and independent source-map or
+The bench currently records 1,133 of 2,014 total candidates (56.3%) and 625
+of 1,432 pure-Fortran Tapenade candidates (43.6%). The remaining queue is 881
+rows: 807 pure-Fortran and 74 mixed-language cases. Its latest shard is
+`next52`, which records 48 modern-feature procedure roots with 16 generated
+products, 32 explicit phase-specific refusals, and independent source-map or
 refusal oracles. The pure-Fortran breakdown is 64 runnable, 134 measured
-expected refusals, 34 invalid-upstream closures, 307 additional FortAD feature
-boundaries, and 38 other bounded evidence closures.
+expected refusals, 34 invalid-upstream closures, 339 additional FortAD feature
+boundaries, and 54 other bounded evidence closures.
 
 ## Repository responsibilities
 
