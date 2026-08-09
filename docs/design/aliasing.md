@@ -16,10 +16,16 @@ therefore passive rather than differentiated values.
 A strided section such as `x(1:size(x):2)` may be noncontiguous, and two
 sections can overlap without having the same spelling. FortAD reports that
 storage identity is not tracked instead of treating such a section as an
-ordinary element. Vector subscripts such as `x(idx)` where `idx` is an array,
-computed or component bases, pointer/target aliases, and rank greater than two
-remain explicit refusals. Vector subscripts do not have a range node in the
-frontend, so FortAD checks the declared rank of each subscript.
+ordinary element. A direct vector subscript `x(idx)` is the one bounded
+exception: FortAD accepts an `INTEGER, PARAMETER` vector with literal,
+positive, unique values when the source has one explicit literal extent. The
+parameter declaration and initializer are copied into generated JVP and VJP
+procedures, so the vector remains passive and reverse mode can scatter safely.
+Dynamic vectors, duplicate or out-of-range indices, vector-plus-range
+sections, computed or component bases, pointer/target aliases, and rank greater
+than two remain explicit refusals. Vector subscripts do not have a range node in
+the frontend, so FortAD checks both the declared source extent and the
+subscript declaration.
 
 ```fortran
 use fortad, only: fad_jvp, fad_result_t
@@ -34,7 +40,10 @@ result = fad_jvp(source, ["x"])
 The executable boundary is
 [`test_alias_boundary_oracle.f90`](../../test/test_alias_boundary_oracle.f90).
 It checks both JVP and VJP refusals for `TARGET`, `POINTER`, pointer
-association, a strided section, and a vector subscript. The positive
+association, a strided section, and unsupported vector subscripts. The
+positive static-vector path is independently checked by
+[`test_constant_vector_subscript_oracle.f90`](../../test/test_constant_vector_subscript_oracle.f90).
+The positive
 rank-one and rank-two section paths are independently checked against hand
 derivatives, central differences, and the adjoint identity by
 [`test_contiguous_section_oracle.f90`](../../test/test_contiguous_section_oracle.f90)

@@ -6,7 +6,7 @@ module fortad_forward
     !! rule needs it and no value has to be saved. Statements whose tangent is a
     !! structural zero produce no code at all: that is activity analysis falling
     !! out of the zero-aware rule builders rather than being a separate pass.
-    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, &
+    use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
         expr_const, expr_var, expr_binop, expr_unop, expr_call, &
         fad_base_name, fad_suffix_name, &
         FAD_CONST, FAD_VAR, FAD_BINOP, FAD_UNOP, FAD_CALL, &
@@ -14,7 +14,8 @@ module fortad_forward
         FAD_ELSE, FAD_END_IF, FAD_CALL_STMT, FAD_INTENT_IN, &
         FAD_INTENT_OUT, FAD_INTENT_INOUT, FAD_INTENT_NONE, &
         FAD_SELECT_TYPE, FAD_TYPE_IS, FAD_CLASS_IS, FAD_CLASS_DEFAULT, &
-        FAD_END_SELECT, FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC
+        FAD_END_SELECT, FAD_ALLOCATE, FAD_DEALLOCATE, FAD_MOVE_ALLOC, &
+        copy_decl
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule
     use fortad_registry, only: call_rule_has, call_rule_lines, &
         call_rule_substitute
@@ -62,6 +63,7 @@ contains
         type(forward_spec_t), intent(in) :: spec
         type(fad_proc_t), intent(out) :: tangent
         type(forward_status_t), intent(out) :: status
+        type(fad_decl_t) :: local_decl
         character(len=:), allocatable :: suffix, ndir
         character(len=256), allocatable :: active_paths(:)
         character(len=256) :: decl_name, decl_type, decl_dims, tangent_type
@@ -152,10 +154,18 @@ contains
             if (allocated(primal%decls(i)%dims)) then
                 decl_dims = primal%decls(i)%dims
             end if
-            ignored = tangent%add_decl_fields(decl_name, decl_type, &
-                FAD_INTENT_NONE, primal%decls(i)%is_value, &
-                primal%decls(i)%is_array, primal%decls(i)%is_contiguous, &
-                .false., decl_dims, .false., primal%decls(i)%is_allocatable)
+            if (primal%decls(i)%is_parameter) then
+                call copy_decl(local_decl, primal%decls(i))
+                local_decl%intent = FAD_INTENT_NONE
+                local_decl%is_result = .false.
+                local_decl%is_optional = .false.
+                ignored = tangent%add_decl(local_decl)
+            else
+                ignored = tangent%add_decl_fields(decl_name, decl_type, &
+                    FAD_INTENT_NONE, primal%decls(i)%is_value, &
+                    primal%decls(i)%is_array, primal%decls(i)%is_contiguous, &
+                    .false., decl_dims, .false., primal%decls(i)%is_allocatable)
+            end if
             if (active(i)) then
                 tangent_type = decl_type
                 if (primal%decls(i)%is_polymorphic) then

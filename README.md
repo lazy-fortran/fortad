@@ -54,7 +54,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Derived components | bounded concrete scalar, nested, inherited, array, and fixed-source polymorphic component paths |
 | Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known bindings and bounded direct polymorphic dispatch |
 | Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
-| Aliasing and sections | bounded rank-one/rank-two contiguous range sections. Named refusals cover `pointer`, `target`, pointer association, vector subscripts, and noncontiguous or computed sections |
+| Aliasing and sections | bounded rank-one/rank-two contiguous range sections plus literal unique `INTEGER, PARAMETER` vector subscripts on explicit-shape arrays. Named refusals cover aliases, dynamic/duplicate/out-of-range vectors, vector-plus-range sections, and noncontiguous or computed sections |
 | GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |
 
 Forward vector mode places the direction index first. For an array `x(n)`, a

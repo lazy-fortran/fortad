@@ -165,6 +165,11 @@ module fortad_ir
         !! descriptor and cannot be emitted as an ordinary assumed-shape
         !! array.
         logical :: is_allocatable = .false.
+        !! Compile-time parameter declarations retain their initializer so
+        !! generated tangent/reverse procedures can reuse passive index
+        !! vectors and scalar constants.
+        logical :: is_parameter = .false.
+        character(len=:), allocatable :: initializer
         !! Semantic type facts copied from fortfront.  These are deliberately
         !! not inferred from type_name by the differentiation passes: a
         !! polymorphic allocatable needs a dynamic-type ownership model, not a
@@ -511,6 +516,7 @@ contains
         if (allocated(out%name)) deallocate (out%name)
         if (allocated(out%type_name)) deallocate (out%type_name)
         if (allocated(out%dims)) deallocate (out%dims)
+        if (allocated(out%initializer)) deallocate (out%initializer)
         if (allocated(source%name)) out%name = source%name
         if (allocated(source%type_name)) out%type_name = source%type_name
         if (allocated(source%dims)) out%dims = source%dims
@@ -521,6 +527,8 @@ contains
         out%is_array = source%is_array
         out%is_contiguous = source%is_contiguous
         out%is_allocatable = source%is_allocatable
+        out%is_parameter = source%is_parameter
+        if (allocated(source%initializer)) out%initializer = source%initializer
         out%is_polymorphic = source%is_polymorphic
         out%is_unlimited_polymorphic = source%is_unlimited_polymorphic
         out%is_select_alias = source%is_select_alias
@@ -599,6 +607,8 @@ contains
         out%is_contiguous = is_contiguous
         out%is_result = is_result
         out%is_allocatable = is_allocatable
+        out%is_parameter = .false.
+        if (allocated(out%initializer)) deallocate (out%initializer)
         out%is_polymorphic = .false.
         out%is_unlimited_polymorphic = .false.
         out%is_select_alias = .false.

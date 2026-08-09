@@ -1,13 +1,15 @@
 module fortad_lower_statements
     !! Lower statement and expression trees from fortfront into fortad IR.
     use fortfront, only: ast_arena_t, module_node, assignment_node, &
-        binary_op_node, identifier_node, literal_node, call_or_subscript_node, &
+        binary_op_node, identifier_node, literal_node, array_literal_node, &
+        call_or_subscript_node, &
         declaration_node, do_loop_node, if_node, parameter_declaration_node, &
         subroutine_call_node, use_statement_node, comment_node, &
         allocate_statement_node, deallocate_statement_node, &
         pointer_assignment_node, &
         return_node, &
-        get_select_type_info, get_type_guard_info, component_access_query_t, &
+        get_select_type_info, get_type_guard_info, get_declaration_initializer, &
+        get_array_literal_elements, component_access_query_t, &
         query_component_access, query_derived_type, query_type_binding, &
         derived_type_query_t, type_binding_query_t, declaration_query_t, &
         query_declaration, query_program_unit, program_unit_query_t, &
@@ -51,6 +53,7 @@ module fortad_lower_statements
     use frontend_compiler_queries, only: global_reference_query_t, &
         query_active_global_references
     use frontend_compiler_resolution, only: BINDING_DECLARATION, &
+        BINDING_NAMED_CONSTANT, &
         BINDING_FUNCTION, BINDING_SUBROUTINE, BINDING_ASSOCIATE_NAME, &
         BINDING_DUMMY_ARGUMENT, BINDING_GENERIC_INTERFACE, &
         declaration_binding_t, resolve_identifier_binding
@@ -1525,6 +1528,11 @@ contains
         d%is_array = n%is_array
         d%is_contiguous = n%is_contiguous
         d%is_allocatable = n%is_allocatable
+        d%is_parameter = n%is_parameter
+        if (n%is_parameter .and. n%has_initializer) then
+            d%initializer = parameter_initializer_text(arena, &
+                n%initializer_index)
+        end if
         storage = query_storage(arena, idx)
         if (storage%found) then
             d%is_polymorphic = storage%is_polymorphic
@@ -1561,6 +1569,47 @@ contains
             end if
         end if
     end subroutine fill_decl
+
+    function parameter_initializer_text(arena, idx) result(text)
+        !! Render a passive parameter initializer for generated procedures.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        character(len=:), allocatable :: text
+        integer, allocatable :: elements(:)
+        integer :: i
+
+        text = ""
+        if (idx <= 0 .or. idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        select type (initializer => arena%entries(idx)%node)
+            type is (literal_node)
+            text = trim(initializer%value)
+            type is (array_literal_node)
+            call get_array_literal_elements(arena, idx, elements)
+            text = "(/"
+            do i = 1, size(elements)
+                if (i > 1) text = text//", "
+                if (elements(i) <= 0 .or. elements(i) > arena%size) then
+                    text = ""
+                    return
+                end if
+                if (.not. arena%has_node_at(elements(i))) then
+                    text = ""
+                    return
+                end if
+                select type (element => arena%entries(elements(i))%node)
+                    type is (literal_node)
+                    text = text//trim(element%value)
+                class default
+                    text = ""
+                    return
+                end select
+            end do
+            text = text//"/)"
+        class default
+            text = ""
+        end select
+    end function parameter_initializer_text
 
     logical function is_procedure_pointer_type(n) result(is_callback)
         !! Whether a declaration is a procedure pointer, rather than a data
@@ -2456,7 +2505,7 @@ contains
         procedure_name = ""
         do i = 1, size(query%candidates)
             if (query%candidates(i)%procedure_node_index /= &
-                    query%selected_procedure_node_index) cycle
+                query%selected_procedure_node_index) cycle
             if (allocated(query%candidates(i)%procedure_name)) then
                 procedure_name = query%candidates(i)%procedure_name
             end if
@@ -3619,7 +3668,7 @@ contains
 
     logical function has_vector_subscript(arena, arg_indices, lowered_args, proc) &
             result(found)
-        !! Whether an array access receives an array-valued subscript.
+        !! Whether an array access receives an unsupported array-valued subscript.
         !!
         !! A vector subscript has no range node: ``x(idx)`` is represented as
         !! an identifier argument, so declaration rank must be consulted after
@@ -3642,6 +3691,8 @@ contains
                 decl_idx = proc%decl_index(name)
                 if (decl_idx > 0) then
                     if (proc%decls(decl_idx)%is_array) then
+                        if (supported_constant_vector_subscript(arena, node_idx, &
+                            proc, name)) cycle
                         found = .true.
                         return
                     end if
@@ -3657,6 +3708,85 @@ contains
             end if
         end do
     end function has_vector_subscript
+
+    logical function supported_constant_vector_subscript(arena, idx, proc, base) &
+            result(supported)
+        !! Permit only a static unique INTEGER PARAMETER index vector.
+        !!
+        !! FAD_INDEX already emits indexed reads and reverse scatter-adds. A
+        !! dynamic vector, alias, or duplicate index needs runtime storage
+        !! identity that the IR deliberately does not represent.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(in) :: proc
+        character(len=*), intent(in) :: base
+        type(declaration_binding_t) :: binding
+        character(len=:), allocatable :: binding_error
+        integer, allocatable :: elements(:), values(:)
+        integer :: declaration_index, initializer_index, i, j, ios, base_index
+        integer :: extent
+        logical :: declaration_is_parameter, declaration_is_array
+
+        supported = .false.
+        if (idx <= 0) return
+        if (idx > arena%size) return
+        if (.not. arena%has_node_at(idx)) return
+        select type (reference => arena%entries(idx)%node)
+            type is (identifier_node)
+            ! Continue with the binding lookup below.
+        class default
+            return
+        end select
+        call resolve_identifier_binding(arena, idx, binding, binding_error)
+        if (.not. binding%found) return
+        if (binding%binding_kind /= BINDING_DECLARATION .and. &
+            binding%binding_kind /= BINDING_NAMED_CONSTANT) return
+        if (.not. allocated(binding%name)) return
+        declaration_index = binding%declaration_node_index
+        if (declaration_index <= 0) return
+        if (declaration_index > arena%size) return
+        if (.not. arena%has_node_at(declaration_index)) return
+        declaration_is_parameter = .false.
+        declaration_is_array = .false.
+        select type (declaration => arena%entries(declaration_index)%node)
+            type is (declaration_node)
+            declaration_is_parameter = declaration%is_parameter
+            declaration_is_array = declaration%is_array
+        class default
+            return
+        end select
+        if (.not. declaration_is_parameter) return
+        if (.not. declaration_is_array) return
+        if (proc%decl_index_of(trim(binding%name)) <= 0) return
+        base_index = proc%decl_index(trim(base))
+        if (base_index <= 0) return
+        if (.not. allocated(proc%decls(base_index)%dims)) return
+        if (index(trim(proc%decls(base_index)%dims), ",") > 0) return
+        read (proc%decls(base_index)%dims, *, iostat=ios) extent
+        if (ios /= 0 .or. extent <= 0) return
+        initializer_index = get_declaration_initializer(arena, declaration_index)
+        if (initializer_index <= 0) return
+        call get_array_literal_elements(arena, initializer_index, elements)
+        if (size(elements) == 0) return
+        allocate (values(size(elements)))
+        do i = 1, size(elements)
+            if (elements(i) <= 0) return
+            if (elements(i) > arena%size) return
+            if (.not. arena%has_node_at(elements(i))) return
+            select type (literal => arena%entries(elements(i))%node)
+                type is (literal_node)
+                read (literal%value, *, iostat=ios) values(i)
+                if (ios /= 0) return
+                if (values(i) <= 0 .or. values(i) > extent) return
+            class default
+                return
+            end select
+            do j = 1, i - 1
+                if (values(i) == values(j)) return
+            end do
+        end do
+        supported = .true.
+    end function supported_constant_vector_subscript
 
     subroutine refuse_vector_subscript(arena, idx, status)
         !! Refuse array-valued subscripts until storage identity is tracked.
@@ -4762,7 +4892,7 @@ contains
             ! receiver path can misread `typed%leaf%run` as binding `leaf%run`
             ! on `container_t`.
             if (allocated(node%name) .and. &
-                    has_nested_component_receiver(node%name)) then
+                has_nested_component_receiver(node%name)) then
                 arm_index = select_type_arm_for_call(arena, idx)
                 if (arm_index > 0) then
                     component_dispatch = query_select_type_component_dispatch( &
@@ -4990,7 +5120,7 @@ contains
         if (named_pass) named_pass = len_trim( &
             dispatch%implementation_pass_name) > 0
         if (.not. named_pass .and. dispatch%pass_arg .and. &
-                allocated(dispatch%pass_name)) then
+            allocated(dispatch%pass_name)) then
             pass_name = trim(dispatch%pass_name)
             named_pass = len_trim(pass_name) > 0
         else if (named_pass) then
