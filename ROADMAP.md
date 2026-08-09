@@ -564,6 +564,10 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   focused `test_forward_oracle` and `test_fortad_ir_copy` lanes pass under
   NVHPC after `fffb75b`; the new lifetime oracle has GNU evidence but has not
   yet been signed off in the NVHPC lane.
+  The new P8.6c two-target callback oracle also compiles through the NVHPC
+  build, but its test process aborts with `corrupted size vs. prev_size`
+  before behavioral assertions. This is the same compiler/runtime allocator
+  lane boundary and is not counted as generated-source evidence.
   A fixed-source scalar `class(*)` component assignment inside one proven
   `TYPE IS` or `CLASS IS` arm now differentiates through concrete shadows in
   JVP and VJP. Unresolved multi-arm dispatch and all unsafe ownership forms
