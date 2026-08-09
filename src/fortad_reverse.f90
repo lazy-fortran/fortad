@@ -6229,9 +6229,9 @@ contains
                                     reverse_cotangent_alias)
                             end block
                         end if
+                        return
                     end if
                 end if
-                return
             end if
             if (trim(node_text) == "sum") then
                 if (size(node_args) > 0) then
