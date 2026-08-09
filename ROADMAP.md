@@ -87,8 +87,12 @@ pointers, ownership changes, and unresolved dispatch remain named refusals.
 It also replays one bounded concrete scalar component lifetime across
 `ALLOCATE`, `MOVE_ALLOC`, and `DEALLOCATE` in JVP and VJP, with an independent
 finite-difference, adjoint-identity, and refusal oracle. Array-valued lifetime
-replay, changing shapes, polymorphic lifetime changes, aliases, pointers, and
-unresolved ownership remain explicit boundaries.
+replay, changing shapes, unresolved polymorphic ownership, aliases, and
+pointers remain explicit boundaries. A new fixed-path scalar polymorphic
+component slice transfers the paired shadow through `MOVE_ALLOC` when a
+concrete `SOURCE=` object and one matching `SELECT TYPE` arm prove the dynamic
+type; unresolved dispatch, changing ownership, and array-valued polymorphic
+lifetime remain refusals.
 The adjoint shadow is caller-owned and must already be allocated, so this
 slice does not pretend to solve general allocatable lifetime replay.
 Fixed-path `SELECT TYPE`, `CLASS IS`, abstract/deferred dispatch, inherited
@@ -514,8 +518,11 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   unresolved dispatch refused by the independent oracle.
   The latest NVIDIA compatibility slice also replays one concrete scalar component across
   `ALLOCATE`, `MOVE_ALLOC`, and `DEALLOCATE` in JVP and VJP with an independent
-  numerical/refusal oracle; arrays, changing shapes, polymorphic lifetime
-  changes, aliases, and pointers remain explicit boundaries. That NVIDIA
+  numerical/refusal oracle; arrays, changing shapes, unresolved polymorphic
+  ownership, aliases, and pointers remain explicit boundaries. The current
+  GNU-tested fixed-path scalar polymorphic component slice also transfers its
+  paired shadow through `MOVE_ALLOC` after a concrete `SOURCE=` and matching
+  `SELECT TYPE` proof. That NVIDIA
   compatibility slice removes remaining intrinsic assignment of allocatable
   expression and statement arenas and lowers ordinary call arguments directly
   into the IR record. The bounded component-dependent reverse slice adds a shaped
@@ -1629,6 +1636,18 @@ of selected child ends the fixed-path derivative contract.
         checks hand values, central differences, the adjoint identity, and a
         precise rank-five refusal. Whole-component, lifetime, alias,
         polymorphic, global, and non-REAL paths remain named boundaries.
+      - [x] **P7.2l fixed-path polymorphic component MOVE_ALLOC.** FortAD now
+        transfers a scalar `class(base_t), allocatable` component shadow from
+        one concrete derived object to another when `ALLOCATE(..., SOURCE=)`
+        and one matching concrete `SELECT TYPE` arm prove the dynamic type.
+        JVP and VJP replay the component descriptor transfer and final
+        deallocation. The independent
+        [`test_polymorphic_component_move_oracle.f90`](test/test_polymorphic_component_move_oracle.f90)
+        checks the hand derivative, central finite difference, adjoint
+        identity, and an unresolved-polymorphism refusal. Array-valued
+        polymorphic components, dynamic sources or indices, aliases,
+        pointers/TARGET, repeated lifetimes, and global ownership remain
+        explicit refusals.
 - [ ] **P7.3 Aliasing and sections.** Track `pointer`, `target`, association,
       overlapping actual arguments, noncontiguous sections, and component
       aliases by storage identity. Test aliases that share a target and aliases
