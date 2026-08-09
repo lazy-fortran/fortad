@@ -14,6 +14,7 @@ module fortad_lower_statements
         binding_hierarchy_query_t, query_type_binding_hierarchy, &
         generic_call_query_t, query_generic_call, resolved_type_query_t, &
         query_resolved_type, &
+        defined_operator_query_t, query_defined_operator, &
         call_arguments_query_t, query_call_arguments, &
         procedure_actual_argument_query_t, query_procedure_actual_argument, &
         procedure_signature_query_t, procedure_dummy_query_t, &
@@ -2342,9 +2343,7 @@ contains
             out = proc%add_expr(expr_const(n%value))
             type is (binary_op_node)
             if (is_defined_operator(n%operator)) then
-                status%ok = .false.
-                status%message = "unsupported operator '"//trim(n%operator)// &
-                    "' in an active expression"
+                out = lower_defined_operator(arena, idx, n, proc, status)
                 return
             end if
             block
@@ -2417,6 +2416,112 @@ contains
                 itoa(node_line(arena, idx))
         end select
     end function lower_expr_with_context
+
+    recursive integer function lower_defined_operator(arena, idx, node, proc, &
+            status) result(out)
+        !! Lower one FortFront-resolved defined operator as its selected
+        !! same-file function call.  The query is deliberately consumed here:
+        !! FortAD must not duplicate generic resolution or invent conversions.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(binary_op_node), intent(in) :: node
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+        type(defined_operator_query_t) :: query
+        integer, allocatable :: operand_indices(:)
+        integer, allocatable :: args(:)
+        character(len=:), allocatable :: procedure_name
+        integer :: i
+
+        out = 0
+        query = query_defined_operator(arena, idx)
+        if (.not. query%found .or. .not. query%is_resolved) then
+            status%ok = .false.
+            status%message = defined_operator_refusal(query, node%line)
+            return
+        end if
+        if (query%selected_procedure_node_index <= 0) then
+            status%ok = .false.
+            status%message = "defined operator '"//trim(node%operator)// &
+                "' resolved without a selected procedure at line "// &
+                itoa(node%line)
+            return
+        end if
+
+        procedure_name = ""
+        do i = 1, size(query%candidates)
+            if (query%candidates(i)%procedure_node_index /= &
+                    query%selected_procedure_node_index) cycle
+            if (allocated(query%candidates(i)%procedure_name)) then
+                procedure_name = query%candidates(i)%procedure_name
+            end if
+            exit
+        end do
+        if (len_trim(procedure_name) == 0) then
+            status%ok = .false.
+            status%message = "FortFront resolved defined operator '"// &
+                trim(node%operator)//"' without exposing its procedure name at line "// &
+                itoa(node%line)
+            return
+        end if
+
+        if (node%left_index > 0 .and. node%right_index > 0) then
+            allocate (operand_indices(2))
+            operand_indices = [node%left_index, node%right_index]
+        else if (node%right_index > 0) then
+            allocate (operand_indices(1))
+            operand_indices(1) = node%right_index
+        else if (node%left_index > 0) then
+            allocate (operand_indices(1))
+            operand_indices(1) = node%left_index
+        else
+            status%ok = .false.
+            status%message = "defined operator '"//trim(node%operator)// &
+                "' has no operand at line "//itoa(node%line)
+            return
+        end if
+
+        allocate (args(size(operand_indices)))
+        do i = 1, size(operand_indices)
+            args(i) = lower_expr(arena, operand_indices(i), proc, status)
+            if (.not. status%ok) return
+        end do
+        out = proc%add_expr_call(trim(procedure_name), args)
+    end function lower_defined_operator
+
+    function defined_operator_refusal(query, line) result(message)
+        !! Turn FortFront's exact refusal facts into a stable FortAD error.
+        type(defined_operator_query_t), intent(in) :: query
+        integer, intent(in) :: line
+        character(len=:), allocatable :: message
+        character(len=:), allocatable :: reason
+
+        reason = "no exact candidate"
+        if (query%is_ambiguous) then
+            reason = "ambiguous candidates"
+        else if (query%has_conversion) then
+            reason = "implicit conversion is required"
+        else if (query%has_unknown_types) then
+            reason = "operand type is unknown"
+        else if (query%has_pointer_operand) then
+            reason = "pointer or TARGET operand storage is unsupported"
+        else if (query%has_global_mutable_state) then
+            reason = "mutable global state is unsupported"
+        else if (query%has_invalid_arity) then
+            reason = "candidate arity is invalid"
+        else if (allocated(query%refusal_reason)) then
+            if (len_trim(query%refusal_reason) > 0) then
+                reason = trim(query%refusal_reason)
+            end if
+        end if
+        if (allocated(query%operator)) then
+            message = "unsupported defined operator '"//trim(query%operator)// &
+                "' at line "//itoa(line)//": "//trim(reason)
+        else
+            message = "unsupported defined operator at line "//itoa(line)// &
+                ": "//trim(reason)
+        end if
+    end function defined_operator_refusal
 
     subroutine annotate_passed_procedure_expression(arena, idx, expr, status)
         !! Attach one proven passed-procedure target to a function call.  The
