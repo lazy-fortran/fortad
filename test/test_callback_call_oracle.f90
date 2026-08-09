@@ -20,12 +20,17 @@ program test_callback_call_oracle
         "        real(8), intent(in) :: x"//nl// &
         "        y = 2.0d0*x"//nl// &
         "    end function scale"//nl// &
+        "    real(8) function shifted_scale(x) result(y)"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        y = 3.0d0*x + 1.0d0"//nl// &
+        "    end function shifted_scale"//nl// &
         "    real(8) function kernel(x) result(y)"//nl// &
         "        real(8), intent(in) :: x"//nl// &
         "        real(8), external :: external_scale"//nl// &
         "        procedure(scale), pointer :: callback"//nl// &
         "        procedure(external_iface), pointer :: external_callback"//nl// &
         "        callback => scale"//nl// &
+        "        callback => shifted_scale"//nl// &
         "        external_callback => external_scale"//nl// &
         "        y = callback(x) + external_callback(x) + x*x"//nl// &
         "    end function kernel"//nl// &
@@ -92,13 +97,13 @@ program test_callback_call_oracle
         "    xd = -0.4d0"//nl// &
         "    yb = 1.7d0"//nl// &
         "    call kernel_jvp(x, xd, y, yd)"//nl// &
-        "    if (abs(y - 7.8125d0) > 1.0d-12) error stop 1"//nl// &
-        "    if (abs(yd + 3.0d0) > 1.0d-12) error stop 2"//nl// &
+        "    if (abs(y - 10.0625d0) > 1.0d-12) error stop 1"//nl// &
+        "    if (abs(yd + 3.4d0) > 1.0d-12) error stop 2"//nl// &
         "    h = 1.0d-6"//nl// &
         "    fp = kernel(x+h); fm = kernel(x-h)"//nl// &
         "    if (abs(yd - xd*(fp-fm)/(2.0d0*h)) > 1.0d-7) error stop 3"//nl// &
         "    call kernel_vjp(x, y, yb, xb)"//nl// &
-        "    if (abs(xb - 12.75d0) > 1.0d-12) error stop 4"//nl// &
+        "    if (abs(xb - 14.45d0) > 1.0d-12) error stop 4"//nl// &
         "    if (abs(yd*yb - xd*xb) > 1.0d-12) error stop 5"//nl// &
         "    print *, 'callback call oracle pass'"//nl// &
         "end program driver"//nl
@@ -170,6 +175,7 @@ contains
         select case (case_name)
         case ("reassigned")
             text = text// &
+                "        callback => scale"//nl// &
                 "        callback => scale"//nl// &
                 "        callback => scale"//nl
         case ("branched")
