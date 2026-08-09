@@ -325,12 +325,12 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `be7ce88`
-- FortFront `3f1adfbe`
-- FFC `c598f19`
-- fortad-bench `e614f75`
+- FortAD `c6dfab0`
+- FortFront `8908af33`
+- FFC `a032bab`
+- fortad-bench `bd97975`
 
-- FortFront `5f8366d5`, including abstract/deferred hierarchy, concrete-only
+- FortFront `8908af33`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
@@ -443,7 +443,7 @@ historical evidence only:
   compound component declarations now retains complete component metadata and
   compiles through the explicit reverse probe; it remains a legacy
   compatibility case, not modern runnable support.
-FortAD `be7ce88` (including the bounded passed-procedure callback slice on
+FortAD `c6dfab0` (including the bounded passed-procedure callback slice on
 top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12b`, `92bf9ad`, `bfe204d`, `1215d44`, `f51bb4c`, `a693014`, `4c8635a`, `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
   `e28ba4b`, `58899bf`, and `a45dbea`), including active
   concrete rank-four
@@ -498,9 +498,12 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   exact actual/formal storage facts; aliases, callbacks, globals, pointers,
   allocatables, mismatches, and ambiguous mappings are refused. Function
   expression calls retain the existing keyword/optional forwarding path. The
-  full GNU `fo check` gate is green: 124 modules and 89/89 tests, with
+  full GNU `fo check` gate is green: 125 modules and 90/90 tests, with
   changed-file formatting passing; repository lint still reports 293 existing
   compiler warnings.
+  The emitter benchmark measures a reproducible 71.14 s to 69.59 s median
+  reduction (2.18%) from exact-size single-allocation module indentation, with
+  an independent compiled analytic oracle and provenance script.
   The NVIDIA HPC SDK 26.5 build at `fffb75b` also compiles 410 FortAD targets,
   409 derivative targets, and all 88 test programs after replacing the nonportable
   `STOP ..., QUIET=` CLI exits and NVHPC-reserved test identifiers. Its
@@ -596,7 +599,7 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
 - FortAD now also supports one fixed-arm `CLASS IS` path with the same passive
   dynamic-type contract and independent numerical/refusal oracle; multiple
   arms, aliases, pointers, global state, and ownership remain refusals.
-- fortad-bench `e614f75` (on top of `ab9965e`, `da511c6`, `df6fadc`, and `56ec44b`), including the
+- fortad-bench `bd97975` (on top of `ab9965e`, `da511c6`, `df6fadc`, and `56ec44b`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
   next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26 evidence contracts. The reproducible queue
   contains 1,141 rows: 1,067 pure-Fortran and 74 mixed-language candidates.
@@ -604,8 +607,11 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   strict pure-Fortran candidates (25.5%); 1,067 pure-Fortran candidates
   remain in the queue. The reproducible Enzyme comparison now has
   a common size-sweep harness for N=100 through 1,000,000 with median/min/max
-  timing and provenance artifacts; no performance victory is claimed until
-  measurements are generated under the documented controlled protocol.
+  timing and provenance artifacts. The latest sweep contains 95 measured rows
+  and 18 explicit gaps: Euler, RK4, and BA are complete; Bruss reaches
+  N=100,000; all LSTM sizes remain FortAD rank-error gaps and Bruss at
+  N=1,000,000 exits 139. No cross-engine performance victory is claimed until
+  those gaps are closed or explicitly scoped by a complete comparison.
 
 The next feature order has four steps. The callback-flow, bounded
 abstract-dispatch-provenance, fixed literal polymorphic owner-array, bounded
