@@ -320,12 +320,12 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `4b89bc9`
-- FortFront `a31275fc`
-- FFC `2483ff3`
-- fortad-bench `b8b7c69`
+- FortAD `fffb75b`
+- FortFront `9201da7a`
+- FFC `534413c`
+- fortad-bench `6be3b93`
 
-- FortFront `a31275fc`, including abstract/deferred hierarchy, concrete-only
+- FortFront `9201da7a`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
@@ -342,6 +342,10 @@ historical evidence only:
   Its narrowed component-path binding query also resolves inherited bindings
   through `EXTENDS` and refuses deferred, generic, ambiguous, abstract, and
   ownership boundaries.
+  Its ownership query now exposes deep derived assignment facts and refuses
+  active global-state and uncontrolled-alias paths explicitly, so downstream
+  differentiation can distinguish safe value ownership from unsupported
+  storage sharing.
   Its call-boundary query now exposes formal intent, type/kind/rank, storage,
   actual-to-formal mappings, and explicit alias, callback, global-state,
   unknown-type, and mismatch refusals for downstream differentiation.
@@ -358,7 +362,7 @@ historical evidence only:
   dispatch provenance now retains the declaring type and inherited-binding
   status for concrete targets, so downstream differentiation can distinguish
   inherited implementations without guessing from the leaf type.
-- FFC `2483ff3`, including rank-three and rank-four intrinsic
+- FFC `534413c`, including rank-three and rank-four intrinsic
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
@@ -394,6 +398,10 @@ historical evidence only:
   Runtime logical `COUNT(mask)` now lowers for rank-one and rank-two automatic
   and assumed-shape arrays with an independent gfortran differential oracle;
   rank-three and higher remain precise refusals.
+  Runtime `MAXVAL` and `MINVAL` now lower for rank-three automatic and
+  assumed-shape integer, `REAL`, and `REAL(8)` arrays with an independent
+  gfortran differential oracle; unsupported reduction families and ranks
+  remain precise refusals.
   array-valued RHS expressions for multi-retained runtime sections remain a
   named boundary until the direct-session expression contract proves them.
 - FortAD includes the automatic derived-component CLI inference slice: when
@@ -409,7 +417,7 @@ historical evidence only:
   compound component declarations now retains complete component metadata and
   compiles through the explicit reverse probe; it remains a legacy
   compatibility case, not modern runnable support.
-FortAD `4b89bc9` (including the bounded passed-procedure callback slice on
+FortAD `fffb75b` (including the bounded passed-procedure callback slice on
 top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12b`, `92bf9ad`, `bfe204d`, `1215d44`, `f51bb4c`, `a693014`, `4c8635a`, `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
   `e28ba4b`, `58899bf`, and `a45dbea`), including active
   concrete rank-four
@@ -450,9 +458,12 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   derivative targets, and all 88 test programs after replacing the nonportable
   `STOP ..., QUIET=` CLI exits and NVHPC-reserved test identifiers. Its
   execution lane remains open: 55/88 tests abort in the NVHPC test runner with
-  allocator failures (`malloc(): unaligned tcache chunk detected`), including
-  unrelated baseline oracles. This is recorded as a compiler/runtime lane
-  defect, not as generated-derivative evidence.
+  allocator failures, including unrelated baseline oracles. An independent
+  minimal Fortran oracle passes with GNU and aborts under NVHPC 26.5; Valgrind
+  attributes the invalid write to `pgf90_str_copy_klen`. This is recorded as a
+  compiler/runtime lane defect, not as generated-derivative evidence. The
+  focused `test_forward_oracle` and `test_fortad_ir_copy` lanes pass under
+  NVHPC after `fffb75b`.
   A fixed-source scalar `class(*)` component assignment inside one proven
   `TYPE IS` or `CLASS IS` arm now differentiates through concrete shadows in
   JVP and VJP. Unresolved multi-arm dispatch and all unsafe ownership forms
@@ -537,7 +548,7 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
 - FortAD now also supports one fixed-arm `CLASS IS` path with the same passive
   dynamic-type contract and independent numerical/refusal oracle; multiple
   arms, aliases, pointers, global state, and ownership remain refusals.
-- fortad-bench `b8b7c69` (on top of `ab9965e`, `da511c6`, `df6fadc`, and `56ec44b`), including the
+- fortad-bench `6be3b93` (on top of `ab9965e`, `da511c6`, `df6fadc`, and `56ec44b`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
   next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26 evidence contracts. The reproducible queue
   contains 1,161 rows: 1,087 pure-Fortran and 74 mixed-language candidates.
@@ -564,7 +575,7 @@ numerical/application rules. Active global mutable state, uncontrolled
 aliases, active I/O, and opaque calls without rules remain product refusals
 rather than compatibility work.
 
-FortFront source `main` is currently `a31275fc`. This handoff includes the
+FortFront source `main` is currently `9201da7a`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -582,6 +593,8 @@ function-result metadata, as well as ownership-event paths, explicit
 `MOVE_ALLOC` transfer facts, and
 automatic-reallocation candidates, including owner paths, ranks, assignment
 and indexed type-bound receiver storage/type facts,
+  deep derived-assignment ownership facts, and explicit global-state and
+  alias refusals,
 kind, reallocation kind, and shape-expression indices. The earlier
 procedure-name, #2980, public array-query, nested
 substring, and issue-1968 assumed-shape fixes.
