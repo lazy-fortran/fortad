@@ -330,7 +330,7 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `a295c76`
+- FortAD `eb355de`
 - FortFront `ae75547c`
 - FFC `2f6cc37`
 - fortad-bench `f269791`
@@ -1731,9 +1731,15 @@ of selected child ends the fixed-path derivative contract.
             The generated complex adjoint stores the two coordinate gradients.
             [`test_complex_reverse_oracle.f90`](test/test_complex_reverse_oracle.f90)
             checks hand values, central differences, and the real adjoint
-            identity. Complex arithmetic, `aimag`, `conjg`, `abs`, complex
-            outputs, and BLAS remain named refusal boundaries.
-      Complex reverse rules beyond this projection, complex BLAS, and
+            identity. Complex arithmetic, `conjg`, `abs`, complex outputs,
+            and BLAS remain named refusal boundaries.
+      - [x] **P7.5c bounded `aimag` projection VJP.** Commit `d1dec10`
+            differentiates a real objective through `aimag(z)` for active
+            complex inputs. The independent
+            [`test_complex_reverse_oracle.f90`](test/test_complex_reverse_oracle.f90)
+            checks hand values, central differences, and the real adjoint
+            identity, while `abs` and `conjg` remain precise refusals.
+      Complex reverse rules beyond these projections, complex BLAS, and
       non-holomorphic objective conventions remain open.
 - [ ] **P7.6 Source forms.** Accept fixed form, CPP and includes,
       semicolon-separated statements, mixed legacy modules, and generated
