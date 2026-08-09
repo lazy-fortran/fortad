@@ -349,13 +349,11 @@ contains
                         "objects", status)
                     return
                 end if
-                if (allocation_component_polymorphic(proc, s%call_args(1)) .or. &
-                    allocation_component_polymorphic(proc, s%call_args(2))) then
-                    call refuse_allocation(n%line, &
-                        "move_alloc does not support polymorphic component ownership", &
-                        status)
-                    return
-                end if
+                ! Polymorphic component ownership is admitted to the IR here
+                ! only as a passive descriptor transfer.  Forward/reverse
+                ! differentiation must still prove a fixed concrete SOURCE=
+                ! acquisition and SELECT TYPE arm before it creates a shadow;
+                ! unresolved dynamic ownership remains a named refusal there.
             else if (.not. (type_bound%found .or. type_bound%is_unresolved .or. &
                     index(n%name, "%") > 0)) then
                 s%kind = FAD_CALL_STMT

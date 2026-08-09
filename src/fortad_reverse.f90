@@ -873,12 +873,15 @@ contains
         !! reverse boundary for ``allocate(box%field%payload, source=child)``
         !! and one literal-indexed holder element such as
         !! ``allocate(holders(2)%payload, source=child)``.  Dynamic indices,
-        !! sections, reallocation, aliases, and ownership transfers stay
-        !! refusals because their descriptor history is not represented here.
+        !! sections, reallocation, and aliases stay refusals because their
+        !! descriptor history is not represented here.  One direct
+        !! ``MOVE_ALLOC`` transfer to a distinct scalar component is part of
+        !! the fixed-path replay slice.
         type(fad_proc_t), intent(in) :: primal
         type(reverse_status_t), intent(inout) :: status
         integer :: i, n_allocate, n_deallocate, allocate_at, deallocate_at
-        character(len=:), allocatable :: target, deallocated_target
+        character(len=:), allocatable :: target, lifetime_target, &
+            deallocated_target
 
         status%ok = .true.
         n_allocate = 0
@@ -886,6 +889,7 @@ contains
         allocate_at = 0
         deallocate_at = 0
         target = ""
+        lifetime_target = ""
         deallocated_target = ""
 
         do i = 1, primal%n_stmts
@@ -931,7 +935,17 @@ contains
                 "acquisition/deallocation"
             return
         end if
-        if (.not. same_component_name(target, deallocated_target) .or. &
+        lifetime_target = target
+        do i = allocate_at + 1, deallocate_at - 1
+            if (primal%stmts(i)%kind /= FAD_MOVE_ALLOC) cycle
+            if (.not. allocated(primal%stmts(i)%call_args)) cycle
+            if (size(primal%stmts(i)%call_args) /= 2) cycle
+            if (.not. same_component_name(emit_expr(primal, &
+                primal%stmts(i)%call_args(1)), lifetime_target)) cycle
+            lifetime_target = emit_expr(primal, primal%stmts(i)%call_args(2))
+            exit
+        end do
+        if (.not. same_component_name(lifetime_target, deallocated_target) .or. &
             deallocate_at <= allocate_at) then
             status%ok = .false.
             status%message = "reverse mode: polymorphic component ownership '"// &
@@ -940,12 +954,15 @@ contains
         end if
     end subroutine check_nested_polymorphic_component_lifetime
 
-    logical function fixed_source_component(primal, stmt_index) result(supported)
+    logical function fixed_source_component(primal, stmt_index, &
+            required_selector) result(supported)
         !! Facts for the one supported component ownership transition.
         type(fad_proc_t), intent(in) :: primal
         integer, intent(in) :: stmt_index
-        character(len=:), allocatable :: target, source_type, dispatch_type
-        integer :: owner_di, source_di, i
+        character(len=*), intent(in), optional :: required_selector
+        character(len=:), allocatable :: target, selector_target, source_type, &
+            dispatch_type
+        integer :: owner_di, source_di, i, select_start
         logical :: found
 
         supported = .false.
@@ -996,13 +1013,29 @@ contains
         if (.not. found) return
 
         source_type = type_leaf(primal%decls(source_di)%type_name)
+        selector_target = target
+        select_start = stmt_index + 1
+        do i = stmt_index + 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_MOVE_ALLOC) cycle
+            if (.not. allocated(primal%stmts(i)%call_args)) return
+            if (size(primal%stmts(i)%call_args) /= 2) return
+            if (.not. same_component_name(emit_expr(primal, &
+                primal%stmts(i)%call_args(1)), target)) cycle
+            selector_target = emit_expr(primal, primal%stmts(i)%call_args(2))
+            select_start = i + 1
+            exit
+        end do
+        if (present(required_selector)) then
+            if (.not. same_component_name(selector_target, required_selector)) &
+                return
+        end if
         dispatch_type = ""
         found = .false.
-        do i = stmt_index + 1, primal%n_stmts
+        do i = select_start, primal%n_stmts
             if (primal%stmts(i)%kind == FAD_END_SELECT) exit
             if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
             if (.not. same_component_name(emit_expr(primal, &
-                primal%stmts(i)%value), target)) cycle
+                primal%stmts(i)%value), selector_target)) cycle
             call fixed_dispatch_type(primal, i, dispatch_type, found)
             exit
         end do
@@ -1183,7 +1216,7 @@ contains
         integer :: i, n_allocate, n_deallocate, n_move, source_di, target_di
         integer :: move_at, allocate_at, deallocate_at
         character(len=:), allocatable :: source, target, owner
-        logical :: found, component_mode
+        logical :: found, component_mode, polymorphic_component
 
         n_allocate = 0
         n_deallocate = 0
@@ -1227,6 +1260,7 @@ contains
         target = emit_expr(primal, primal%stmts(move_at)%call_args(2))
         component_mode = index(trim(source), "%") > 0 .or. &
             index(trim(target), "%") > 0
+        polymorphic_component = .false.
         if (component_mode .neqv. (index(trim(source), "%") > 0 .and. &
             index(trim(target), "%") > 0)) then
             status%ok = .false.
@@ -1242,32 +1276,60 @@ contains
                     "distinct scalar paths without dynamic indices"
                 return
             end if
-            if (.not. is_concrete_allocatable_component_path(primal, source) .or. &
-                .not. is_concrete_allocatable_component_path(primal, target)) then
-                status%ok = .false.
-                status%message = "reverse mode: move_alloc component owners require "// &
-                    "concrete scalar through rank-four REAL allocatable components"
-                return
-            end if
-            if (allocatable_component_rank(primal, source) /= &
-                allocatable_component_rank(primal, target)) then
-                status%ok = .false.
-                status%message = "reverse mode: move_alloc component owners require "// &
-                    "matching component ranks"
-                return
-            end if
-            if (allocatable_component_rank(primal, source) > 0) then
-                if (.not. fixed_literal_component_shape(primal, allocate_at)) then
+            if (is_concrete_allocatable_component_path(primal, source) .and. &
+                is_concrete_allocatable_component_path(primal, target)) then
+                if (allocatable_component_rank(primal, source) /= &
+                    allocatable_component_rank(primal, target)) then
                     status%ok = .false.
-                    status%message = "reverse mode: array component MOVE_ALLOC "// &
-                        "requires one literal allocation shape"
+                    status%message = "reverse mode: move_alloc component owners require "// &
+                        "matching component ranks"
+                    return
+                end if
+                if (allocatable_component_rank(primal, source) > 0) then
+                    if (.not. fixed_literal_component_shape(primal, allocate_at)) then
+                        status%ok = .false.
+                        status%message = "reverse mode: array component MOVE_ALLOC "// &
+                            "requires one literal allocation shape"
+                        return
+                    end if
+                end if
+            else
+                polymorphic_component = is_polymorphic_component_path(primal, source)
+                if (.not. polymorphic_component) then
+                    status%ok = .false.
+                    status%message = "reverse mode: move_alloc component owners require "// &
+                        "concrete scalar through rank-four REAL allocatable components"
+                    return
+                end if
+                if (.not. is_polymorphic_component_path(primal, target)) then
+                    status%ok = .false.
+                    status%message = "reverse mode: polymorphic MOVE_ALLOC requires "// &
+                        "matching polymorphic component paths"
+                    return
+                end if
+                if (allocatable_component_rank(primal, source) /= 0 .or. &
+                    allocatable_component_rank(primal, target) /= 0) then
+                    status%ok = .false.
+                    status%message = "reverse mode: polymorphic component MOVE_ALLOC "// &
+                        "is limited to scalar components"
+                    return
+                end if
+                if (.not. fixed_source_component(primal, allocate_at)) then
+                    status%ok = .false.
+                    status%message = "reverse mode: polymorphic component MOVE_ALLOC "// &
+                        "requires one fixed concrete SOURCE= acquisition and SELECT TYPE arm"
                     return
                 end if
             end if
             source_di = primal%decl_index(fad_base_name(source))
             target_di = primal%decl_index(fad_base_name(target))
-            if (source_di <= 0 .or. target_di <= 0 .or. &
-                primal%decls(source_di)%is_polymorphic .or. &
+            if (source_di <= 0 .or. target_di <= 0) then
+                status%ok = .false.
+                status%message = "reverse mode: move_alloc component owners must "// &
+                    "have declared bases"
+                return
+            end if
+            if (primal%decls(source_di)%is_polymorphic .or. &
                 primal%decls(target_di)%is_polymorphic .or. &
                 primal%decls(source_di)%is_select_alias .or. &
                 primal%decls(target_di)%is_select_alias) then
@@ -3018,7 +3080,12 @@ contains
                     allocations(i)%previous_owner = trim(source)
                     allocations(i)%owner = trim(target)
                 end if
-                allocations(i)%active = active(source_di) .or. active(target_di)
+                ! The allocation may already be active through its concrete
+                ! SOURCE= payload even when the enclosing base itself is not
+                ! marked active.  MOVE_ALLOC transfers that shadow; it must
+                ! not erase the earlier ownership fact.
+                allocations(i)%active = allocations(i)%active .or. &
+                    active(source_di) .or. active(target_di)
                 exit
             end if
         end do
@@ -4873,9 +4940,7 @@ contains
                     if (primal%stmts(k)%kind /= FAD_ALLOCATE) cycle
                     if (.not. allocated(primal%stmts(k)%allocation_args)) cycle
                     if (size(primal%stmts(k)%allocation_args) < 1) cycle
-                    if (trim(emit_expr(primal, primal%stmts(k)%allocation_args(1))) /= &
-                        trim(selector)) cycle
-                    if (fixed_source_component(primal, k)) then
+                    if (fixed_source_component(primal, k, selector)) then
                         fixed_ownership = .true.
                         exit
                     end if
@@ -5382,7 +5447,8 @@ contains
         type(fad_proc_t), intent(in) :: primal
         character(len=*), intent(in) :: path
         logical, intent(in) :: active(:)
-        integer :: i, source_di
+        integer :: i, j, source_di
+        character(len=:), allocatable :: allocation_path, ownership_path
 
         found = .false.
         do i = 1, primal%n_stmts
@@ -5390,10 +5456,20 @@ contains
             if (.not. primal%stmts(i)%allocation_target_polymorphic) cycle
             if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
             if (size(primal%stmts(i)%allocation_args) < 1) cycle
-            if (.not. same_component_name(emit_expr(primal, &
-                primal%stmts(i)%allocation_args(1)), path) .and. &
-                index(trim(path), trim(emit_expr(primal, &
-                primal%stmts(i)%allocation_args(1)))//"%") /= 1) cycle
+            allocation_path = emit_expr(primal, primal%stmts(i)%allocation_args(1))
+            ownership_path = allocation_path
+            do j = i + 1, primal%n_stmts
+                if (primal%stmts(j)%kind /= FAD_MOVE_ALLOC) cycle
+                if (.not. allocated(primal%stmts(j)%call_args)) cycle
+                if (size(primal%stmts(j)%call_args) /= 2) cycle
+                if (.not. same_component_name(emit_expr(primal, &
+                    primal%stmts(j)%call_args(1)), ownership_path)) cycle
+                ownership_path = emit_expr(primal, primal%stmts(j)%call_args(2))
+                exit
+            end do
+            if (.not. same_component_name(ownership_path, path)) then
+                if (index(trim(path), trim(ownership_path)//"%") /= 1) cycle
+            end if
             if (primal%stmts(i)%allocation_source <= 0) cycle
             source_di = concrete_source_decl(primal, &
                 primal%stmts(i)%allocation_source)

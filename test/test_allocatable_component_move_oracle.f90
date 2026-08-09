@@ -244,7 +244,7 @@ program test_allocatable_component_move_oracle
     refused = fad_vjp(polymorphic_source, [character(len=1) :: "x"], &
         dependent="out", from="polymorphic_move")
     call require_refusal(refused, "polymorphic component lifetime", &
-        "polymorphic component ownership")
+        "fixed concrete SOURCE")
     refused = fad_vjp(target_source, [character(len=1) :: "x"], &
         dependent="out", from="target_move")
     call require_refusal(refused, "TARGET component lifetime", "TARGET alias")

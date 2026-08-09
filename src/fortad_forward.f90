@@ -426,9 +426,7 @@ contains
                     if (primal%stmts(k)%kind /= FAD_ALLOCATE) cycle
                     if (.not. allocated(primal%stmts(k)%allocation_args)) cycle
                     if (size(primal%stmts(k)%allocation_args) < 1) cycle
-                    if (trim(emit_expr(primal, primal%stmts(k)%allocation_args(1))) /= &
-                        trim(selector)) cycle
-                    if (has_fixed_source_component(primal, k, active)) then
+                    if (has_fixed_source_component(primal, k, active, selector)) then
                         fixed_ownership = .true.
                         exit
                     end if
@@ -562,15 +560,17 @@ contains
         end do
     end subroutine refuse_active_polymorphic_ownership
 
-    logical function has_fixed_source_component(primal, stmt_index, active) result(supported)
+    logical function has_fixed_source_component(primal, stmt_index, active, &
+            required_selector) result(supported)
         !! One component acquisition from a declared concrete SOURCE object.
         !! The component classification is a FortFront storage fact carried by
         !! the allocation statement, including array-element components.
         type(fad_proc_t), intent(in) :: primal
         integer, intent(in) :: stmt_index
         logical, intent(in) :: active(:)
-        integer :: i, holder_di, source_di
-        character(len=:), allocatable :: target_text
+        character(len=*), intent(in), optional :: required_selector
+        integer :: i, holder_di, source_di, select_start
+        character(len=:), allocatable :: target_text, selector_text
 
         supported = .false.
         if (stmt_index <= 0 .or. stmt_index > primal%n_stmts) return
@@ -595,7 +595,28 @@ contains
             if (emit_expr(primal, primal%stmts(i)%allocation_args(1)) == &
                 target_text) return
         end do
-        supported = .true.
+        selector_text = target_text
+        select_start = stmt_index + 1
+        do i = stmt_index + 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_MOVE_ALLOC) cycle
+            if (.not. allocated(primal%stmts(i)%call_args)) return
+            if (size(primal%stmts(i)%call_args) /= 2) return
+            if (.not. same_component_name(emit_expr(primal, &
+                primal%stmts(i)%call_args(1)), target_text)) cycle
+            selector_text = emit_expr(primal, primal%stmts(i)%call_args(2))
+            select_start = i + 1
+            exit
+        end do
+        if (present(required_selector)) then
+            if (.not. same_component_name(selector_text, required_selector)) return
+        end if
+        do i = select_start, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+            if (.not. same_component_name(emit_expr(primal, &
+                primal%stmts(i)%value), selector_text)) cycle
+            supported = .true.
+            return
+        end do
     end function has_fixed_source_component
 
     logical function source_activity_supported(primal, source_di) result(ok)
