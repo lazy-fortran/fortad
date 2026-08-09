@@ -4958,7 +4958,7 @@ contains
         character(len=:), allocatable :: cotangent_selector
         character(len=:), allocatable :: seed_target
         logical :: receiver_cotangent
-        integer :: a, i, ignored, seed_expr, selector_expr
+        integer :: a, i, ignored, seed_expr, component_seed, selector_expr
 
         call receiver_cotangent_context(primal, rec, suffix, ssa%active_paths, &
             active, &
@@ -5003,9 +5003,23 @@ contains
                 seed_expr = adjoint%add_expr(expr_var(seed_target))
                 if (receiver_cotangent .and. (rec%arms(a)%kind == FAD_TYPE_IS .or. &
                     rec%arms(a)%kind == FAD_CLASS_IS)) then
-                    call accumulate(primal, adjoint, rec%arms(a)%rhs(i), &
-                        seed_expr, ssa, suffix, active, n_tmp, status, &
-                        receiver_alias, cotangent_alias)
+                    if (index(trim(rec%arms(a)%lhs(i)), "%") > 0) then
+                        ! A selected component store first accumulates the
+                        ! cotangent from later reads into the selected shadow.
+                        ! Snapshot that location before differentiating the
+                        ! store RHS: otherwise an owner-array element can be
+                        ! read as both the incoming seed and the contribution
+                        ! just added by the later read.
+                        call materialise(primal, adjoint, seed_expr, ssa, n_tmp, &
+                            component_seed, force=.true.)
+                        call accumulate(primal, adjoint, rec%arms(a)%rhs(i), &
+                            component_seed, ssa, suffix, active, n_tmp, status, &
+                            receiver_alias, cotangent_alias)
+                    else
+                        call accumulate(primal, adjoint, rec%arms(a)%rhs(i), &
+                            seed_expr, ssa, suffix, active, n_tmp, status, &
+                            receiver_alias, cotangent_alias)
+                    end if
                     ! A fixed-path component assignment kills the incoming
                     ! component cotangent before SOURCE= ownership replay.
                     ! Keeping it would incorrectly differentiate the copied
