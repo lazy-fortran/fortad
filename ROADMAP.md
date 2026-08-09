@@ -838,7 +838,7 @@ The current FortFront `main` handoff is `ae75547c`, which includes the
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
       GNU is current: `fo` builds 410 targets, checks 409 derivative
-      targets, and runs 92 tests. The NVIDIA compatibility build compiles
+      targets, and runs 94 tests. The NVIDIA compatibility build compiles
       410 FortAD targets and 409 derivative targets; its execution lane still
       has the documented NVHPC runtime/compiler failure.
       The cheap lint rules report zero unused imports. Four pre-existing
@@ -857,7 +857,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `f9d2ecb`. Its GNU behavioral
+The implementation snapshot is FortAD code at `a295c76`. Its GNU behavioral
 gate is green (410 build targets, 409 derivative targets, 94/94 tests).
 `fo lint` still has four short-circuit hazards and 108 array-temporary
 warnings. Feature scope is recorded in the Phase 7 and 8
@@ -2202,10 +2202,10 @@ An unsupported result is recorded as such and never counted as a runtime win.
       rows with active module state, dependent inference, invalid generated
       interfaces, and procedure-call actual boundaries. Its `next21` shard
       adds four rows with active I/O, legacy GOTO, nested DO-WHILE, and legacy
-      labeled-DO boundaries. There are 1,181 rows queued. The pure-Fortran
-      queue contains 1,107 rows. There are 325 of 1,432 strict pure-Fortran
-      candidates and 833 of 2,014 total
-      candidates are classified. Each shard row has an
+      labeled-DO boundaries. The current queue has 1,121 rows, including
+      1,047 pure-Fortran and 74 mixed-language candidates. There are 385 of
+      1,432 strict pure-Fortran candidates and 893 of 2,014 total candidates
+      classified. Each shard row has an
       exact-source Tapenade/FortAD probe and an independent behavioral or
       refusal oracle. The preceding `next6` shard closed `set11/lh011`,
       `set04/lh156`, `set07/v521`, and `set11/vpf17`. `next5` closed
