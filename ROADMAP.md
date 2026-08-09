@@ -104,7 +104,7 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current main pins are FortAD `ad7e425`, FortFront `d35a5528`, and
+The current main pins are FortAD `692f2e0`, FortFront `6c27ca86`, and
 fortad-bench `72ee483`. FortAD has bounded `SPREAD` JVP and direct array-valued
 reverse-transpose support, and now consumes FortFront's bounded
 procedure-pointer `ASSOCIATED` state facts for a fixed same-scope callback
@@ -112,6 +112,16 @@ guard. The new independent oracle checks compiled JVP/VJP values, finite
 differences, the adjoint identity, and named refusals. Active global mutable
 state, uncontrolled aliasing, unresolved dispatch, and changing callback
 ownership remain intentional product refusals.
+
+FortAD also consumes the FortFront type-bound dispatch target set for direct
+abstract/deferred function calls only when it contains exactly one concrete
+same-file implementation. The selected child is lowered to one structural
+`SELECT TYPE` arm and differentiated through JVP and VJP. Multiple children,
+an unresolved target set, generic or ambiguous bindings, and dynamic-type
+perturbations remain explicit refusals. The independent compiled oracle is
+`test/test_abstract_deferred_dispatch_oracle.f90`; it mirrors the
+`itpplasma/abstract_deferred_refusal` shape, proves the one-child path, and
+keeps the affine/square two-child case refused.
 
 The bench currently records 937 of 2,014 total candidates and 429 of 1,432
 pure-Fortran Tapenade candidates (30.0%); 1,077 total candidates remain in the

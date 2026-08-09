@@ -109,7 +109,7 @@ program test_polymorphic_scalar_receiver_oracle
     end if
 
     call expect_refusal(multi_target_source(), "multiple dispatch targets", &
-        "fixed concrete runtime path")
+        "multiple runtime targets")
     call expect_refusal(alias_source(), "receiver alias", "alias")
     call expect_refusal(pointer_source(), "pointer receiver", "pointer")
     print *, "test_polymorphic_scalar_receiver_oracle: all cases passed"

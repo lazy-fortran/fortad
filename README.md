@@ -53,7 +53,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Elemental procedures | same-file elemental functions retain elemental JVP/VJP array calls |
 | Fixed-form input | CLI `.f`, `.for`, `.ftn`, and `.f77` files with legacy comments and declarations |
 | Derived components | bounded concrete scalar, nested, inherited, array, and fixed-source polymorphic component paths |
-| Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known bindings and bounded direct polymorphic dispatch |
+| Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known bindings and direct polymorphic dispatch with exactly one FortFront-proven concrete target |
 | Complex JVP/VJP | real-coordinate `conjg`, `real`, `aimag`, `cmplx`, `abs`, multiplication, and division; bounded real-objective VJP through `real(z)`/`dble(z)` |
 | Aliasing and sections | bounded rank-one/rank-two contiguous range sections plus literal unique `INTEGER, PARAMETER` vector subscripts on explicit-shape arrays. Named refusals cover aliases, dynamic/duplicate/out-of-range vectors, vector-plus-range sections, and noncontiguous or computed sections |
 | GPU directives | one-level fused positive reduction adjoints through OpenMP target and OpenACC |
@@ -95,6 +95,10 @@ proof, and executable refusal oracles are in
 [the aliasing and sections design note](docs/design/aliasing.md).
 The fixed-dispatch abstract/deferred hierarchy slice and its multi-level
 oracle are in [the abstract hierarchy design note](docs/design/abstract-hierarchy.md).
+Direct calls through a `class(base_t)` dummy are differentiated only when
+FortFront proves one concrete deferred-binding implementation. The compiled
+JVP/VJP, finite-difference, adjoint, unresolved-target, and multi-child
+refusal oracle is [`test_abstract_deferred_dispatch_oracle.f90`](test/test_abstract_deferred_dispatch_oracle.f90).
 Passive fixed-type polymorphic allocatable dispatch, bounded active nested
 `allocate(source=concrete)` ownership, and the remaining semantic boundary
 for polymorphic ownership are in

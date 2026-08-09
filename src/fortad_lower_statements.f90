@@ -30,6 +30,7 @@ module fortad_lower_statements
         get_source_line, TREAL
     use ast_nodes_control, only: associate_node
     use ast_nodes_bounds, only: array_slice_node
+    use ast_nodes_misc, only: import_statement_node
     use frontend_compiler_control_queries, only: control_statement_query_t, &
         query_control_statement, CONTROL_SELECT_RANK, select_rank_arm_query_t
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
@@ -171,6 +172,12 @@ contains
         end if
         select type (n => arena%entries(idx)%node)
             type is (comment_node)
+            return
+
+            type is (import_statement_node)
+            ! IMPORT is specification-only metadata for an interface body.
+            ! Its names are already resolved by FortFront and it has no
+            ! executable counterpart in the generated derivative procedure.
             return
 
             type is (use_statement_node)
@@ -4267,8 +4274,9 @@ contains
         !! NOPASS, and the implementation is a local function. A local
         !! override on an abstract/deferred parent and a statically resolved
         !! inherited binding are also accepted. A simple polymorphic receiver
-        !! is expanded from FortFront's concrete dispatch-target facts; generic,
-        !! unknown, empty, and incompatible target sets remain refusals.
+        !! is expanded only when FortFront proves exactly one concrete
+        !! dispatch target; generic, unknown, empty, multiple, and incompatible
+        !! target sets remain refusals.
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: call_index
         type(call_or_subscript_node), intent(in) :: node
@@ -4534,6 +4542,12 @@ contains
         result_expr = 0
         call validate_dispatch_query(query, status)
         if (.not. status%ok) return
+        if (size(query%dispatch_target_type_indices) /= 1) then
+            call refuse_type_bound(status, trim(query%binding_name), &
+                "direct polymorphic dispatch requires one FortFront-proven "// &
+                "concrete runtime target; multiple runtime targets are unsupported")
+            return
+        end if
         method = trim(query%binding_name)
         if (len_trim(receiver_alias) == 0) then
             call refuse_type_bound(status, method, "the dispatch receiver is unresolved")
@@ -4688,6 +4702,12 @@ contains
 
         call validate_dispatch_query(query, status)
         if (.not. status%ok) return
+        if (size(query%dispatch_target_type_indices) /= 1) then
+            call refuse_type_bound(status, trim(query%binding_name), &
+                "direct polymorphic dispatch requires one FortFront-proven "// &
+                "concrete runtime target; multiple runtime targets are unsupported")
+            return
+        end if
         method = trim(query%binding_name)
         if (proc%decl_index(receiver_alias) == 0) then
             alias_decl%name = receiver_alias

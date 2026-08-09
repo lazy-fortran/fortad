@@ -1,7 +1,7 @@
 program test_direct_polymorphic_oracle
-    !! Independent behavioral oracle for direct CLASS dispatch through a
-    !! deferred binding.  The source has no SELECT TYPE: FortAD must preserve
-    !! the runtime child choice in generated JVP and VJP code.
+    !! Independent refusal oracle for multiple-target direct CLASS dispatch through
+    !! a deferred binding.  With two runtime children, FortAD must not choose
+    !! one vtable arm without a fixed FortFront proof.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -80,8 +80,6 @@ program test_direct_polymorphic_oracle
         "end module direct_polymorphic_case"//nl
 
     type(fad_result_t) :: eval_jvp, eval_vjp, apply_jvp, apply_vjp
-    character(len=:), allocatable :: dir, driver
-    integer :: stat, unit
 
     eval_jvp = fad_jvp(source, ["x"], from="evaluate", name="evaluate_jvp")
     eval_vjp = fad_vjp(source, ["x"], dependent="y", from="evaluate", &
@@ -89,97 +87,26 @@ program test_direct_polymorphic_oracle
     apply_jvp = fad_jvp(source, ["x"], from="apply", name="apply_jvp")
     apply_vjp = fad_vjp(source, ["x"], dependent="y", from="apply", &
         name="apply_vjp")
-    call require_ok(eval_jvp, "evaluate JVP")
-    call require_ok(eval_vjp, "evaluate VJP")
-    call require_ok(apply_jvp, "apply JVP")
-    call require_ok(apply_vjp, "apply VJP")
-    call expect_dynamic_type_refusal()
-
-    dir = "build/oracle/direct_polymorphic"
-    call execute_command_line("mkdir -p "//dir, exitstat=stat)
-    if (stat /= 0) error stop "could not create oracle directory"
-    open (newunit=unit, file=dir//"/primal.f90", status="replace", action="write")
-    write (unit, '(a)') source
-    close (unit)
-    open (newunit=unit, file=dir//"/derivatives.f90", status="replace", action="write")
-    write (unit, '(a)') "module direct_polymorphic_derivatives"
-    write (unit, '(a)') "    use direct_polymorphic_case, only: model_t, linear_t, quadratic_t"
-    write (unit, '(a)') "contains"
-    write (unit, '(a)') eval_jvp%code
-    write (unit, '(a)') eval_vjp%code
-    write (unit, '(a)') apply_jvp%code
-    write (unit, '(a)') apply_vjp%code
-    write (unit, '(a)') "end module direct_polymorphic_derivatives"
-    close (unit)
-
-    driver = &
-        "program driver"//nl// &
-        "    use direct_polymorphic_case, only: model_t, linear_t, quadratic_t, evaluate, apply"//nl// &
-        "    use direct_polymorphic_derivatives, only: evaluate_jvp, evaluate_vjp, apply_jvp, apply_vjp"//nl// &
-        "    implicit none"//nl// &
-        "    type(linear_t) :: linear"//nl// &
-        "    type(quadratic_t) :: quadratic"//nl// &
-        "    linear%scale = 3.0d0"//nl// &
-        "    quadratic%scale = 2.0d0"//nl// &
-        "    quadratic%bias = 1.5d0"//nl// &
-        "    call check(linear, 6.0d0, 3.0d0, 'linear')"//nl// &
-        "    call check(quadratic, 9.5d0, 8.0d0, 'quadratic')"//nl// &
-        "contains"//nl// &
-        "    subroutine check(model, expected_y, expected_grad, label)"//nl// &
-        "        class(model_t), intent(in) :: model"//nl// &
-        "        real(8), intent(in) :: expected_y, expected_grad"//nl// &
-        "        character(len=*), intent(in) :: label"//nl// &
-        "        real(8) :: x, x_d, y, y_d, y_b, x_b, h, yp, ym, fd"//nl// &
-        "        x = 2.0d0"//nl// &
-        "        x_d = -0.4d0"//nl// &
-        "        y_b = 1.7d0"//nl// &
-        "        h = 1.0d-5"//nl// &
-        "        call evaluate_jvp(model, x, x_d, y, y_d)"//nl// &
-        "        if (abs(y - expected_y) > 1.0d-13 .or. abs(y_d - expected_grad*x_d) > 1.0d-13) error stop 2"//nl// &
-        "        call evaluate_vjp(model, x, y, y_b, x_b)"//nl// &
-        "        if (abs(y - expected_y) > 1.0d-13 .or. abs(x_b - y_b*expected_grad) > 1.0d-13) error stop 3"//nl// &
-        "        yp = evaluate(model, x+h)"//nl// &
-        "        ym = evaluate(model, x-h)"//nl// &
-        "        fd = (yp-ym)/(2.0d0*h)"//nl// &
-        "        if (abs(fd - expected_grad) > 1.0d-7) error stop 4"//nl// &
-        "        if (abs(y_b*y_d - x_b*x_d) > 1.0d-13) error stop 5"//nl// &
-        "        call apply_jvp(model, x, x_d, y, y_d)"//nl// &
-        "        if (abs(y - expected_y) > 1.0d-13 .or. abs(y_d - expected_grad*x_d) > 1.0d-13) error stop 6"//nl// &
-        "        call apply_vjp(model, x, y, y_b, x_b)"//nl// &
-        "        if (abs(y - expected_y) > 1.0d-13 .or. abs(x_b - y_b*expected_grad) > 1.0d-13) error stop 7"//nl// &
-        "        call apply(model, x+h, yp)"//nl// &
-        "        call apply(model, x-h, ym)"//nl// &
-        "        fd = (yp-ym)/(2.0d0*h)"//nl// &
-        "        if (abs(fd - expected_grad) > 1.0d-7) error stop 8"//nl// &
-        "        if (abs(y_b*y_d - x_b*x_d) > 1.0d-13) error stop 9"//nl// &
-        "    end subroutine check"//nl// &
-        "end program driver"//nl
-    open (newunit=unit, file=dir//"/driver.f90", status="replace", action="write")
-    write (unit, '(a)') driver
-    close (unit)
-    call execute_command_line("gfortran -std=f2018 -O2 -J"//dir//" -I"//dir// &
-        " -o "//dir//"/run "//dir//"/primal.f90 "//dir//"/derivatives.f90 "// &
-        dir//"/driver.f90 > "//dir//"/build.log 2>&1", exitstat=stat)
-    if (stat /= 0) then
-        print *, "generated source did not compile; see ", dir//"/build.log"
-        error stop 1
-    end if
-    call execute_command_line("./"//dir//"/run", exitstat=stat)
-    if (stat /= 0) error stop "direct polymorphic derivative mismatch"
+    call require_refusal(eval_jvp, "evaluate JVP")
+    call require_refusal(eval_vjp, "evaluate VJP")
+    call require_refusal(apply_jvp, "apply JVP")
+    call require_refusal(apply_vjp, "apply VJP")
+    call expect_multiple_target_refusal()
     print *, "test_direct_polymorphic_oracle: all cases passed"
 
 contains
 
-    subroutine require_ok(result, label)
+    subroutine require_refusal(result, label)
         type(fad_result_t), intent(in) :: result
         character(len=*), intent(in) :: label
-        if (.not. result%ok) then
+        if (result%ok .or. .not. allocated(result%message) .or. &
+            index(result%message, "multiple runtime targets") == 0) then
             print *, "FAIL ", label, ": ", result%message
             error stop 1
         end if
-    end subroutine require_ok
+    end subroutine require_refusal
 
-    subroutine expect_dynamic_type_refusal()
+    subroutine expect_multiple_target_refusal()
         type(fad_result_t) :: result
 
         result = fad_jvp(source, ["model"], from="evaluate")
@@ -188,11 +115,11 @@ contains
             error stop 1
         end if
         if (.not. allocated(result%message)) then
-            print *, "FAIL dynamic type refusal had no message"
+            print *, "FAIL multiple-target refusal had no message"
             error stop 1
         end if
-        if (index(result%message, "dynamic type") == 0) then
-            print *, "FAIL dynamic type refusal was not named: ", result%message
+        if (index(result%message, "multiple runtime targets") == 0) then
+            print *, "FAIL multiple-target refusal was not named: ", result%message
             error stop 1
         end if
         result = fad_vjp(source, ["model"], dependent="y", from="evaluate")
@@ -201,13 +128,13 @@ contains
             error stop 1
         end if
         if (.not. allocated(result%message)) then
-            print *, "FAIL reverse dynamic type refusal had no message"
+            print *, "FAIL reverse multiple-target refusal had no message"
             error stop 1
         end if
-        if (index(result%message, "dynamic type") == 0) then
-            print *, "FAIL reverse dynamic type refusal was not named: ", result%message
+        if (index(result%message, "multiple runtime targets") == 0) then
+            print *, "FAIL reverse multiple-target refusal was not named: ", result%message
             error stop 1
         end if
-    end subroutine expect_dynamic_type_refusal
+    end subroutine expect_multiple_target_refusal
 
 end program test_direct_polymorphic_oracle
