@@ -1921,6 +1921,13 @@ of selected child ends the fixed-path derivative contract.
             default, assumed-size, scalar, dynamic, pointer, alias,
             allocatable, global, kind, multiple-arm, missing-arm, and
             unsupported-rank refusals.
+      - [x] **P7.7h linear `SPREAD` intrinsic.** FortAD accepts an array
+            `SPREAD` with passive integer shape controls. Forward mode spreads
+            the source tangent; reverse mode sums the output cotangent over
+            the replicated dimension. The independent
+            [`test_spread_oracle.f90`](test/test_spread_oracle.f90) checks
+            generated compilation, hand JVP/VJP values, the adjoint identity,
+            and a central finite difference.
 
 ## Phase 8: Runtime polymorphism and callbacks
 

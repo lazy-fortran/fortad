@@ -42,6 +42,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Scalar JVP and VJP | expressions, intrinsic calls, branches, and supported procedure calls |
 | Array JVP | whole arrays and subscripts, including loops and batched directions |
 | Array VJP | reductions, element writes, nested loops, affine recurrences, and taped nonlinear recurrences |
+| Shape-changing linear intrinsics | `SPREAD` JVPs and dimension-wise reverse cotangent reduction |
 | Derivative-only output | forward and reverse modes with `--no-primal` |
 | Hessian-vector product | scalar-direction forward-over-reverse |
 | Sparse Jacobian | static conservative patterns, column coloring, seeding, and recovery |
