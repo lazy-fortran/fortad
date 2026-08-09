@@ -383,6 +383,7 @@ contains
         !! occur while the expression arena grows.
         type(fad_expr_t), intent(out) :: destination
         type(fad_expr_t), intent(in) :: source
+        integer :: i
 
         destination%kind = source%kind
         destination%rank = source%rank
@@ -403,9 +404,9 @@ contains
         if (allocated(source%call_arg_names)) then
             allocate (character(len=len(source%call_arg_names)) :: &
                 destination%call_arg_names(size(source%call_arg_names)))
-            if (size(source%call_arg_names) > 0) then
-                destination%call_arg_names = source%call_arg_names
-            end if
+            do i = 1, size(source%call_arg_names)
+                destination%call_arg_names(i) = source%call_arg_names(i)
+            end do
         end if
         if (allocated(source%callback_formal)) then
             destination%callback_formal = source%callback_formal
@@ -785,6 +786,7 @@ contains
     subroutine fad_copy_stmt(destination, source)
         type(fad_stmt_t), intent(out) :: destination
         type(fad_stmt_t), intent(in) :: source
+        integer :: i
 
         destination%kind = source%kind
         destination%value = source%value
@@ -816,18 +818,37 @@ contains
             destination%target_component_type_name = &
                 source%target_component_type_name
         end if
-        if (allocated(source%call_args)) &
-            destination%call_args = source%call_args
-        if (allocated(source%call_arg_names)) &
-            destination%call_arg_names = source%call_arg_names
+        if (allocated(source%call_args)) then
+            allocate (destination%call_args(size(source%call_args)))
+            if (size(source%call_args) > 0) then
+                destination%call_args = source%call_args
+            end if
+        end if
+        if (allocated(source%call_arg_names)) then
+            !! Do not assign an assumed-length character array directly here.
+            !! nvfortran 26.5 mis-sizes that intrinsic assignment while the
+            !! statement arena is growing, corrupting the heap and later
+            !! aborting a valid polymorphic transformation.  Allocate from
+            !! the source descriptor and copy elements individually, as in
+            !! copy_expr above.
+            allocate (character(len=len(source%call_arg_names)) :: &
+                destination%call_arg_names(size(source%call_arg_names)))
+            do i = 1, size(source%call_arg_names)
+                destination%call_arg_names(i) = source%call_arg_names(i)
+            end do
+        end if
         if (allocated(source%callback_formal)) then
             destination%callback_formal = source%callback_formal
         end if
         if (allocated(source%callback_target)) then
             destination%callback_target = source%callback_target
         end if
-        if (allocated(source%allocation_args)) &
-            destination%allocation_args = source%allocation_args
+        if (allocated(source%allocation_args)) then
+            allocate (destination%allocation_args(size(source%allocation_args)))
+            if (size(source%allocation_args) > 0) then
+                destination%allocation_args = source%allocation_args
+            end if
+        end if
     end subroutine fad_copy_stmt
 
 end module fortad_ir
