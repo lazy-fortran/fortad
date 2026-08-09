@@ -136,9 +136,14 @@ ownership, and mutable global state remain source-local refusals.
 
 FortFront `8da49474` also exposes formal procedure-interface signatures and
 explicit compatible, incompatible, and unresolved actual/formal states. FortAD
-has not yet consumed that contract for generic callback differentiation; the
-next interface slice must use these facts rather than infer a callback
-signature.
+now consumes those facts for one fixed same-file scalar `REAL(8)` function
+actual, or one same-file procedure pointer with one unconditional assignment,
+passed to a scalar procedure dummy. JVP and VJP inline the proven concrete
+target. Incompatible, unresolved, generic, ambiguous, aliased, ownership-
+changing, and active-global callback paths remain named refusals. The
+independent compiled oracle is
+`test/test_passed_procedure_callback_oracle.f90`; it checks hand values,
+central finite differences, the adjoint identity, and refusal messages.
 
 FortAD also consumes the FortFront type-bound dispatch target set for direct
 abstract/deferred function calls only when it contains exactly one concrete
@@ -2323,14 +2328,15 @@ problem-specific rule.
       arm facts in `7139a946`.
       The bounded same-scope callback call and derivative slice is delivered
       by FortAD `48dec22` with hand, finite-difference, and adjoint oracles.
-      **P8.6a bounded passed-procedure callback slice (isolated branch):** one
-      direct same-scope procedure-pointer assignment with an exact scalar
-      `real(8) function(real(8), intent(in))` target can be passed directly to
-      one procedure dummy; FortFront facts drive target substitution during
-      FortAD inlining. The independent
+      **P8.6a bounded passed-procedure callback slice:** one direct same-file
+      scalar `real(8) function(real(8), intent(in))` actual, or one direct
+      same-scope procedure-pointer assignment to that target, can be passed to
+      one procedure dummy; FortFront formal/actual compatibility facts drive
+      target substitution during FortAD inlining. The independent
       `test_passed_procedure_callback_oracle.f90` covers JVP/VJP,
       finite-difference, adjoint, and named refusals. Reassignment, null,
-      generic/ambiguous/dynamic targets, aliases, global mutable state,
+      incompatible or unresolved interfaces, generic/ambiguous/dynamic
+      targets, aliases, global mutable state,
       ownership changes, `class(*)` context objects, general flow, and
       reverse callback lifetime remain open.
       **P8.6c bounded direct-call reassignment:** FortFront `236dbec4` and the

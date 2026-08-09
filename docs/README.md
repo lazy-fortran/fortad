@@ -45,7 +45,7 @@ independent oracle.
 | [Polymorphic ownership](design/polymorphic-ownership.md) | passive dispatch plus bounded active `allocate(source=concrete)` ownership for `class(base_t)`/`class(*)`, with semantic refusal outside the fixed path | [`test_polymorphic_ownership_oracle.f90`](../test/test_polymorphic_ownership_oracle.f90) |
 | [Abstract hierarchy](design/abstract-hierarchy.md) | fixed concrete overrides plus bounded `select type` dispatch through deferred bindings | [`test_abstract_hierarchy_oracle.f90`](../test/test_abstract_hierarchy_oracle.f90), [`test_runtime_select_type_oracle.f90`](../test/test_runtime_select_type_oracle.f90) |
 | [GPU emission](design/gpu.md) | restricted OpenMP target and OpenACC loop shape | external `fortad-bench` device record |
-| [Procedure interfaces](design/procedure-interfaces.md) | elemental JVP/VJP preservation and array calls | [`test_elemental_interface_oracle.f90`](../test/test_elemental_interface_oracle.f90) |
+| [Procedure interfaces](design/procedure-interfaces.md) | fixed formal/actual scalar callback interfaces, elemental JVP/VJP preservation, and array calls | [`test_passed_procedure_callback_oracle.f90`](../test/test_passed_procedure_callback_oracle.f90), [`test_elemental_interface_oracle.f90`](../test/test_elemental_interface_oracle.f90) |
 | [Source forms](design/source-forms.md) | fixed-form file normalization and legacy procedure purity | [`test_tapenade_fixed_form_oracle.f90`](../test/test_tapenade_fixed_form_oracle.f90) |
 | [Assumed-rank `SELECT RANK`](design/assumed-rank-select-rank.md) | fixed direct `RANK (1)` JVP/VJP path with descriptor, alias, and dispatch refusals | [`test_assumed_rank_select_rank_oracle.f90`](../test/test_assumed_rank_select_rank_oracle.f90) |
 

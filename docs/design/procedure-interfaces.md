@@ -69,24 +69,28 @@ callback state remain named refusals. See
 [`test_callback_call_oracle.f90`](../../test/test_callback_call_oracle.f90) for
 the compiled JVP/VJP, finite-difference, adjoint, and refusal oracle.
 
-## Passed-procedure callbacks: bounded P8.6 slice
+## Passed-procedure callbacks: bounded fixed-interface P8.6 slice
 
-FortAD also accepts one narrower passed-procedure form. In the caller, a
-local procedure pointer must receive exactly one direct same-scope assignment
-to a fixed target and then be passed directly as the actual for one procedure
-dummy with an exact scalar `real(8) function(real(8), intent(in))` interface.
-FortFront supplies the actual/formal mapping, resolved target, and signature;
-FortAD records that fact on the call, substitutes the fixed target while
-inlining, and leaves the pointer declaration and assignment out of generated
-AD code. The JVP and VJP therefore differentiate the concrete target using the
-ordinary call machinery.
+FortAD accepts one fixed-interface passed-procedure form. A same-file scalar
+`REAL(8)` function may be passed directly, or a local procedure pointer may
+receive exactly one direct same-scope assignment to that function before it is
+passed as the actual for one procedure dummy. The formal procedure interface
+and actual target must both be the exact scalar
+`real(8) function(real(8), intent(in))` signature. FortFront supplies the
+actual/formal mapping, both signatures, compatibility state, and (for a
+pointer) the fixed target fact; FortAD consumes those facts rather than
+inferring a callback signature. It substitutes the fixed target while
+inlining and leaves the procedure dummy, pointer declaration, and pointer
+assignment out of generated AD code. The JVP and VJP therefore differentiate
+the concrete target using the ordinary call machinery.
 
 This is intentionally a modern-Fortran abstraction boundary, not a runtime
-callback implementation. FortAD refuses reassignment, branch or loop flow,
-`NULL()` targets, generic/ambiguous/unresolved/dynamic targets, aliases,
-global mutable state, and target ownership or pointer-association changes.
-The refusal names the first violated boundary. The independent hand,
-finite-difference, adjoint, and refusal oracle is
+callback implementation. FortAD refuses incompatible or unresolved
+formal/actual facts, generic or ambiguous actuals, reassignment, branch or
+loop flow, `NULL()` targets, aliases, global mutable state, and target
+ownership or pointer-association changes. The refusal names the first violated
+boundary. The independent compiled hand, finite-difference, adjoint, and
+refusal oracle is
 [`test_passed_procedure_callback_oracle.f90`](../../test/test_passed_procedure_callback_oracle.f90).
 
 ### Optional callback dummies
