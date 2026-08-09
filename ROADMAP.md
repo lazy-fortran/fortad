@@ -144,13 +144,13 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files. The reproducible queue contains 1,117 rows: 1,043
+candidate files. The reproducible queue contains 1,113 rows: 1,039
 pure-Fortran and 74 mixed-language candidates. Pure-Fortran status is 63
-runnable, 134 expected refusals, 34 invalid-upstream closures, and 158 other
-bounded FortAD feature/dependency classifications: 389 of 1,432 strict
-pure-Fortran candidates are classified (27.2%), while 1,043 remain in the
-pure-Fortran queue. Across the whole corpus, 897 of 2,014 candidates are
-accounted for (44.5%). The 74 mixed-language rows remain a separate dependency
+runnable, 134 expected refusals, 34 invalid-upstream closures, and 162 other
+bounded FortAD feature/dependency classifications: 393 of 1,432 strict
+pure-Fortran candidates are classified (27.4%), while 1,039 remain in the
+pure-Fortran queue. Across the whole corpus, 901 of 2,014 candidates are
+accounted for (44.7%). The 74 mixed-language rows remain a separate dependency
 lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -334,13 +334,13 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `6473ea1`
-- FortFront `4420e3d0`
+- FortAD `ea21512`
+- FortFront `83cba6d2`
 - FFC `2f6cc37`
-- fortad-bench `36b2d5b`
+- fortad-bench `1275638`
 - fo `8534372`
 
-- FortFront `4420e3d0`, including abstract/deferred hierarchy, concrete-only
+- FortFront `83cba6d2`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
@@ -379,6 +379,10 @@ historical evidence only:
   multi-level abstract/deferred implementations. The independent API oracle
   covers depths zero, one, and two and keeps generic and unresolved targets
   explicit boundaries.
+  Its defined-operator query now exposes exact operand categories, kinds,
+  ranks, selected specific candidates, and explicit ambiguity, conversion,
+  unknown-type, pointer/TARGET, and global-state refusals for downstream
+  differentiation.
   Its call-boundary query now exposes formal intent, type/kind/rank, storage,
   actual-to-formal mappings, and explicit alias, callback, global-state,
   unknown-type, and mismatch refusals for downstream differentiation.
@@ -638,12 +642,12 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   mapping. JVP/VJP generated-source, numerical, and refusal oracles pass;
   unresolved, generic, alias, pointer, allocatable, array, global, and
   ownership-changing paths remain precise refusals.
-- fortad-bench `36b2d5b` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
+- fortad-bench `1275638` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
-  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34/next35/next36/next37 evidence contracts. The reproducible queue
-  contains 1,117 rows: 1,043 pure-Fortran and 74 mixed-language candidates.
-  897 of 2,014 corpus candidates are accounted for, including 389 of 1,432
-  strict pure-Fortran candidates (27.2%); 1,043 pure-Fortran candidates
+  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34/next35/next36/next37/next38 evidence contracts. The reproducible queue
+  contains 1,113 rows: 1,039 pure-Fortran and 74 mixed-language candidates.
+  901 of 2,014 corpus candidates are accounted for, including 393 of 1,432
+  strict pure-Fortran candidates (27.4%); 1,039 pure-Fortran candidates
   remain in the queue. The reproducible Enzyme comparison now has
   a common size-sweep harness for N=100 through 1,000,000 with median/min/max
   timing and provenance artifacts. The latest sweep contains 125 measured rows
@@ -672,6 +676,9 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   and independent behavioral or refusal oracles. They remain explicit
   boundaries for generic calls without derivative rules, active formatted I/O,
   program-unit layout, and external allocatable-dummy calls.
+  The `next38` shard adds `set10/lh215`, `set10/lh216`, `set12/mvo11`, and
+  `set07/v472`; all four have fresh Tapenade three-mode probes, exact hashes,
+  and independent behavioral or refusal oracles.
 
 The next feature order has four steps. The callback-flow, bounded
 abstract-dispatch-provenance, fixed literal polymorphic owner-array, bounded
@@ -820,7 +827,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `4420e3d0`, which includes the
+The current FortFront `main` handoff is `83cba6d2`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths, plus formal-ordered actual-to-formal call
@@ -874,7 +881,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `6473ea1`. Its GNU behavioral
+The implementation snapshot is FortAD code at `ea21512`. Its GNU behavioral
 gate is green (410 build targets, 409 derivative targets, 94/94 tests).
 `fo lint` still has four short-circuit hazards and 108 array-temporary
 warnings. Feature scope is recorded in the Phase 7 and 8
@@ -1748,14 +1755,21 @@ of selected child ends the fixed-path derivative contract.
             The generated complex adjoint stores the two coordinate gradients.
             [`test_complex_reverse_oracle.f90`](test/test_complex_reverse_oracle.f90)
             checks hand values, central differences, and the real adjoint
-            identity. Complex arithmetic, `conjg`, `abs`, complex outputs,
-            and BLAS remain named refusal boundaries.
+            identity. Complex arithmetic, `conjg`, complex outputs, and BLAS
+            remain named refusal boundaries; zero-valued `abs(z)` remains a
+            differentiability boundary.
       - [x] **P7.5c bounded `aimag` projection VJP.** Commit `d1dec10`
             differentiates a real objective through `aimag(z)` for active
             complex inputs. The independent
             [`test_complex_reverse_oracle.f90`](test/test_complex_reverse_oracle.f90)
             checks hand values, central differences, and the real adjoint
-            identity, while `abs` and `conjg` remain precise refusals.
+            identity, while `conjg` remains a precise refusal.
+      - [x] **P7.5d bounded nonzero complex `abs` projection VJP.** Commits
+            `ecf5455` and `ea21512` differentiate a real objective through
+            `abs(z)` for active complex inputs with a nonzero primal modulus.
+            The independent complex reverse oracle checks hand values, central
+            differences, and the adjoint identity; `abs(0)`, `conjg`, complex
+            arithmetic, complex outputs, and BLAS remain explicit boundaries.
       Complex reverse rules beyond these projections, complex BLAS, and
       non-holomorphic objective conventions remain open.
 - [ ] **P7.6 Source forms.** Accept fixed form, CPP and includes,
@@ -2225,9 +2239,9 @@ An unsupported result is recorded as such and never counted as a runtime win.
       rows with active module state, dependent inference, invalid generated
       interfaces, and procedure-call actual boundaries. Its `next21` shard
       adds four rows with active I/O, legacy GOTO, nested DO-WHILE, and legacy
-      labeled-DO boundaries. The current queue has 1,117 rows, including
-      1,043 pure-Fortran and 74 mixed-language candidates. There are 389 of
-      1,432 strict pure-Fortran candidates and 897 of 2,014 total candidates
+      labeled-DO boundaries. The current queue has 1,113 rows, including
+      1,039 pure-Fortran and 74 mixed-language candidates. There are 393 of
+      1,432 strict pure-Fortran candidates and 901 of 2,014 total candidates
       classified. Each shard row has an
       exact-source Tapenade/FortAD probe and an independent behavioral or
       refusal oracle. The preceding `next6` shard closed `set11/lh011`,
