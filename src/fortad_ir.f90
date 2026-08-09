@@ -212,6 +212,7 @@ module fortad_ir
         integer, allocatable :: bucket_next(:)
     contains
         procedure :: add_expr => proc_add_expr
+        procedure :: add_expr_call => proc_add_expr_call
         procedure :: add_stmt => proc_add_stmt
         procedure :: add_decl => proc_add_decl
         procedure :: add_decl_fields => proc_add_decl_fields
@@ -219,7 +220,8 @@ module fortad_ir
         procedure :: decl_index_of => proc_decl_index_of
     end type fad_proc_t
 
-    public :: expr_const, expr_var, expr_binop, expr_unop, expr_call
+    public :: expr_const, expr_var, expr_binop, expr_unop, expr_call, &
+        fad_set_expr_call
     public :: fad_base_name, fad_suffix_name
     public :: fad_expr_equal, copy_decl
 
@@ -352,6 +354,19 @@ contains
         self%bucket_head(h) = self%n_exprs
         idx = self%n_exprs
     end function proc_add_expr
+
+    integer function proc_add_expr_call(self, name, args, arg_names) result(idx)
+        !! Build and append a call without returning a derived value carrying
+        !! deferred-length allocatables through nvfortran's assignment path.
+        class(fad_proc_t), intent(inout) :: self
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: args(:)
+        character(len=*), intent(in), optional :: arg_names(:)
+        type(fad_expr_t) :: e
+
+        call fad_set_expr_call(e, name, args, arg_names)
+        idx = self%add_expr(e)
+    end function proc_add_expr_call
 
     subroutine copy_expr(destination, source)
         !! Copy an expression without compiler-generated assignment of its
@@ -655,16 +670,39 @@ contains
         e%args(1) = a
     end function expr_unop
 
+    subroutine fad_set_expr_call(e, name, args, arg_names)
+        !! Set an intrinsic or procedure reference in place.  Keeping the
+        !! construction in a subroutine avoids returning a derived value with
+        !! deferred-length components through nvfortran's intrinsic assignment.
+        type(fad_expr_t), intent(out) :: e
+        character(len=*), intent(in) :: name
+        integer, intent(in) :: args(:)
+        character(len=*), intent(in), optional :: arg_names(:)
+        integer :: i
+
+        e%kind = FAD_CALL
+        e%text = name
+        e%args = args
+        if (present(arg_names)) then
+            !! nvfortran 26.5 mis-sizes a deferred-length character array
+            !! when intrinsic assignment receives an assumed-length array.
+            !! Allocate the descriptor from the actual length and copy scalar
+            !! elements so the assignment cannot overrun adjacent storage.
+            allocate (character(len=len(arg_names)) :: &
+                e%call_arg_names(size(arg_names)))
+            do i = 1, size(arg_names)
+                e%call_arg_names(i) = arg_names(i)
+            end do
+        end if
+    end subroutine fad_set_expr_call
+
     type(fad_expr_t) function expr_call(name, args, arg_names) result(e)
         !! An intrinsic or procedure reference.
         character(len=*), intent(in) :: name
         integer, intent(in) :: args(:)
         character(len=*), intent(in), optional :: arg_names(:)
 
-        e%kind = FAD_CALL
-        e%text = name
-        e%args = args
-        if (present(arg_names)) e%call_arg_names = arg_names
+        call fad_set_expr_call(e, name, args, arg_names)
     end function expr_call
 
     logical function fad_expr_equal(a, b) result(same)

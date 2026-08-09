@@ -27,7 +27,8 @@ module fortad_lower_statements
     use frontend_compiler_control_queries, only: control_statement_query_t, &
         query_control_statement, CONTROL_SELECT_RANK, select_rank_arm_query_t
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-        expr_const, expr_var, expr_binop, expr_call, fad_base_name, copy_decl, &
+        expr_const, expr_var, expr_binop, expr_call, fad_set_expr_call, &
+        fad_base_name, copy_decl, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
         FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
         FAD_INTENT_IN, FAD_INTENT_OUT, FAD_INTENT_INOUT, &
@@ -457,7 +458,7 @@ contains
         type(fad_stmt_t) :: s
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
-        integer :: condition, ignored
+        integer :: condition, ignored, i
         character(len=:), allocatable :: tag, target_text
 
         status%ok = .true.
@@ -479,8 +480,8 @@ contains
         ignored = proc%add_stmt(s)
         s%kind = FAD_ASSIGN
         s%target = target_text
-        s%value = proc%add_expr(expr_call(flow%targets(1)%procedure_name, args, &
-            arg_names))
+        s%value = proc%add_expr_call(flow%targets(1)%procedure_name, args, &
+            arg_names)
         ignored = proc%add_stmt(s)
         s%kind = FAD_ELSE
         s%value = 0
@@ -488,8 +489,8 @@ contains
         ignored = proc%add_stmt(s)
         s%kind = FAD_ASSIGN
         s%target = target_text
-        s%value = proc%add_expr(expr_call(flow%targets(2)%procedure_name, args, &
-            arg_names))
+        s%value = proc%add_expr_call(flow%targets(2)%procedure_name, args, &
+            arg_names)
         ignored = proc%add_stmt(s)
         s%kind = FAD_END_IF
         s%value = 0
@@ -510,7 +511,7 @@ contains
         type(fad_stmt_t) :: s
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
-        integer :: condition, ignored
+        integer :: condition, ignored, i
         character(len=:), allocatable :: tag
 
         status%ok = .true.
@@ -529,7 +530,11 @@ contains
         s%kind = FAD_CALL_STMT
         s%target = flow%targets(1)%procedure_name
         s%call_args = args
-        s%call_arg_names = arg_names
+        allocate (character(len=len(arg_names)) :: &
+            s%call_arg_names(size(arg_names)))
+        do i = 1, size(arg_names)
+            s%call_arg_names(i) = arg_names(i)
+        end do
         ignored = proc%add_stmt(s)
         s%kind = FAD_ELSE
         s%value = 0
@@ -540,7 +545,11 @@ contains
         s%kind = FAD_CALL_STMT
         s%target = flow%targets(2)%procedure_name
         s%call_args = args
-        s%call_arg_names = arg_names
+        allocate (character(len=len(arg_names)) :: &
+            s%call_arg_names(size(arg_names)))
+        do i = 1, size(arg_names)
+            s%call_arg_names(i) = arg_names(i)
+        end do
         ignored = proc%add_stmt(s)
         s%kind = FAD_END_IF
         s%value = 0
@@ -2239,7 +2248,7 @@ contains
                 e%args = args
                 out = proc%add_expr(e)
             else
-                e = expr_call(call_name, args, arg_names)
+                call fad_set_expr_call(e, call_name, args, arg_names)
                 call annotate_passed_procedure_expression(arena, idx, e, status)
                 if (.not. status%ok) return
                 out = proc%add_expr(e)
@@ -3964,7 +3973,7 @@ contains
                 if (.not. status%ok) return
             end do
         end if
-        out = proc%add_expr(expr_call(impl, args, arg_names))
+        out = proc%add_expr_call(impl, args, arg_names)
     end function lower_type_bound_call
 
     subroutine lower_polymorphic_function_dispatch(arena, node, proc, query, &
@@ -4070,7 +4079,7 @@ contains
             ignored = proc%add_stmt(s)
             s%kind = FAD_ASSIGN
             s%target = temp
-            s%value = proc%add_expr(expr_call(implementation, args, arg_names))
+            s%value = proc%add_expr_call(implementation, args, arg_names)
             ignored = proc%add_stmt(s)
         end do
         s%kind = FAD_CLASS_DEFAULT

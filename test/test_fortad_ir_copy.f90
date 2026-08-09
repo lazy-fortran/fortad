@@ -19,7 +19,7 @@ program test_fortad_ir_copy
     type(fad_stmt_t) :: original, copy, arena_stmt
     type(fad_expr_t) :: arena_expr, filler_expr
     type(fad_proc_t) :: proc
-    integer :: failures, expr_index, duplicate_index, stmt_index, i
+    integer :: failures, expr_index, duplicate_index, stmt_index, call_index, i
     character(len=16) :: label
 
     failures = 0
@@ -137,6 +137,16 @@ program test_fortad_ir_copy
         "expression hash-consing after arena growth", failures)
     call expect(fad_expr_equal(proc%exprs(expr_index), arena_expr), &
         "expression fields after arena growth", failures)
+
+    ! The keyword-name path must construct the deferred-length array in place;
+    ! nvfortran 26.5 overruns the heap when this is returned as a derived
+    ! function value or assigned from an assumed-length character array.
+    call_index = proc%add_expr_call("keyword_kernel", [21, 34], &
+        [character(len=8) :: "first", "second"])
+    call expect(proc%exprs(call_index)%call_arg_names(1) == "first", &
+        "in-place call keyword name", failures)
+    call expect(proc%exprs(call_index)%call_arg_names(2) == "second", &
+        "in-place second keyword name", failures)
 
     do i = 1, 64
         arena_stmt%kind = FAD_CALL_STMT
