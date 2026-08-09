@@ -56,8 +56,14 @@ reverse mode: move_alloc requires one straight-line allocation owner and one mat
 
 Repeated or path-dependent automatic reallocation, mixing automatic and
 explicit lifetime operations, array-valued component assignment/read,
-allocatable component explicit lifetime operations, polymorphic components or
-owners, pointer/target aliases, and active module-owned state remain refused.
+polymorphic components or owners, pointer/target aliases, and active
+module-owned state remain refused. The one explicit component-lifetime
+exception is a concrete scalar `REAL` allocatable component: one `ALLOCATE`,
+one direct active store/read path, one `MOVE_ALLOC` to a distinct concrete
+scalar component, and one matching final `DEALLOCATE` are replayed with paired
+enclosing-object shadows. This does not extend to array components, dynamic
+indices, `SOURCE=`/`MOLD=`, polymorphic components, or changing ownership
+paths.
 A `MOVE_ALLOC` outside the one-owner, straight-line,
 matching-final-deallocation shape is also refused. Those cases require storage
 identity, dynamic ownership, or a per-path allocation-state tape; emitting a
@@ -83,6 +89,12 @@ The scalar allocatable-component reallocation oracle is
 It compiles and runs the primal and generated JVP/VJP with gfortran, checks the
 hand derivative and central finite difference, verifies allocation of both
 derivative component descriptors, and checks the adjoint dot-product identity.
+
+The concrete component `MOVE_ALLOC` oracle is
+[`test_allocatable_component_move_oracle.f90`](../../test/test_allocatable_component_move_oracle.f90).
+It compiles and runs generated JVP/VJP code, checks hand and central
+finite-difference derivatives plus the VJP dot-product identity, and verifies
+refusals for polymorphic, array-valued, and `TARGET` component lifetimes.
 
 A fixed one-dimensional literal element of a concrete derived array is also
 accepted for that scalar component transition, for example

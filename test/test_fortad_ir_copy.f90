@@ -41,6 +41,7 @@ program test_fortad_ir_copy
     original%allocation_mold = 17
     original%allocation_target_polymorphic = .true.
     original%allocation_target_unlimited_polymorphic = .true.
+    original%allocation_target_component = .true.
 
     call fad_copy_stmt(copy, original)
 
@@ -89,6 +90,8 @@ program test_fortad_ir_copy
     call expect(copy%allocation_target_unlimited_polymorphic .eqv. &
         original%allocation_target_unlimited_polymorphic, &
         "allocation_target_unlimited_polymorphic", failures)
+    call expect(copy%allocation_target_component .eqv. &
+        original%allocation_target_component, "allocation_target_component", failures)
 
     ! An unallocated component must stay unallocated rather than become an
     ! empty string, which would turn a "no target" statement into one whose

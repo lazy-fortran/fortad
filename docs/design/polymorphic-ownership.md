@@ -63,7 +63,7 @@ This is one selected element, not an array lifetime tape. Computed or dynamic
 indices, sections, vector subscripts, rank-two or higher holder paths,
 assumed-shape or allocatable holder arrays, pointer/TARGET or other aliases,
 factories, polymorphic sources, repeated or path-dependent lifetime changes,
-`MOLD=`, `MOVE_ALLOC`, finalization replay, global mutable state, and ambiguous
+`MOLD=`, polymorphic-component `MOVE_ALLOC`, finalization replay, global mutable state, and ambiguous
 or runtime-changing dispatch remain precise reverse refusals. Forward support
 for broader array paths is unchanged; this slice does not imply reverse
 support for them.
@@ -90,7 +90,7 @@ The bounded reverse slice deliberately refuses component array sections and
 all array-element paths outside the one fixed-shape, literal-indexed holder
 case above. It also refuses factories and polymorphic sources (the `class(*)`
 case still requires a concrete source), `MOLD=`, repeated or path-dependent
-acquisition, aliases, `move_alloc`, whole-object assignment, finalization
+acquisition, aliases, polymorphic-component `move_alloc`, whole-object assignment, finalization
 replay, and unresolved or multi-arm dispatch. It also does not
 weaken the existing refusals for descriptor changes, reallocation, global
 mutable state, pointer/target aliases, or unsupported allocatable components.

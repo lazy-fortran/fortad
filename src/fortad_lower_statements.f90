@@ -328,10 +328,22 @@ contains
                 size(n%arg_indices) == 2 .and. .not. &
                 (type_bound%found .or. type_bound%is_unresolved)) then
                 s%kind = FAD_MOVE_ALLOC
-                if (.not. allocation_object_declared(proc, s%call_args(1)) .or. &
-                    .not. allocation_object_declared(proc, s%call_args(2))) then
+                s%allocation_target_component = &
+                    allocation_component_declared(proc, s%call_args(1)) .or. &
+                    allocation_component_declared(proc, s%call_args(2))
+                if ((.not. allocation_object_declared(proc, s%call_args(1)) .and. &
+                    .not. allocation_component_declared(proc, s%call_args(1))) .or. &
+                    (.not. allocation_object_declared(proc, s%call_args(2)) .and. &
+                    .not. allocation_component_declared(proc, s%call_args(2)))) then
                     call refuse_allocation(n%line, "move_alloc requires allocatable "// &
                         "objects", status)
+                    return
+                end if
+                if (allocation_component_polymorphic(proc, s%call_args(1)) .or. &
+                    allocation_component_polymorphic(proc, s%call_args(2))) then
+                    call refuse_allocation(n%line, &
+                        "move_alloc does not support polymorphic component ownership", &
+                        status)
                     return
                 end if
             else if (.not. (type_bound%found .or. type_bound%is_unresolved .or. &
@@ -1602,9 +1614,9 @@ contains
                 type(storage_query_t) :: component_storage
                 component_storage = query_storage(arena, node%var_indices(1))
                 if (.not. component_storage%found .or. &
-                    .not. component_storage%is_allocatable .or. &
-                    .not. component_storage%is_polymorphic) then
-                    call refuse_allocation(node%line, "non-allocatable target", status)
+                    .not. component_storage%is_allocatable) then
+                    call refuse_allocation(node%line, "non-allocatable target "// &
+                        trim(emit_expr(proc, s%allocation_args(1))), status)
                     return
                 end if
                 if (component_storage%is_module_state .or. &
@@ -1616,10 +1628,15 @@ contains
                 ! query_storage resolves both a component and a component of
                 ! an array element.  Keep that frontend fact in the IR; later
                 ! passes must not rediscover it from rendered source text.
-                s%allocation_target_polymorphic = .true.
+                s%allocation_target_component = .true.
+                s%allocation_target_polymorphic = component_storage%is_polymorphic
                 s%allocation_target_unlimited_polymorphic = &
                     component_storage%is_unlimited_polymorphic
             end block
+        end if
+        if (.not. s%allocation_target_polymorphic) then
+            s%allocation_target_component = allocation_component_declared(proc, &
+                s%allocation_args(1))
         end if
         if (allocated(node%shape_indices)) then
             if (size(node%shape_indices) > 0) then
@@ -1672,16 +1689,45 @@ contains
         if (.not. status%ok) return
         if (.not. allocation_object_declared(proc, s%allocation_args(1))) then
             block
+                type(component_path_query_t) :: component_path
                 type(storage_query_t) :: component_storage
-                component_storage = query_storage(arena, node%var_indices(1))
-                if (.not. component_storage%found .or. &
-                    .not. component_storage%is_allocatable .or. &
-                    .not. component_storage%is_polymorphic) then
-                    call refuse_allocation(node%line, "non-allocatable target", status)
-                    return
+                integer :: component_index
+                logical :: whole_component, is_component
+                call component_reference_parts(arena, node%var_indices(1), &
+                    component_index, whole_component, is_component)
+                if (.not. is_component) then
+                    if (.not. known_component_lifetime_object(proc, &
+                        emit_expr(proc, s%allocation_args(1)))) then
+                        call refuse_allocation(node%line, &
+                            "non-allocatable target "// &
+                            trim(emit_expr(proc, s%allocation_args(1))), status)
+                        return
+                    end if
+                else
+                    component_path = query_component_path(arena, component_index)
+                    component_storage = query_storage(arena, component_index)
+                    if (.not. component_path%found .or. &
+                        .not. component_storage%found .or. &
+                        .not. component_storage%is_allocatable) then
+                        if (.not. known_component_lifetime_object(proc, &
+                            emit_expr(proc, s%allocation_args(1)))) then
+                            call refuse_allocation(node%line, &
+                                "non-allocatable target", status)
+                            return
+                        end if
+                    end if
+                    if (component_storage%is_module_state .or. &
+                        component_storage%is_save_state .or. &
+                        component_storage%is_common_state) then
+                        call refuse_allocation(node%line, &
+                            "global mutable ownership", status)
+                        return
+                    end if
                 end if
             end block
         end if
+        s%allocation_target_component = allocation_component_declared(proc, &
+            s%allocation_args(1))
     end subroutine lower_deallocate_statement
 
     subroutine refuse_allocation(line, construct, status)
@@ -1823,14 +1869,66 @@ contains
         if (idx <= 0 .or. idx > proc%n_exprs) return
         if (.not. allocated(proc%exprs(idx)%text)) return
         di = proc%decl_index_of(proc%exprs(idx)%text)
-        ! Component ownership needs a containing-object lifetime model.  Do
-        ! not accept it merely because the expression contains a percent sign.
-        found = .false.
-        if (di > 0) then
+        if (index(proc%exprs(idx)%text, "%") == 0 .and. di > 0) then
             found = proc%decls(di)%is_allocatable .and. &
                 index(proc%exprs(idx)%text, "%") == 0
         end if
     end function allocation_object_declared
+
+    logical function allocation_component_declared(proc, idx) result(found)
+        !! Whether a lowered expression is a proven allocatable component.
+        type(fad_proc_t), intent(in) :: proc
+        integer, intent(in) :: idx
+
+        found = .false.
+        if (idx <= 0 .or. idx > proc%n_exprs) return
+        found = proc%exprs(idx)%is_component_path .and. &
+            proc%exprs(idx)%component_is_allocatable
+    end function allocation_component_declared
+
+    logical function allocation_component_polymorphic(proc, idx) result(found)
+        !! Whether a component MOVE_ALLOC operand has a dynamic declared type.
+        type(fad_proc_t), intent(in) :: proc
+        integer, intent(in) :: idx
+
+        found = .false.
+        if (idx <= 0 .or. idx > proc%n_exprs) return
+        found = proc%exprs(idx)%is_component_path .and. &
+            proc%exprs(idx)%component_is_polymorphic
+    end function allocation_component_polymorphic
+
+    logical function known_component_lifetime_object(proc, text) result(found)
+        !! A deallocation path can be represented by a plain identifier node
+        !! even when its earlier ALLOCATE/MOVE_ALLOC paths carried component
+        !! metadata.  Accept it only when that prior lifetime proves the same
+        !! descriptor, never from a percent sign alone.
+        type(fad_proc_t), intent(in) :: proc
+        character(len=*), intent(in) :: text
+        integer :: i
+        character(len=:), allocatable :: candidate
+
+        found = .false.
+        if (index(trim(text), "%") == 0) return
+        do i = 1, proc%n_stmts
+            if (proc%stmts(i)%kind == FAD_ALLOCATE) then
+                if (.not. allocated(proc%stmts(i)%allocation_args)) cycle
+                if (size(proc%stmts(i)%allocation_args) < 1) cycle
+                candidate = emit_expr(proc, proc%stmts(i)%allocation_args(1))
+                if (same_name(candidate, text)) then
+                    found = .true.
+                    return
+                end if
+            else if (proc%stmts(i)%kind == FAD_MOVE_ALLOC) then
+                if (.not. allocated(proc%stmts(i)%call_args)) cycle
+                if (size(proc%stmts(i)%call_args) /= 2) cycle
+                candidate = emit_expr(proc, proc%stmts(i)%call_args(2))
+                if (same_name(candidate, text)) then
+                    found = .true.
+                    return
+                end if
+            end if
+        end do
+    end function known_component_lifetime_object
 
     function declaration_dims_from_source(arena, line_number, name) result(dims)
         !! Fallback for declaration bounds not attached to the parser node.

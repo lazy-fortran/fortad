@@ -131,6 +131,10 @@ module fortad_ir
         integer, allocatable :: allocation_args(:)
         integer :: allocation_source = 0
         integer :: allocation_mold = 0
+        !! The allocation object is an allocatable component path rather than
+        !! a simple declaration.  This remains separate from polymorphism:
+        !! concrete component lifetimes have a fixed declared type.
+        logical :: allocation_target_component = .false.
         logical :: allocation_target_polymorphic = .false.
         logical :: allocation_target_unlimited_polymorphic = .false.
     end type fad_stmt_t
@@ -795,6 +799,8 @@ contains
         destination%line = source%line
         destination%allocation_source = source%allocation_source
         destination%allocation_mold = source%allocation_mold
+        destination%allocation_target_component = &
+            source%allocation_target_component
         destination%allocation_target_polymorphic = &
             source%allocation_target_polymorphic
         destination%allocation_target_unlimited_polymorphic = &
