@@ -127,6 +127,7 @@ program test_polymorphic_nested_component_oracle
 
     call expect_refusal(replace_text(source, "class(base_t), allocatable :: payload", &
         "class(base_t), pointer :: payload"), "pointer", "pointer or TARGET")
+    call expect_direct_dispatch_refusal()
     call expect_refusal(replace_text( &
         replace_text(source, "select type (item => box%payload)", &
         "associate (alias => box%payload)"//nl// &
@@ -172,6 +173,21 @@ contains
             error stop 1
         end if
     end subroutine expect_refusal_with
+
+    subroutine expect_direct_dispatch_refusal()
+        character(len=:), allocatable :: case_source
+
+        case_source = replace_text(source, &
+            "        select type (item => box%payload)"//nl// &
+            "        type is (child_t)"//nl// &
+            "            y = item%scale*x + item%bias"//nl// &
+            "        class default"//nl// &
+            "            y = x"//nl// &
+            "        end select", &
+            "        y = box%payload%value(x)")
+        call expect_refusal_with(case_source, [character(len=1) :: "x"], &
+            "direct polymorphic component dispatch", "polymorphic component receiver")
+    end subroutine expect_direct_dispatch_refusal
 
     subroutine expect_dynamic_refusal()
         character(len=64) :: case_independents(2)

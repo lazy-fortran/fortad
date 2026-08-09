@@ -34,7 +34,8 @@ module fortad_lower_statements
     use frontend_compiler_control_queries, only: control_statement_query_t, &
         query_control_statement, CONTROL_SELECT_RANK, select_rank_arm_query_t
     use fortad_ir, only: fad_proc_t, fad_expr_t, fad_stmt_t, fad_decl_t, &
-        expr_const, expr_var, expr_binop, expr_call, fad_set_expr_call, &
+        expr_const, expr_var, expr_binop, expr_unop, expr_call, &
+        fad_set_expr_call, &
         fad_base_name, copy_decl, &
         FAD_ASSIGN, FAD_DO, FAD_END_DO, FAD_IF, FAD_ELSE, &
         FAD_END_IF, FAD_VAR, FAD_INDEX, FAD_CALL_STMT, FAD_INTENT_NONE, &
@@ -2472,6 +2473,7 @@ contains
         character(len=:), allocatable :: callback_name
         type(procedure_reassignment_call_query_t) :: reassignment
         type(procedure_pointer_state_query_t) :: pointer_state
+        type(type_bound_call_query_t) :: type_bound
 
         out = 0
         if (idx <= 0 .or. idx > arena%size) then
@@ -2522,6 +2524,21 @@ contains
                 out = lower_defined_operator(arena, idx, n, proc, status)
                 return
             end if
+            if (same_name(n%operator, ".not.")) then
+                if (n%right_index <= 0) then
+                    status%ok = .false.
+                    status%message = "intrinsic .not. has no operand at line "// &
+                        itoa(node_line(arena, idx))
+                    return
+                end if
+                block
+                    integer :: operand
+                    operand = lower_expr(arena, n%right_index, proc, status)
+                    if (.not. status%ok) return
+                    out = proc%add_expr(expr_unop(trim(n%operator), operand))
+                end block
+                return
+            end if
             block
                 integer :: l, r
                 l = lower_expr(arena, n%left_index, proc, status)
@@ -2555,7 +2572,9 @@ contains
             end if
             if (n%base_expr_index > 0) then
                 if (is_component_base(arena, n%base_expr_index)) then
-                    if (is_type_bound_reference(arena, n%base_expr_index, proc)) then
+                    type_bound = query_type_bound_call(arena, idx)
+                    if (is_type_bound_reference(arena, n%base_expr_index, proc) .or. &
+                            type_bound%found .or. type_bound%is_unresolved) then
                         out = lower_type_bound_call(arena, idx, n, proc, status)
                         if (.not. status%ok) return
                     else if (size(n%arg_indices) == 0) then
@@ -3466,7 +3485,7 @@ contains
         if (len(text) < 3) return
         if (text(1:1) /= "." .or. text(len(text):len(text)) /= ".") return
         select case (lower_ascii(text))
-        case (".and.", ".or.", ".eqv.", ".neqv.", ".eq.", ".ne.", &
+        case (".not.", ".and.", ".or.", ".eqv.", ".neqv.", ".eq.", ".ne.", &
                 ".lt.", ".le.", ".gt.", ".ge.")
             return
         end select
@@ -4304,6 +4323,15 @@ contains
             call refuse_type_bound(status, node%name, &
                 "the receiver is not a component access")
             return
+        end if
+        if (trim(arena%entries(access%base_node_index)%node_type) == &
+                "component_access") then
+            dispatch = query_type_bound_call(arena, call_index)
+            if (dispatch%found .or. dispatch%is_unresolved) then
+                call refuse_type_bound(status, node%name, &
+                    "polymorphic component receiver ownership or dynamic type is unsupported")
+                return
+            end if
         end if
         indexed_receiver = .false.
         receiver_index = 0
