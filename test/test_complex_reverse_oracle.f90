@@ -1,7 +1,8 @@
 program test_complex_reverse_oracle
     !! Independent real-coordinate oracle for the bounded complex VJP slice.
     !!
-    !! A real objective obtained from `real(z)` has a two-coordinate gradient;
+    !! A real objective obtained from `real(z)`, `dble(z)`, or `aimag(z)` has a
+    !! two-coordinate gradient;
     !! FortAD represents it as a complex adjoint.  The hand derivative, a
     !! central difference in an arbitrary complex direction, and the real
     !! adjoint identity all check the generated routine.  A non-holomorphic
@@ -16,7 +17,8 @@ program test_complex_reverse_oracle
         "contains"//nl// &
         "    pure real(8) function project(z) result(y)"//nl// &
         "        complex(8), intent(in) :: z"//nl// &
-        "        y = 2.5d0*real(z) + 0.5d0*dble(z) + 1.75d0"//nl// &
+        "        y = 2.5d0*real(z) + 0.5d0*dble(z) + 3.25d0*aimag(z) + "// &
+        "1.75d0"//nl// &
         "    end function project"//nl// &
         "end module complex_projection_case"//nl
     character(len=*), parameter :: bad_source = &
@@ -28,7 +30,17 @@ program test_complex_reverse_oracle
         "        y = abs(z)"//nl// &
         "    end function magnitude"//nl// &
         "end module complex_projection_bad"//nl
+    character(len=*), parameter :: conjg_source = &
+        "module complex_conjg_projection_bad"//nl// &
+        "    implicit none"//nl// &
+        "contains"//nl// &
+        "    pure real(8) function conjugate_projection(z) result(y)"//nl// &
+        "        complex(8), intent(in) :: z"//nl// &
+        "        y = real(conjg(z))"//nl// &
+        "    end function conjugate_projection"//nl// &
+        "end module complex_conjg_projection_bad"//nl
     type(fad_result_t) :: vjp, refused
+    type(fad_result_t) :: refused_conjg
     character(len=:), allocatable :: dir, driver
     integer :: stat, unit
 
@@ -45,6 +57,13 @@ program test_complex_reverse_oracle
         index(refused%message, "complex") == 0) then
         print *, "FAIL unsupported complex reverse path was accepted"
         error stop 2
+    end if
+    refused_conjg = fad_vjp(conjg_source, [character(len=1) :: "z"], &
+        dependent="y", from="conjugate_projection")
+    if (refused_conjg%ok .or. .not. allocated(refused_conjg%message) .or. &
+        index(refused_conjg%message, "aimag(z)") == 0) then
+        print *, "FAIL complex conjugation projection was accepted"
+        error stop 8
     end if
 
     dir = "build/oracle_complex_reverse"
@@ -73,7 +92,7 @@ program test_complex_reverse_oracle
         "    y_b = -1.3d0"//nl// &
         "    y = project(z)"//nl// &
         "    call project_vjp(z, y, y_b, z_b)"//nl// &
-        "    err = abs(z_b-cmplx(3.0d0*y_b,0.0d0,8))"//nl// &
+        "    err = abs(z_b-cmplx(3.0d0*y_b,3.25d0*y_b,8))"//nl// &
         "    if (err > 1.0d-13) then"//nl// &
         "        print *, 'complex projection hand-adjoint error', err, z_b"//nl// &
         "        error stop 3"//nl// &
@@ -82,7 +101,7 @@ program test_complex_reverse_oracle
         "    yp = project(z+h*dz)"//nl// &
         "    ym = project(z-h*dz)"//nl// &
         "    fd = (yp-ym)/(2.0d0*h)"//nl// &
-        "    want = 3.0d0*real(dz)"//nl// &
+        "    want = 3.0d0*real(dz) + 3.25d0*aimag(dz)"//nl// &
         "    if (abs(fd-want) > 1.0d-8) then"//nl// &
         "        print *, 'complex projection finite-difference error', fd, "// &
         "want"//nl// &
