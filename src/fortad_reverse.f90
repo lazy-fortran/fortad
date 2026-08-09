@@ -1246,7 +1246,7 @@ contains
                 .not. is_concrete_allocatable_component_path(primal, target)) then
                 status%ok = .false.
                 status%message = "reverse mode: move_alloc component owners require "// &
-                    "concrete scalar through rank-three REAL allocatable components"
+                    "concrete scalar through rank-four REAL allocatable components"
                 return
             end if
             if (allocatable_component_rank(primal, source) /= &
@@ -1423,7 +1423,7 @@ contains
 
     logical function is_concrete_allocatable_component_path(primal, text) &
             result(found)
-        !! The concrete component lifetime slice is scalar through rank-three REAL.
+        !! The concrete component lifetime slice is scalar through rank-four REAL.
         type(fad_proc_t), intent(in) :: primal
         character(len=*), intent(in) :: text
         integer :: i
@@ -1440,7 +1440,7 @@ contains
                 .not. primal%exprs(i)%component_is_target .and. &
                 .not. primal%exprs(i)%component_is_global .and. &
                 (primal%exprs(i)%component_rank >= 0 .and. &
-                primal%exprs(i)%component_rank <= 3)
+                primal%exprs(i)%component_rank <= 4)
             return
         end do
     end function is_concrete_allocatable_component_path
@@ -1471,7 +1471,7 @@ contains
         if (.not. allocated(primal%stmts(stmt_index)%allocation_args)) return
         target = emit_expr(primal, primal%stmts(stmt_index)%allocation_args(1))
         rank = allocatable_component_rank(primal, target)
-        if (rank < 1 .or. rank > 3) return
+        if (rank < 1 .or. rank > 4) return
         if (size(primal%stmts(stmt_index)%allocation_args) /= rank + 1) return
         found = .true.
         do i = 2, size(primal%stmts(stmt_index)%allocation_args)
