@@ -899,6 +899,8 @@ contains
         select case (p%exprs(idx)%kind)
         case (FAD_VAR, FAD_INDEX)
             di = p%decl_index_of(p%exprs(idx)%text)
+            if (di == 0) di = p%decl_index(fad_base_name( &
+                p%exprs(idx)%text))
         end select
     end function arg_decl_index
 
@@ -1409,8 +1411,12 @@ contains
 
         target_text = emit_expr(primal, ps%allocation_args(1))
         di = primal%decl_index_of(target_text)
-        target_active = .false.
-        if (di > 0) target_active = decl_active(primal, di, active)
+        if (index(trim(target_text), "%") > 0) then
+            target_active = component_path_is_active(primal, target_text, active)
+        else
+            target_active = .false.
+            if (di > 0) target_active = decl_active(primal, di, active)
+        end if
 
         s%kind = FAD_ALLOCATE
         allocate (s%allocation_args(size(ps%allocation_args)))
@@ -1466,15 +1472,16 @@ contains
         status%ok = .true.
         target = emit_expr(primal, ps%allocation_args(1))
         di = primal%decl_index_of(target)
-        if (di > 0) then
-            if (decl_active(primal, di, active)) then
-                call reset_statement(s)
-                s%kind = FAD_DEALLOCATE
-                allocate (s%allocation_args(1))
-                s%allocation_args(1) = tangent%add_expr(expr_var( &
-                    tangent_name(target, suffix, vector)))
-                ignored = tangent%add_stmt(s)
-            end if
+        if ((index(trim(target), "%") > 0 .and. &
+            component_path_is_active(primal, target, active)) .or. &
+            (index(trim(target), "%") == 0 .and. di > 0 .and. &
+            decl_active(primal, di, active))) then
+            call reset_statement(s)
+            s%kind = FAD_DEALLOCATE
+            allocate (s%allocation_args(1))
+            s%allocation_args(1) = tangent%add_expr(expr_var( &
+                tangent_name(target, suffix, vector)))
+            ignored = tangent%add_stmt(s)
         end if
         call reset_statement(s)
         s%kind = FAD_DEALLOCATE
@@ -1560,6 +1567,7 @@ contains
         if (allocated(s%allocation_args)) deallocate (s%allocation_args)
         s%allocation_source = 0
         s%allocation_mold = 0
+        s%allocation_target_component = .false.
         s%allocation_target_polymorphic = .false.
         s%allocation_target_unlimited_polymorphic = .false.
         if (allocated(s%callback_formal)) deallocate (s%callback_formal)
@@ -1933,6 +1941,12 @@ contains
         yes = component_path_is_active(primal, text, active, paths)
         if (index(trim(text), "%") == 0) then
             yes = decl_active(primal, di, active)
+        else if (.not. yes .and. di > 0 .and. &
+                concrete_allocatable_component_path(primal, text)) then
+            ! A component store can become active through an arithmetic RHS
+            ! even when the component itself is not an explicit independent.
+            ! The enclosing concrete object then owns the matching shadow.
+            yes = decl_active(primal, di, active)
         end if
     end function target_path_active
 
@@ -1946,7 +1960,31 @@ contains
 
         text = emit_expr(primal, idx)
         yes = component_path_is_active(primal, text, active, paths)
+        if (.not. yes .and. concrete_allocatable_component_path(primal, text)) then
+            yes = decl_active(primal, primal%decl_index_of(text), active)
+        end if
     end function component_expr_is_active
+
+    logical function concrete_allocatable_component_path(primal, text) &
+            result(found)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        integer :: i
+
+        found = .false.
+        if (index(trim(text), "%") == 0) return
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (.not. same_component_name(primal%exprs(i)%text, text)) cycle
+            found = primal%exprs(i)%component_is_allocatable .and. &
+                primal%exprs(i)%component_is_real .and. &
+                .not. primal%exprs(i)%component_is_polymorphic .and. &
+                .not. primal%exprs(i)%component_is_pointer .and. &
+                .not. primal%exprs(i)%component_is_target .and. &
+                primal%exprs(i)%component_rank == 0
+            return
+        end do
+    end function concrete_allocatable_component_path
 
     logical function same_component_name(a, b) result(equal)
         character(len=*), intent(in) :: a, b
