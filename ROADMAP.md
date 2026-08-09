@@ -575,10 +575,13 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   The CLI now infers the procedure root from a derivative output name when the
   output stem is unique, preserving explicit `--root`/`--head` forms and
   passing an independent compiled CLI oracle.
-  P8.6 differentiates one fixed same-scope callback through FortFront's exact
+  P8.6 differentiates fixed same-scope callbacks through FortFront's exact
   assigned target/signature facts, with JVP/VJP, finite-difference, and adjoint
-  checks. Reassignment, missing assignment, `NULL()`, generic, ambiguous,
-  dynamic, alias, and active-global callback paths remain refusals.
+  checks. The direct-call slice now also accepts exactly two unconditional
+  same-scope assignments to fixed scalar `REAL(8)` functions and lowers the
+  second target; third or indirect mutations, missing assignment, `NULL()`,
+  generic, ambiguous, dynamic, alias, and active-global callback paths remain
+  refusals.
   **P8.6b bounded optional passed-procedure callback:** the same fixed target
   may be supplied by keyword to an optional procedure dummy. An omitted
   optional callback is also accepted when FortFront identifies exactly one
@@ -724,13 +727,13 @@ contract. The next step is general
 allocatable-component lifetime and polymorphic assignment/replay, using the
 new call-boundary facts to preserve actual-to-formal storage and intent. The
 array-element receiver slice is a first bounded extension of that work. Third,
-extend procedure-pointer and callback flow to reassignment, passed procedures,
-and context objects. Fourth, expand reverse checkpointing and
+extend the remaining procedure-pointer and callback flow to `ASSOCIATED`,
+context objects, and general runtime dispatch. Fourth, expand reverse checkpointing and
 numerical/application rules. Active global mutable state, uncontrolled
 aliases, active I/O, and opaque calls without rules remain product refusals
 rather than compatibility work.
 
-FortFront source `main` is currently `edcb532b`. This handoff includes the
+FortFront source `main` is currently `236dbec4`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
@@ -2237,6 +2240,13 @@ problem-specific rule.
       generic/ambiguous/dynamic targets, aliases, global mutable state,
       ownership changes, `class(*)` context objects, general flow, and
       reverse callback lifetime remain open.
+      **P8.6c bounded direct-call reassignment:** FortFront `236dbec4` and the
+      current FortAD change prove exactly two unconditional same-scope direct
+      assignments to fixed scalar `REAL(8)` function targets and lower the
+      second target automatically. The independent callback oracle covers
+      distinct-target JVP/VJP, central differences, and the adjoint identity;
+      third or indirect mutations, branches, loops, nullification, aliases,
+      unresolved targets, and global mutable state remain refusals.
 - [ ] **P8.7 Dispatch diagnostics.** Detect perturbations that cross a type or
       callback boundary. Also detect branch and clamp boundaries, along with
       event or convergence boundaries. Report the choice and source line. A

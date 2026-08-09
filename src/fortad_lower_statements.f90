@@ -19,6 +19,7 @@ module fortad_lower_statements
         procedure_actual_argument_query_t, query_procedure_actual_argument, &
         procedure_signature_query_t, procedure_dummy_query_t, &
         procedure_call_target_query_t, query_procedure_call_target, &
+        procedure_reassignment_call_query_t, query_procedure_reassignment_call, &
         procedure_target_query_t, query_procedure_target, &
         type_bound_call_query_t, query_type_bound_call, &
         select_type_component_dispatch_query_t, &
@@ -2302,6 +2303,7 @@ contains
         integer :: i
         character(len=:), allocatable :: call_name
         character(len=:), allocatable :: callback_name
+        type(procedure_reassignment_call_query_t) :: reassignment
 
         out = 0
         if (idx <= 0 .or. idx > arena%size) then
@@ -2358,10 +2360,15 @@ contains
             if (.not. status%ok) return
             call resolve_generic_call(arena, idx, n%name, call_name, status)
             if (.not. status%ok) return
-            callback_name = call_name
-            call resolve_callback_call(arena, idx, callback_name, &
-                size(n%arg_indices), .false., call_name, status)
-            if (.not. status%ok) return
+            reassignment = query_procedure_reassignment_call(arena, idx)
+            if (reassignment%found) then
+                call_name = trim(reassignment%second_target%procedure_name)
+            else
+                callback_name = call_name
+                call resolve_callback_call(arena, idx, callback_name, &
+                    size(n%arg_indices), .false., call_name, status)
+                if (.not. status%ok) return
+            end if
             if (n%base_expr_index == 0) then
                 if (is_array_name(proc, n%name)) then
                     if (has_vector_subscript(arena, n%arg_indices, args, proc)) then

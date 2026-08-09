@@ -50,13 +50,16 @@ is also `optional`, and the source and tangent actuals may be supplied or
 omitted together. Active optional reverse arguments remain a named refusal
 until reverse storage and call-shape handling are implemented. A bounded
 procedure-pointer callback is supported when a direct same-scope call has
-exactly one preceding unconditional direct assignment to a same-file internal
-or external procedure. FortFront resolves that target, FortAD checks the
-function/subroutine kind and same-file argument count, then lowers the call as
-the concrete procedure so the existing inlining and derivative paths apply.
-The pointer declaration and passive assignment do not enter generated AD code.
-Reassignment, branch-local flow, `NULL()`/`NULLIFY`, generic or unresolved
-targets, and module-owned mutable callback state remain named refusals. See
+one preceding unconditional direct assignment to a same-file internal or
+external procedure. A second bounded form permits exactly two such assignments
+to same-arena scalar `REAL(8)` functions with one `REAL(8), INTENT(IN)`
+argument; the second assignment is the active target. FortFront resolves the
+target facts, FortAD checks the function kind and argument shape, then lowers
+the call as the concrete procedure so the existing inlining and derivative
+paths apply. The pointer declaration and passive assignments do not enter
+generated AD code. A third or indirect mutation, branch/loop-dependent flow,
+`NULL()`/`NULLIFY`, generic or unresolved targets, and module-owned mutable
+callback state remain named refusals. See
 [`test_callback_call_oracle.f90`](../../test/test_callback_call_oracle.f90) for
 the compiled JVP/VJP, finite-difference, adjoint, and refusal oracle.
 
