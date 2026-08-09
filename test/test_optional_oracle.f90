@@ -6,7 +6,8 @@ program test_optional_oracle
     !! supplied and when it is omitted.  An active optional is checked too:
     !! both its primal and tangent actual may be omitted together.  The
     !! driver checks both paths against central differences and the closed-form
-    !! derivative; reverse active-optionals remain an explicit refusal.
+    !! derivative.  Active optional reverse behavior has its own compiled
+    !! present/omitted oracle in test_active_optional_reverse_oracle.f90.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -19,7 +20,7 @@ program test_optional_oracle
         "    z = x"//nl// &
         "    if (present(y)) z = z + x*y"//nl// &
         "end function f"//nl
-    type(fad_result_t) :: jvp, vjp, active_jvp, active_vjp
+    type(fad_result_t) :: jvp, vjp, active_jvp
     integer :: failures, unit, stat
     character(len=:), allocatable :: dir, driver
 
@@ -44,20 +45,8 @@ program test_optional_oracle
     if (failures > 0) error stop 1
 
     active_jvp = fad_jvp(source, ["y"], name="f_y_jvp")
-    active_vjp = fad_vjp( &
-        "function active_optional(x, y) result(z)"//nl// &
-        "    real(8), intent(in) :: x"//nl// &
-        "    real(8), intent(in), optional :: y"//nl// &
-        "    real(8) :: z"//nl// &
-        "    z = x"//nl// &
-        "    if (present(y)) z = z + y*y"//nl// &
-        "end function active_optional"//nl, ["y"], name="active_optional_vjp")
-    if (.not. active_jvp%ok .or. active_vjp%ok) then
-        print *, "FAIL optional: active optional JVP/VJP boundary changed"
-        error stop 1
-    end if
-    if (index(active_vjp%message, "active optional") == 0) then
-        print *, "FAIL optional: active optional refusal was not named"
+    if (.not. active_jvp%ok) then
+        print *, "FAIL optional: active optional JVP boundary changed"
         error stop 1
     end if
 
