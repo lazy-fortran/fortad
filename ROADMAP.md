@@ -122,9 +122,13 @@ layout, and provenance. It needs no AD-specific semantic model. It changes
 only when multiple generators need a common emission convention.
 
 The `fo` build driver owns the one-command build/test path across sibling
-repositories. Its current `732d74d` dependency-repair fix keeps external
-source discovery regex-only, so valid legacy sources are not sent through
-FortFront's full semantic parser; its fresh GNU gate passes 32/32 tests.
+repositories. Its current `8534372` dependency-repair and nvfortran fix keeps
+external source discovery regex-only and emits variable `ERROR STOP` statuses
+through an nvfortran-portable integer expression, so valid legacy sources are
+not sent through FortFront's full semantic parser. Direct nvfortran 26.5
+compilation of the changed sources passes; the GNU named compiler-dialect test
+passes, while the full nvfortran test runner remains blocked by the pre-existing
+`fx_mcp` link symbols.
 
 The compiler matrix is a validation lane, not an AD dependency. gfortran, ifx,
 flang, nvfortran, and LFortran must compile the generated code within their
@@ -140,13 +144,13 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files. The reproducible queue contains 1,121 rows: 1,047
+candidate files. The reproducible queue contains 1,117 rows: 1,043
 pure-Fortran and 74 mixed-language candidates. Pure-Fortran status is 63
-runnable, 134 expected refusals, 34 invalid-upstream closures, and 154 other
-bounded FortAD feature/dependency classifications: 385 of 1,432 strict
-pure-Fortran candidates are classified (26.9%), while 1,047 remain in the
-pure-Fortran queue. Across the whole corpus, 893 of 2,014 candidates are
-accounted for (44.3%). The 74 mixed-language rows remain a separate dependency
+runnable, 134 expected refusals, 34 invalid-upstream closures, and 158 other
+bounded FortAD feature/dependency classifications: 389 of 1,432 strict
+pure-Fortran candidates are classified (27.2%), while 1,043 remain in the
+pure-Fortran queue. Across the whole corpus, 897 of 2,014 candidates are
+accounted for (44.5%). The 74 mixed-language rows remain a separate dependency
 lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -330,12 +334,13 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `eb355de`
-- FortFront `ae75547c`
+- FortAD `6473ea1`
+- FortFront `4420e3d0`
 - FFC `2f6cc37`
-- fortad-bench `f269791`
+- fortad-bench `36b2d5b`
+- fo `8534372`
 
-- FortFront `ae75547c`, including abstract/deferred hierarchy, concrete-only
+- FortFront `4420e3d0`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
@@ -370,6 +375,10 @@ historical evidence only:
   Its owned-array generic-dispatch query now resolves exact generic/PASS
   targets, with ambiguous, deferred, unresolved, global, alias, and
   control-flow paths refused.
+  Its binding and call queries now expose proven inheritance depth for
+  multi-level abstract/deferred implementations. The independent API oracle
+  covers depths zero, one, and two and keeps generic and unresolved targets
+  explicit boundaries.
   Its call-boundary query now exposes formal intent, type/kind/rank, storage,
   actual-to-formal mappings, and explicit alias, callback, global-state,
   unknown-type, and mismatch refusals for downstream differentiation.
@@ -524,8 +533,11 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   an independent compiled analytic oracle and provenance script.
   The reverse temporary rank fix preserves scalar `z(i)` temporaries as
   scalars while retaining array rank for true sections. The refreshed sweep
-  closes 12 of 15 historical LSTM gaps; the remaining 1,000,000-point LSTM
-  and Brusselator runs signal 11 and remain performance/runtime gaps.
+  now has 125 measured rows and zero runtime gaps; the former million-point
+  LSTM and Brusselator signal-11 failures were inherited process-stack limits,
+  and the runner now normalizes that limit. The complete matrix still does
+  not establish a whole-suite performance win: FortAD beats Enzyme on several
+  workloads while Tapenade remains faster on others.
   The NVIDIA HPC SDK 26.5 build at `fffb75b` also compiles 410 FortAD targets,
   409 derivative targets, and all 88 test programs after replacing the nonportable
   `STOP ..., QUIET=` CLI exits and NVHPC-reserved test identifiers. Its
@@ -626,19 +638,18 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   mapping. JVP/VJP generated-source, numerical, and refusal oracles pass;
   unresolved, generic, alias, pointer, allocatable, array, global, and
   ownership-changing paths remain precise refusals.
-- fortad-bench `f269791` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
+- fortad-bench `36b2d5b` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
-  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34/next35/next36 evidence contracts. The reproducible queue
-  contains 1,121 rows: 1,047 pure-Fortran and 74 mixed-language candidates.
-  893 of 2,014 corpus candidates are accounted for, including 385 of 1,432
-  strict pure-Fortran candidates (26.9%); 1,047 pure-Fortran candidates
+  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34/next35/next36/next37 evidence contracts. The reproducible queue
+  contains 1,117 rows: 1,043 pure-Fortran and 74 mixed-language candidates.
+  897 of 2,014 corpus candidates are accounted for, including 389 of 1,432
+  strict pure-Fortran candidates (27.2%); 1,043 pure-Fortran candidates
   remain in the queue. The reproducible Enzyme comparison now has
   a common size-sweep harness for N=100 through 1,000,000 with median/min/max
-  timing and provenance artifacts. The latest sweep contains 115 measured rows
-  and 6 explicit gaps: Euler, RK4, and BA are complete; Bruss reaches
-  N=100,000; 12 of 15 LSTM gaps are closed; and the 1,000,000-point LSTM and
-  Bruss runs signal 11. No cross-engine performance victory is claimed until
-  those runtime gaps are closed or explicitly scoped.
+  timing and provenance artifacts. The latest sweep contains 125 measured rows
+  and no explicit gaps across Euler, RK4, LSTM, BA, and Brusselator at all five
+  sizes. No cross-engine performance victory is claimed: the complete matrix
+  is evidence for the remaining optimization work, not a universal win.
   The `next33` shard adds `set11/mvo02`, `set07/v460`, `set04/v031`, and
   `set05/v148` with fresh Tapenade three-mode probes, exact hashes, and
   independent behavioral/refusal oracles. Their current boundaries are
@@ -656,6 +667,11 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   exact hashes, and independent behavioral or refusal oracles. They remain
   explicit boundaries for invalid generated interfaces, global mutable state,
   and active I/O before the later OpenMP directive.
+  The `next37` shard adds `set05/v182`, `set07/v499`, `set10/lh233`, and
+  `set11/vpf23`; all four have fresh Tapenade three-mode probes, exact hashes,
+  and independent behavioral or refusal oracles. They remain explicit
+  boundaries for generic calls without derivative rules, active formatted I/O,
+  program-unit layout, and external allocatable-dummy calls.
 
 The next feature order has four steps. The callback-flow, bounded
 abstract-dispatch-provenance, fixed literal polymorphic owner-array, bounded
@@ -804,7 +820,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `ae75547c`, which includes the
+The current FortFront `main` handoff is `4420e3d0`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths, plus formal-ordered actual-to-formal call
@@ -812,6 +828,7 @@ The current FortFront `main` handoff is `ae75547c`, which includes the
       generic candidates, the bounded type-binding hierarchy query, the
       type-bound call dispatch query, dispatch-target signature facts,
       effective abstract/deferred implementation nodes and PASS signatures,
+      proven multi-level inheritance depth for abstract/deferred dispatch,
       plus `query_select_type_component_dispatch`, which exposes a proven
       component path, inherited implementation, signature, and PASS mapping
       inside a fixed `SELECT TYPE` arm while refusing unresolved, generic,
@@ -857,7 +874,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `a295c76`. Its GNU behavioral
+The implementation snapshot is FortAD code at `6473ea1`. Its GNU behavioral
 gate is green (410 build targets, 409 derivative targets, 94/94 tests).
 `fo lint` still has four short-circuit hazards and 108 array-temporary
 warnings. Feature scope is recorded in the Phase 7 and 8
@@ -2208,9 +2225,9 @@ An unsupported result is recorded as such and never counted as a runtime win.
       rows with active module state, dependent inference, invalid generated
       interfaces, and procedure-call actual boundaries. Its `next21` shard
       adds four rows with active I/O, legacy GOTO, nested DO-WHILE, and legacy
-      labeled-DO boundaries. The current queue has 1,121 rows, including
-      1,047 pure-Fortran and 74 mixed-language candidates. There are 385 of
-      1,432 strict pure-Fortran candidates and 893 of 2,014 total candidates
+      labeled-DO boundaries. The current queue has 1,117 rows, including
+      1,043 pure-Fortran and 74 mixed-language candidates. There are 389 of
+      1,432 strict pure-Fortran candidates and 897 of 2,014 total candidates
       classified. Each shard row has an
       exact-source Tapenade/FortAD probe and an independent behavioral or
       refusal oracle. The preceding `next6` shard closed `set11/lh011`,
