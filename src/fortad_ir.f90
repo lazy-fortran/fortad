@@ -478,7 +478,7 @@ contains
         class(fad_proc_t), intent(inout) :: self
         type(fad_decl_t), intent(in) :: d
         type(fad_decl_t), allocatable :: tmp(:)
-        integer :: cap, existing
+        integer :: cap, existing, i
 
         existing = self%decl_index(d%name)
         if (existing > 0) then
@@ -490,7 +490,9 @@ contains
         cap = size(self%decls)
         if (self%n_decls >= cap) then
             allocate (tmp(2*cap))
-            tmp(1:cap) = self%decls
+            do i = 1, cap
+                call copy_decl(tmp(i), self%decls(i))
+            end do
             call move_alloc(tmp, self%decls)
         end if
         self%n_decls = self%n_decls + 1
@@ -541,7 +543,7 @@ contains
         logical, intent(in), optional :: is_optional
         logical, intent(in), optional :: is_allocatable
         type(fad_decl_t), allocatable :: tmp(:)
-        integer :: cap, existing
+        integer :: cap, existing, i
         logical :: optional_arg
         logical :: allocatable_arg
 
@@ -562,7 +564,9 @@ contains
         cap = size(self%decls)
         if (self%n_decls >= cap) then
             allocate (tmp(2*cap))
-            tmp(1:cap) = self%decls
+            do i = 1, cap
+                call copy_decl(tmp(i), self%decls(i))
+            end do
             call move_alloc(tmp, self%decls)
         end if
         self%n_decls = self%n_decls + 1

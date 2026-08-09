@@ -25,8 +25,8 @@ module fortad_emit
     implicit none
     private
 
-    public :: emit_proc, emit_proc_into, emit_expr, emit_decl_line, write_expr, &
-        emit_module
+    public :: emit_proc, emit_proc_into, emit_module_into, emit_expr, &
+        emit_decl_line, write_expr, emit_module
 
     !! fortad claims no copyright in what it emits, and the banner says so
     !! where a reader of the generated file will actually see it.
@@ -244,6 +244,20 @@ contains
             text = emit_proc(p)
         end if
     end subroutine emit_proc_into
+
+    subroutine emit_module_into(p, module_name, text, generator)
+        !! Out-argument boundary for module-wrapped emission as well.
+        type(fad_proc_t), intent(in) :: p
+        character(len=*), intent(in) :: module_name
+        character(len=:), allocatable, intent(out) :: text
+        character(len=*), intent(in), optional :: generator
+
+        if (present(generator)) then
+            text = emit_module(p, module_name, generator)
+        else
+            text = emit_module(p, module_name)
+        end if
+    end subroutine emit_module_into
 
     subroutine write_buffer_decls(b, p)
         !! Declare automatic arrays for loops whose reduction body is pure.

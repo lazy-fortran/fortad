@@ -20,7 +20,7 @@ module fortad
         reverse_status_t
     use fortad_taylor_gen, only: differentiate_taylor, taylor_spec_t, &
         taylor_status_t
-    use fortad_emit, only: emit_proc, emit_proc_into, emit_module
+    use fortad_emit, only: emit_proc_into, emit_module_into
     use fortad_dce, only: eliminate_dead_stores, fold_zero_accumulations, &
         eliminate_dead_arrays, eliminate_dead_loops
     use fortad_opt, only: optimise
@@ -227,7 +227,9 @@ contains
 
         res%ok = .true.
         if (given(module_name)) then
-            res%code = emit_module(tangent, module_name, "fortad "//FORTAD_VERSION)
+            call emit_module_into(tangent, module_name, generated, &
+                "fortad "//FORTAD_VERSION)
+            res%code = generated
         else
             call emit_proc_into(tangent, generated)
             res%code = generated
@@ -268,6 +270,7 @@ contains
         type(lower_status_t) :: lstat
         type(reverse_status_t) :: rstat
         type(reverse_spec_t) :: spec
+        character(len=:), allocatable :: generated
         integer :: i, width
         logical :: preserve_component_snapshots
 
@@ -319,9 +322,12 @@ contains
 
         res%ok = .true.
         if (given(module_name)) then
-            res%code = emit_module(adjoint, module_name, "fortad "//FORTAD_VERSION)
+            call emit_module_into(adjoint, module_name, generated, &
+                "fortad "//FORTAD_VERSION)
+            res%code = generated
         else
-            res%code = emit_proc(adjoint)
+            call emit_proc_into(adjoint, generated)
+            res%code = generated
         end if
     end function fad_vjp
 
@@ -412,6 +418,7 @@ contains
         type(lower_status_t) :: lstat
         type(taylor_status_t) :: tstat
         type(taylor_spec_t) :: spec
+        character(len=:), allocatable :: generated
         integer :: i, width
 
         call lower_source(source, primal, lstat, from)
@@ -441,9 +448,12 @@ contains
 
         res%ok = .true.
         if (given(module_name)) then
-            res%code = emit_module(taylor, module_name, "fortad "//FORTAD_VERSION)
+            call emit_module_into(taylor, module_name, generated, &
+                "fortad "//FORTAD_VERSION)
+            res%code = generated
         else
-            res%code = emit_proc(taylor)
+            call emit_proc_into(taylor, generated)
+            res%code = generated
         end if
     end function fad_taylor
 
@@ -459,6 +469,7 @@ contains
         type(fad_result_t) :: res
         type(fad_proc_t) :: primal
         type(lower_status_t) :: lstat
+        character(len=:), allocatable :: generated
 
         call lower_source(source, primal, lstat, from)
         if (.not. lstat%ok) then
@@ -467,7 +478,8 @@ contains
             return
         end if
         res%ok = .true.
-        res%code = emit_proc(primal)
+        call emit_proc_into(primal, generated)
+        res%code = generated
     end function fad_roundtrip
 
 end module fortad
