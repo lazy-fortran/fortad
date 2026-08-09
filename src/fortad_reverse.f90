@@ -258,17 +258,11 @@ contains
             status%message = complex_projection_refusal(primal, active)
             return
         end if
-        do i = 1, size(primal%params)
-            di = primal%decl_index(trim(primal%params(i)))
-            if (di <= 0) cycle
-            if (primal%decls(di)%is_optional .and. active(di)) then
-                status%ok = .false.
-                status%message = "active optional argument '"// &
-                    trim(primal%params(i))//"' is not supported"
-                return
-            end if
-        end do
-
+        ! An active optional primal is safe here because its PRESENT guard is
+        ! retained in the reverse sweep.  Keep its outgoing cotangent
+        ! required: an omitted primal still has a well-defined zero gradient,
+        ! and a required output avoids ever assigning through an absent
+        ! optional cotangent descriptor.
         adjoint%name = primal%name//"_vjp"
         if (allocated(spec%name)) adjoint%name = spec%name
         adjoint%is_function = .false.

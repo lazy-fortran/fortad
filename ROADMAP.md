@@ -113,6 +113,14 @@ differences, the adjoint identity, and named refusals. Active global mutable
 state, uncontrolled aliasing, unresolved dispatch, and changing callback
 ownership remain intentional product refusals.
 
+FortAD now also supports an active scalar optional reverse argument on a legal
+fixed `PRESENT` path. The generated VJP keeps the primal optional and returns a
+required cotangent, yielding zero when the primal optional is omitted. The
+independent `test_active_optional_reverse_oracle.f90` compiles both paths and
+checks central differences and the adjoint identity. Optional arrays,
+components, ownership-bearing arguments, active global mutable state, and
+unsafe aliasing remain outside the slice and retain source-local refusals.
+
 FortAD also consumes the FortFront type-bound dispatch target set for direct
 abstract/deferred function calls only when it contains exactly one concrete
 same-file implementation. The selected child is lowered to one structural
@@ -1787,9 +1795,17 @@ of selected child ends the fixed-path derivative contract.
         through a reordered keyword call. The independent
         [`test_optional_forwarding_oracle.f90`](test/test_optional_forwarding_oracle.f90)
         checks JVP and VJP values against hand derivatives, central
-        differences, and the adjoint identity. Active optional arguments,
-        optional components or expressions, generic resolution, and
+        differences, and the adjoint identity. Optional components or
+        expressions, generic resolution, and
         procedure-pointer interfaces remain explicit boundaries.
+      - [x] **P7.4c1 active optional reverse cotangents.** The generated VJP
+        now accepts a legal scalar optional active primal on a fixed
+        `PRESENT()` path. Its primal dummy remains optional, while the outgoing
+        cotangent is required and is zero when the optional is omitted. The
+        independent [`test_active_optional_reverse_oracle.f90`](test/test_active_optional_reverse_oracle.f90)
+        checks compiled present/omitted JVP/VJP values, central differences,
+        and the adjoint identity. Optional arrays, components, ownership
+        changes, aliases, and active global mutable state remain boundaries.
       - [x] **P7.4d upstream call-argument facts.** FortFront `0f08b7f1`
         exposes formal-ordered actual mappings with original and value-node
         indices, keyword markers, optionality, and omitted-argument records.

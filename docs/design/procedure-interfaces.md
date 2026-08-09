@@ -47,10 +47,16 @@ compiled JVP/VJP check against finite differences.
 
 Active optional forward arguments are supported: the generated tangent dummy
 is also `optional`, and the source and tangent actuals may be supplied or
-omitted together. Active optional reverse arguments remain a named refusal
-until reverse storage and call-shape handling are implemented. A bounded
-procedure-pointer callback is supported when a direct same-scope call has
-one preceding unconditional direct assignment to a same-file internal or
+omitted together. Active optional reverse arguments are supported for a legal
+`present(y)`-guarded path. The generated VJP keeps the primal `y` optional but
+returns the outgoing `y_b` as a required cotangent dummy, so callers may omit
+`y` and still receive a zero cotangent. Present and omitted calls must use the
+same fixed path; optional arrays, optional components, and ownership-bearing
+optionals remain outside this slice. The independent
+[`test_active_optional_reverse_oracle.f90`](../../test/test_active_optional_reverse_oracle.f90)
+checks compiled JVP/VJP values, central differences, and the adjoint identity.
+A bounded procedure-pointer callback is supported when a direct same-scope call
+has one preceding unconditional direct assignment to a same-file internal or
 external procedure. A second bounded form permits exactly two such assignments
 to same-arena scalar `REAL(8)` functions with one `REAL(8), INTENT(IN)`
 argument; the second assignment is the active target. FortFront resolves the

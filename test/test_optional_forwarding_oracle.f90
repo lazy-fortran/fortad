@@ -1,7 +1,8 @@
 program test_optional_forwarding_oracle
     !! Optional-to-optional forwarding must preserve the runtime PRESENT bit.
     !! The forwarding call is keyword-reordered so the same case exercises
-    !! actual/formal mapping before both JVP and VJP generation.
+    !! actual/formal mapping before both JVP and VJP generation.  The active
+    !! optional VJP path is checked on the same present/omitted calls.
     use fortad, only: fad_jvp, fad_vjp, fad_result_t
     implicit none
 
@@ -34,10 +35,7 @@ program test_optional_forwarding_oracle
     if (.not. vjp%ok) error stop "optional-forwarding VJP generation failed"
 
     active_vjp = fad_vjp(source, ["coefficient"], name="active_vjp", from="kernel")
-    if (active_vjp%ok) error stop "active optional VJP should be refused"
-    if (index(active_vjp%message, "active optional") == 0) then
-        error stop "active optional refusal was not precise"
-    end if
+    if (.not. active_vjp%ok) error stop "active optional VJP generation failed"
 
     open (newunit=unit, file=dir//"/primal.f90", status="replace", action="write")
     write (unit, '(a)') "module primal_mod"
@@ -53,13 +51,14 @@ program test_optional_forwarding_oracle
     write (unit, '(a)') "contains"
     write (unit, '(a)') jvp%code
     write (unit, '(a)') vjp%code
+    write (unit, '(a)') active_vjp%code
     write (unit, '(a)') "end module derivative_mod"
     close (unit)
 
     driver = &
         "program driver"//nl// &
         "    use primal_mod, only: kernel"//nl// &
-        "    use derivative_mod, only: kernel_jvp, kernel_vjp"//nl// &
+        "    use derivative_mod, only: kernel_jvp, kernel_vjp, active_vjp"//nl// &
         "    implicit none"//nl// &
         "    call check_case(.false.)"//nl// &
         "    call check_case(.true.)"//nl// &
@@ -68,7 +67,8 @@ program test_optional_forwarding_oracle
         "    subroutine check_case(has_coefficient)"//nl// &
         "        logical, intent(in) :: has_coefficient"//nl// &
         "        real(8) :: x, coefficient, y, y_hand, yd, yd_hand"//nl// &
-        "        real(8) :: xb, xb_hand, fp, fm, h"//nl// &
+        "        real(8) :: xb, xb_hand, coefficient_b, h"//nl// &
+        "        real(8) :: fp, fm"//nl// &
         "        x = 2.0d0"//nl// &
         "        coefficient = 4.0d0"//nl// &
         "        h = 1.0d-6"//nl// &
@@ -94,6 +94,18 @@ program test_optional_forwarding_oracle
         "        call check_close(y, y_hand, 'reverse primal')"//nl// &
         "        call check_close(xb, xb_hand, 'hand VJP')"//nl// &
         "        call check_close(0.75d0*xb, yd, 'adjoint identity')"//nl// &
+        "        if (has_coefficient) then"//nl// &
+        "            call active_vjp(x=x, coefficient=coefficient, y=y, "// &
+        "y_b=1.0d0, coefficient_b=coefficient_b)"//nl// &
+        "        else"//nl// &
+        "            call active_vjp(x=x, y=y, y_b=1.0d0, "// &
+        "coefficient_b=coefficient_b)"//nl// &
+        "        end if"//nl// &
+        "        if (has_coefficient) then"//nl// &
+        "            call check_close(coefficient_b, x, 'active optional VJP')"//nl// &
+        "        else"//nl// &
+        "            call check_close(coefficient_b, 0.0d0, 'omitted optional VJP')"//nl// &
+        "        end if"//nl// &
         "    end subroutine check_case"//nl// &
         "    subroutine hand_jvp(x, xd, coefficient, has_coefficient, y, yd)"//nl// &
         "        real(8), intent(in) :: x, xd, coefficient"//nl// &
