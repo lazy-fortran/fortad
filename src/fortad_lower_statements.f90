@@ -1590,7 +1590,8 @@ contains
         type(fad_proc_t), intent(inout) :: proc
         type(fad_stmt_t), intent(out) :: s
         type(lower_status_t), intent(out) :: status
-        integer :: i
+        integer :: i, allocation_object_index
+        integer, allocatable :: allocation_shape_indices(:)
 
         status%ok = .true.
         s%kind = FAD_ALLOCATE
@@ -1613,14 +1614,27 @@ contains
             call refuse_allocation(node%line, "multiple allocation objects", status)
             return
         end if
+        allocation_object_index = node%var_indices(1)
+        allocate (allocation_shape_indices(0))
+        if (allocated(node%shape_indices)) then
+            if (size(node%shape_indices) > 0) then
+                allocation_shape_indices = node%shape_indices
+            else
+                call split_component_allocation_shape(arena, &
+                    allocation_object_index, allocation_shape_indices)
+            end if
+        else
+            call split_component_allocation_shape(arena, &
+                allocation_object_index, allocation_shape_indices)
+        end if
         allocate (s%allocation_args(1))
         s%allocation_args(1) = lower_expr_with_context(arena, &
-            node%var_indices(1), proc, status, .true.)
+            allocation_object_index, proc, status, .true.)
         if (.not. status%ok) return
         if (.not. allocation_object_declared(proc, s%allocation_args(1))) then
             block
                 type(storage_query_t) :: component_storage
-                component_storage = query_storage(arena, node%var_indices(1))
+                component_storage = query_storage(arena, allocation_object_index)
                 if (.not. component_storage%found .or. &
                     .not. component_storage%is_allocatable) then
                     call refuse_allocation(node%line, "non-allocatable target "// &
@@ -1646,19 +1660,17 @@ contains
             s%allocation_target_component = allocation_component_declared(proc, &
                 s%allocation_args(1))
         end if
-        if (allocated(node%shape_indices)) then
-            if (size(node%shape_indices) > 0) then
-                block
-                    integer, allocatable :: shapes(:)
-                    allocate (shapes(size(node%shape_indices)))
-                    do i = 1, size(node%shape_indices)
-                        shapes(i) = lower_expr(arena, node%shape_indices(i), &
-                            proc, status)
-                        if (.not. status%ok) return
-                    end do
-                    s%allocation_args = [s%allocation_args, shapes]
-                end block
-            end if
+        if (size(allocation_shape_indices) > 0) then
+            block
+                integer, allocatable :: shapes(:)
+                allocate (shapes(size(allocation_shape_indices)))
+                do i = 1, size(allocation_shape_indices)
+                    shapes(i) = lower_expr(arena, allocation_shape_indices(i), &
+                        proc, status)
+                    if (.not. status%ok) return
+                end do
+                s%allocation_args = [s%allocation_args, shapes]
+            end block
         end if
         if (node%source_expr_index > 0) then
             s%allocation_source = lower_expr(arena, node%source_expr_index, &
@@ -1668,6 +1680,32 @@ contains
                 proc, status)
         end if
     end subroutine lower_allocate_statement
+
+    subroutine split_component_allocation_shape(arena, allocation_object_index, &
+            shape_indices)
+        !! FortFront parses ``ALLOCATE(component(extent))`` as a subscripted
+        !! component expression.  Normalize that source form to the component
+        !! owner plus its allocation extent before querying ownership facts.
+        !! This is deliberately limited to a resolved component base; ordinary
+        !! array designators retain the existing frontend representation.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(inout) :: allocation_object_index
+        integer, allocatable, intent(inout) :: shape_indices(:)
+
+        if (allocation_object_index <= 0 .or. &
+            allocation_object_index > arena%size) return
+        if (.not. arena%has_node_at(allocation_object_index)) return
+        select type (reference => arena%entries(allocation_object_index)%node)
+            type is (call_or_subscript_node)
+            if (reference%base_expr_index <= 0) return
+            if (.not. is_component_base(arena, reference%base_expr_index)) return
+            if (.not. allocated(reference%arg_indices)) return
+            if (size(reference%arg_indices) == 0) return
+            allocation_object_index = reference%base_expr_index
+            shape_indices = reference%arg_indices
+        class default
+        end select
+    end subroutine split_component_allocation_shape
 
     subroutine lower_deallocate_statement(arena, node, proc, s, status)
         !! Lower one-owner DEALLOCATE without status side channels.

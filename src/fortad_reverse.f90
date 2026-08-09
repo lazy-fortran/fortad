@@ -1379,7 +1379,7 @@ contains
                 if (size(primal%stmts(i)%allocation_args) < 1) cycle
                 candidate = emit_expr(primal, &
                     primal%stmts(i)%allocation_args(1))
-                if (same_component_name(candidate, text)) then
+                if (same_component_lifetime_name(candidate, text)) then
                     found = .true.
                     return
                 end if
@@ -1387,18 +1387,39 @@ contains
                 if (.not. allocated(primal%stmts(i)%call_args)) cycle
                 if (size(primal%stmts(i)%call_args) /= 2) cycle
                 candidate = emit_expr(primal, primal%stmts(i)%call_args(1))
-                if (same_component_name(candidate, text)) then
+                if (same_component_lifetime_name(candidate, text)) then
                     found = .true.
                     return
                 end if
                 candidate = emit_expr(primal, primal%stmts(i)%call_args(2))
-                if (same_component_name(candidate, text)) then
+                if (same_component_lifetime_name(candidate, text)) then
                     found = .true.
                     return
                 end if
             end if
         end do
     end function explicit_component_lifetime
+
+    logical function same_component_lifetime_name(a, b) result(equal)
+        !! Match an allocation owner to one of its element references.
+        character(len=*), intent(in) :: a, b
+        character(len=:), allocatable :: owner_a, owner_b
+
+        owner_a = component_lifetime_owner(a)
+        owner_b = component_lifetime_owner(b)
+        equal = same_component_name(owner_a, owner_b)
+    end function same_component_lifetime_name
+
+    function component_lifetime_owner(text) result(owner)
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: owner
+        integer :: percent, open
+
+        owner = trim(text)
+        percent = index(owner, "%")
+        open = index(owner, "(")
+        if (percent > 0 .and. open > percent) owner = trim(owner(:open - 1))
+    end function component_lifetime_owner
 
     logical function is_concrete_allocatable_component_path(primal, text) &
             result(found)
@@ -4346,6 +4367,8 @@ contains
                 primal%exprs(i)%text)) cycle
             if (is_scalar_polymorphic_receiver_path(primal, &
                 primal%exprs(i)%text)) cycle
+            if (explicit_component_lifetime(primal, &
+                primal%exprs(i)%text)) cycle
             base = fad_base_name(primal%exprs(i)%text)
             di = primal%decl_index(base)
             if (di <= 0) cycle
@@ -4375,6 +4398,8 @@ contains
             if (is_scalar_polymorphic_receiver_path(primal, &
                 primal%stmts(i)%target)) cycle
             if (is_nested_polymorphic_receiver_path(primal, &
+                primal%stmts(i)%target)) cycle
+            if (explicit_component_lifetime(primal, &
                 primal%stmts(i)%target)) cycle
             base = fad_base_name(primal%stmts(i)%target)
             di = primal%decl_index(base)
