@@ -9,7 +9,7 @@ module fortad_lower
         compiler_frontend_options_t, compiler_frontend_result_t, &
         ast_arena_t, program_unit_query_t, query_program_unit, &
         query_declaration, declaration_query_t, binary_op_node, &
-        defined_operator_query_t, query_defined_operator, INPUT_MODE_STANDARD
+        defined_operator_query_t, query_defined_operator_into, INPUT_MODE_STANDARD
     use fortfront, only: generic_call_query_t, query_generic_call
     use fortad_call_boundaries, only: has_same_file_call, &
         validate_direct_call_boundaries
@@ -492,8 +492,20 @@ contains
             if (.not. arena%has_node_at(i)) cycle
             select type (node => arena%entries(i)%node)
                 type is (binary_op_node)
-                query = query_defined_operator(arena, i)
-                if (query%found .and. query%is_defined_operator) then
+                call query_defined_operator_into(arena, i, query)
+                ! Refusal facts are already complete from the parsed arena.
+                ! Unknown operand types are different: declarations may need
+                ! FortFront's semantic pass before an exact candidate can be
+                ! selected. Do not rerun semantics for boundaries already
+                ! proven ambiguous, converted, aliased, or invalid; invalid or
+                ! unsafe operators must not enter NVHPC's analyzer just to be
+                ! refused again.
+                if (query%found .and. query%is_defined_operator .and. &
+                        .not. query%is_ambiguous .and. &
+                        .not. query%has_conversion .and. &
+                        .not. query%has_pointer_operand .and. &
+                        .not. query%has_global_mutable_state .and. &
+                        .not. query%has_invalid_arity) then
                     found = .true.
                     return
                 end if
