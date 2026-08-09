@@ -104,8 +104,9 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current feature pins are FortAD `df99ec2`, FortFront `8da49474`, and
-fortad-bench `ea12ed8`. The next49 evidence shard intentionally retains its
+The current feature pins are FortAD `1326386`, FortFront `8da49474`, and
+fortad-bench `ea12ed8`; the current main heads are FortAD `b2288cc` and
+fortad-bench `8f3d491` after documentation-only refreshes. The next49 evidence shard intentionally retains its
 historical probe pins (`2636206` and `6c27ca86`), and next50 retains
 (`65280f5` and `c48c3e8b`), so those results remain reproducible; current main
 heads are recorded here separately. FortAD has bounded `SPREAD` JVP and direct
