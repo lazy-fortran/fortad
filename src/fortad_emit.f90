@@ -104,17 +104,39 @@ contains
         !! Indent every non-empty line by one level, for module nesting.
         character(len=*), intent(in) :: text
         character(len=:), allocatable :: out
-        integer :: i, start
+        integer :: i, start, used, nonempty_lines, output_length
 
-        out = ""
+        nonempty_lines = 0
+        output_length = 0
         start = 1
         do i = 1, len(text)
             if (text(i:i) /= new_line('a')) cycle
             if (i > start) then
-                out = out//"    "//text(start:i - 1)//new_line('a')
-            else
-                out = out//new_line('a')
+                nonempty_lines = nonempty_lines + 1
+                output_length = output_length + i - start
             end if
+            output_length = output_length + 1
+            start = i + 1
+        end do
+        output_length = output_length + 4*nonempty_lines
+        if (output_length == 0) then
+            out = ""
+            return
+        end if
+        allocate (character(len=output_length) :: out)
+        used = 0
+        start = 1
+        do i = 1, len(text)
+            if (text(i:i) /= new_line('a')) cycle
+            if (i > start) then
+                out(used + 1:used + 4) = "    "
+                used = used + 4
+                out(used + 1:used + i - start) = text(start:i - 1)
+                used = used + i - start
+            end if
+            ! Empty lines have no indentation, matching the old emitter.
+            out(used + 1:used + 1) = new_line('a')
+            used = used + 1
             start = i + 1
         end do
     end function indent_block
