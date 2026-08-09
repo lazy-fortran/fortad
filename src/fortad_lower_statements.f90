@@ -2809,9 +2809,10 @@ contains
 
     subroutine resolve_passed_procedure(arena, idx, formal, target, status)
         !! Prove the one P8.6 callback slice: one supplied procedure dummy,
-        !! backed by one unconditional same-scope procedure-pointer assignment
-        !! to a same-arena scalar REAL(8) function with the exact supported
-        !! signature.  Every other target flow is a named refusal.
+        !! backed by either a directly resolved same-file scalar REAL(8)
+        !! function or one unconditional same-scope procedure-pointer
+        !! assignment to that function, with the exact supported signature.
+        !! Every other target flow is a named refusal.
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: idx
         character(len=:), allocatable, intent(out) :: formal, target
@@ -2914,8 +2915,34 @@ contains
                 end if
             end if
             if (actual%has_ambiguous_target) then
+                if (actual%has_contextual_target) then
+                    call refuse_passed_callback(line, &
+                        "procedure-pointer callback target is aliased or unresolved", &
+                        status)
+                else
+                    call refuse_passed_callback(line, &
+                        "callback actual is generic or ambiguous", status)
+                end if
+                return
+            end if
+            if (actual%has_incompatible_interface) then
                 call refuse_passed_callback(line, &
-                    "procedure-pointer callback target is unresolved or dynamic", status)
+                    "callback actual has an incompatible formal procedure interface", &
+                    status)
+                return
+            end if
+            if (actual%has_unresolved_interface .or. &
+                .not. actual%formal_signature%found) then
+                call refuse_passed_callback(line, &
+                    "FortFront did not resolve the callback formal procedure interface", &
+                    status)
+                return
+            end if
+            if (.not. actual%is_interface_compatible .and. &
+                actual%target_assignment_node_index > 0) then
+                call refuse_passed_callback(line, &
+                    "callback actual/formal procedure interface compatibility is unresolved", &
+                    status)
                 return
             end if
             if (actual%has_unresolved_target .or. .not. actual%is_resolved) then
@@ -2923,12 +2950,14 @@ contains
                     "procedure-pointer callback target is unresolved or dynamic", status)
                 return
             end if
-            if (actual%target_assignment_node_index <= 0) then
+            if (actual%target_procedure_index <= 0 .or. &
+                .not. actual%signature%is_function) then
                 call refuse_passed_callback(line, &
-                    "require one direct same-scope procedure-pointer assignment", status)
+                    "callback actual is not a resolved same-file function", status)
                 return
             end if
-            if (.not. passed_callback_signature_supported(actual%signature)) then
+            if (.not. passed_callback_signature_supported(actual%formal_signature) .or. &
+                .not. passed_callback_signature_supported(actual%signature)) then
                 call refuse_passed_callback(line, &
                     "callback target signature must be exactly scalar REAL(8) "// &
                     "function(REAL(8), intent(in))", status)

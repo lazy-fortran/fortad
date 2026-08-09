@@ -51,6 +51,7 @@ library and command-line application, then runs the oracle suite. Run bare
 | Long integrations | Revolve checkpoint schedules supplied to a caller-owned time loop |
 | Opaque procedures | scalar partial rules and statement-based tangent/adjoint rules |
 | Elemental procedures | same-file elemental functions retain elemental JVP/VJP array calls |
+| Fixed procedure-dummy callbacks | same-file scalar `REAL(8)` function actuals and one fixed procedure-pointer target use FortFront-proven formal/actual interfaces in JVP and VJP; incompatible, unresolved, generic, aliased, and global cases are refused |
 | Fixed-form input | CLI `.f`, `.for`, `.ftn`, and `.f77` files with legacy comments and declarations |
 | Derived components | bounded concrete scalar, nested, inherited, array, and fixed-source polymorphic component paths |
 | Abstract/deferred hierarchy | fixed-dispatch JVP/VJP for statically known bindings and direct polymorphic dispatch with exactly one FortFront-proven concrete target |
