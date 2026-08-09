@@ -1993,7 +1993,7 @@ contains
                 .not. primal%exprs(i)%component_is_pointer .and. &
                 .not. primal%exprs(i)%component_is_target .and. &
                 (primal%exprs(i)%component_rank >= 0 .and. &
-                primal%exprs(i)%component_rank <= 3)
+                primal%exprs(i)%component_rank <= 4)
             return
         end do
     end function concrete_allocatable_component_path

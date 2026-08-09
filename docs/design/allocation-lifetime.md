@@ -58,11 +58,11 @@ Repeated or path-dependent automatic reallocation, mixing automatic and
 explicit lifetime operations, array-valued component assignment/read,
 polymorphic components or owners, pointer/target aliases, and active
 module-owned state remain refused. The one explicit component-lifetime
-exception covers a concrete scalar through rank-three `REAL` allocatable
+exception covers a concrete scalar through rank-four `REAL` allocatable
 component: one `ALLOCATE` (with literal extents for the array case), direct
 active element stores/reads, one `MOVE_ALLOC` to a distinct concrete
 component, and one matching final `DEALLOCATE` are replayed with paired
-enclosing-object shadows. This does not extend to rank-four-or-higher components,
+enclosing-object shadows. This does not extend to rank-five-or-higher components,
 dynamic shapes or indices, whole-component array accesses, `SOURCE=`/`MOLD=`,
 polymorphic components, or changing ownership paths.
 A `MOVE_ALLOC` outside the one-owner, straight-line,
@@ -93,9 +93,9 @@ derivative component descriptors, and checks the adjoint dot-product identity.
 
 The concrete component `MOVE_ALLOC` oracle is
 [`test_allocatable_component_move_oracle.f90`](../../test/test_allocatable_component_move_oracle.f90).
-It compiles and runs generated scalar, rank-one, rank-two, and rank-three JVP/VJP code, checks hand
+It compiles and runs generated scalar, rank-one, rank-two, rank-three, and rank-four JVP/VJP code, checks hand
 and central finite-difference derivatives plus the VJP dot-product identity,
-and verifies refusals for polymorphic, rank-four, dynamic-shape, and `TARGET`
+and verifies refusals for polymorphic, rank-five, dynamic-shape, and `TARGET`
 component lifetimes; the separate active-component oracle covers whole-array
 access refusal.
 
