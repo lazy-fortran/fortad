@@ -33,7 +33,7 @@ module fortad_reverse
         FAD_INTENT_OUT, &
         FAD_INTENT_INOUT, FAD_INTENT_NONE
     use fortad_rules, only: jvp_binop, jvp_unop, jvp_call, has_rule, &
-        fad_add, fad_mul, fad_neg, fad_real, fad_fn1, fad_fn3
+        fad_add, fad_mul, fad_div, fad_neg, fad_real, fad_fn1, fad_fn3
     use fortad_registry, only: call_rule_has, call_rule_lines, &
         call_rule_substitute
     use fortad_emit, only: emit_expr
@@ -215,6 +215,7 @@ contains
         integer, allocatable :: order_kind(:), order_index(:)
         integer :: n_rec, n_loops, n_branches, n_selects, n_calls
         integer :: n_allocations, n_order
+        logical :: complex_path, projection_path
 
         status%ok = .true.
         suffix = "_b"
@@ -250,12 +251,11 @@ contains
         if (.not. status%ok) return
         call check_reverse_allocation_sources(primal, active, status)
         if (.not. status%ok) return
-        if (complex_reverse_path(primal, dependent, active) .and. &
-            .not. complex_real_projection_path(primal, dependent, active)) then
+        complex_path = complex_reverse_path(primal, dependent, active)
+        projection_path = complex_real_projection_path(primal, dependent, active)
+        if (complex_path .and. .not. projection_path) then
             status%ok = .false.
-            status%message = "reverse mode: active complex adjoints are not "// &
-                "supported for this expression; the bounded real-coordinate "// &
-                "projection path only accepts real(z), dble(z), or aimag(z)"
+            status%message = complex_projection_refusal(primal, active)
             return
         end if
         do i = 1, size(primal%params)
@@ -1899,8 +1899,8 @@ contains
         !! Recognise the first bounded real-coordinate reverse case.
         !!
         !! A complex input may feed a real-valued objective through a direct
-        !! `real(z)`, `dble(z)`, or `aimag(z)` projection and then ordinary
-        !! real arithmetic.
+        !! `real(z)`, `dble(z)`, `aimag(z)`, or nonzero `abs(z)` projection and
+        !! then ordinary real arithmetic.
         !! Its adjoint is representable as a complex number whose real and
         !! imaginary parts are the two coordinate gradients.  Do not broaden
         !! this predicate to arbitrary complex expressions: a single forward
@@ -1977,10 +1977,24 @@ contains
             name = lower_name(primal%exprs(idx)%text)
             if (.not. allocated(primal%exprs(idx)%args)) then
                 yes = .false.
-            else if ((name == "real" .or. name == "dble" .or. name == "aimag") .and. &
-                    size(primal%exprs(idx)%args) == 1) then
-                yes = simple_active_complex(primal, &
-                    primal%exprs(idx)%args(1), active)
+            else if (name == "real" .or. name == "dble" .or. name == "aimag") then
+                if (size(primal%exprs(idx)%args) == 1) then
+                    yes = simple_active_complex(primal, &
+                        primal%exprs(idx)%args(1), active)
+                else
+                    yes = .false.
+                end if
+            else if (name == "abs") then
+                if (size(primal%exprs(idx)%args) == 1) then
+                    if (known_zero_expr(primal, primal%exprs(idx)%args(1))) then
+                        yes = .false.
+                    else
+                        yes = simple_active_complex(primal, &
+                            primal%exprs(idx)%args(1), active)
+                    end if
+                else
+                    yes = .false.
+                end if
             else
                 yes = .false.
             end if
@@ -2011,6 +2025,154 @@ contains
         if (di <= 0 .or. di > size(active)) return
         yes = active(di) .and. decl_is_complex(primal, di)
     end function simple_active_complex
+
+    function complex_projection_refusal(primal, active) result(message)
+        !! Name the first complex reverse boundary that rejected the path.
+        type(fad_proc_t), intent(in) :: primal
+        logical, intent(in) :: active(:)
+        character(len=:), allocatable :: message
+        integer :: i
+
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (has_active_zero_abs(primal, primal%stmts(i)%value, active)) then
+                message = "reverse mode: abs(z) is not differentiable at "// &
+                    "zero; the bounded complex abs path requires a nonzero "// &
+                    "active scalar argument"
+                return
+            end if
+        end do
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (has_active_conjg(primal, primal%stmts(i)%value, active)) then
+                message = "reverse mode: active complex conjg is unsupported; "// &
+                    "only direct real(z), dble(z), aimag(z), or nonzero abs(z) "// &
+                    "projections are supported"
+                return
+            end if
+        end do
+        message = "reverse mode: active complex arithmetic is unsupported; "// &
+            "only direct real(z), dble(z), aimag(z), or nonzero abs(z) "// &
+            "projections are supported"
+    end function complex_projection_refusal
+
+    recursive logical function has_active_zero_abs(primal, idx, active) &
+            result(yes)
+        !! Whether an active complex path contains an ``abs`` of a known zero.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        logical, intent(in) :: active(:)
+        character(len=:), allocatable :: name
+        integer :: i
+
+        yes = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind == FAD_CALL) then
+            name = lower_name(primal%exprs(idx)%text)
+            if (name == "abs") then
+                if (allocated(primal%exprs(idx)%args)) then
+                    if (size(primal%exprs(idx)%args) == 1) then
+                        if (has_active_complex(primal, &
+                            primal%exprs(idx)%args(1), active)) then
+                            if (known_zero_expr(primal, &
+                                primal%exprs(idx)%args(1))) then
+                                yes = .true.
+                                return
+                            end if
+                        end if
+                    end if
+                end if
+            end if
+        end if
+        if (.not. allocated(primal%exprs(idx)%args)) return
+        do i = 1, size(primal%exprs(idx)%args)
+            if (has_active_zero_abs(primal, primal%exprs(idx)%args(i), active)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function has_active_zero_abs
+
+    recursive logical function has_active_conjg(primal, idx, active) result(yes)
+        !! Whether an active complex path contains an unsupported ``conjg``.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        logical, intent(in) :: active(:)
+        character(len=:), allocatable :: name
+        integer :: i
+
+        yes = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind == FAD_CALL) then
+            name = lower_name(primal%exprs(idx)%text)
+            if (name == "conjg") then
+                if (allocated(primal%exprs(idx)%args)) then
+                    if (size(primal%exprs(idx)%args) == 1) then
+                        if (has_active_complex(primal, &
+                            primal%exprs(idx)%args(1), active)) then
+                            yes = .true.
+                            return
+                        end if
+                    end if
+                end if
+            end if
+        end if
+        if (.not. allocated(primal%exprs(idx)%args)) return
+        do i = 1, size(primal%exprs(idx)%args)
+            if (has_active_conjg(primal, primal%exprs(idx)%args(i), active)) then
+                yes = .true.
+                return
+            end if
+        end do
+    end function has_active_conjg
+
+    recursive logical function known_zero_expr(primal, idx) result(yes)
+        !! Prove a small set of zero-valued expressions.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        character(len=:), allocatable :: name
+
+        yes = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        select case (primal%exprs(idx)%kind)
+        case (FAD_CONST)
+            yes = zero_literal(primal%exprs(idx)%text)
+        case (FAD_BINOP)
+            if (.not. allocated(primal%exprs(idx)%args)) return
+            if (size(primal%exprs(idx)%args) /= 2) return
+            if (trim(primal%exprs(idx)%text) == "-" .and. &
+                primal%exprs(idx)%args(1) == primal%exprs(idx)%args(2)) then
+                yes = .true.
+            end if
+        case (FAD_UNOP)
+            if (.not. allocated(primal%exprs(idx)%args)) return
+            if (size(primal%exprs(idx)%args) /= 1) return
+            yes = known_zero_expr(primal, primal%exprs(idx)%args(1))
+        case (FAD_CALL)
+            if (.not. allocated(primal%exprs(idx)%args)) return
+            name = lower_name(primal%exprs(idx)%text)
+            if (name /= "cmplx") return
+            if (size(primal%exprs(idx)%args) < 2) return
+            yes = known_zero_expr(primal, primal%exprs(idx)%args(1))
+            if (.not. yes) return
+            yes = known_zero_expr(primal, primal%exprs(idx)%args(2))
+        end select
+    end function known_zero_expr
+
+    logical function zero_literal(text) result(yes)
+        !! Recognise real zero spellings used by lowered constants.
+        character(len=*), intent(in) :: text
+        character(len=:), allocatable :: normalized
+        real :: value
+        integer :: ios
+
+        yes = .false.
+        normalized = trim(adjustl(text))
+        read (normalized, *, iostat=ios) value
+        if (ios /= 0) return
+        if (value > 0.0 .or. value < 0.0) return
+        yes = .true.
+    end function zero_literal
 
     pure function lower_name(value) result(out)
         !! ASCII lowercase for the two projection intrinsic names.
@@ -6044,6 +6206,29 @@ contains
                                 status, reverse_receiver_alias, &
                                 reverse_cotangent_alias)
                         end block
+                    end if
+                end if
+                return
+            end if
+            if (lower_name(node_text) == "abs") then
+                ! For a nonzero complex input, abs(z) has the real-coordinate
+                ! transpose z/abs(z).  The zero case is rejected during path
+                ! validation instead of inventing a subgradient at the cusp.
+                if (size(node_args) == 1) then
+                    if (has_active_complex(primal, node_args(1), active)) then
+                        if (carries_adjoint(primal, adjoint, node_args(1), ssa, &
+                            active)) then
+                            block
+                                integer :: denominator, radial, complex_seed
+                                denominator = fad_fn1(adjoint, "abs", node_args(1))
+                                radial = fad_mul(adjoint, seed, node_args(1))
+                                complex_seed = fad_div(adjoint, radial, denominator)
+                                call accumulate(primal, adjoint, node_args(1), &
+                                    complex_seed, ssa, suffix, active, n_tmp, &
+                                    status, reverse_receiver_alias, &
+                                    reverse_cotangent_alias)
+                            end block
+                        end if
                     end if
                 end if
                 return
