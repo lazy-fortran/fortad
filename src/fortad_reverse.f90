@@ -6346,6 +6346,30 @@ contains
                 end if
                 return
             end if
+            if (lower_name(node_text) == "spread") then
+                ! The transpose of SPREAD sums the output cotangent over
+                ! the replicated dimension.  A generic forward-rule partial
+                ! would incorrectly return an expanded array and cannot be
+                ! accumulated into the rank-one source.
+                if (size(node_args) >= 3) then
+                    if (carries_adjoint(primal, adjoint, node_args(1), ssa, &
+                        active)) then
+                        block
+                            integer :: sum_args(2), sum_seed
+                            character(len=4) :: sum_names(2)
+                            sum_args(1) = seed
+                            sum_args(2) = node_args(2)
+                            sum_names = [character(len=4) :: "", "dim"]
+                            sum_seed = adjoint%add_expr(expr_call( &
+                                "sum", sum_args, sum_names))
+                            call accumulate(primal, adjoint, node_args(1), &
+                                sum_seed, ssa, suffix, active, n_tmp, status, &
+                                reverse_receiver_alias, reverse_cotangent_alias)
+                        end block
+                    end if
+                end if
+                return
+            end if
             one = fad_real(adjoint, "1.0")
             allocate (dargs(size(node_args)))
             do j = 1, size(node_args)

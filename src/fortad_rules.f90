@@ -39,7 +39,7 @@ contains
         case ("sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", &
               "tanh", "exp", "log", "log10", "sqrt", "abs", "erf", "erfc", &
               "max", "min", "sign", "atan2", "hypot", "real", "dble", "sum", &
-              "dot_product", "aimag", "cmplx", "conjg")
+              "dot_product", "spread", "aimag", "cmplx", "conjg")
             yes = .true.
         case default
             ! A user-registered rule counts as knowing the derivative.
@@ -332,6 +332,12 @@ contains
 
         case ("sum")
             if (da /= 0) out = fad_fn1(p, "sum", da)
+
+        case ("spread")
+            ! SPREAD is linear in its array source.  DIM and NCOPIES are
+            ! integer shape controls and therefore carry no tangent.
+            if (size(args) < 3 .or. da == 0) return
+            out = fad_fn3(p, "spread", da, args(2), args(3))
 
         case ("real", "dble")
             if (expr_is_complex(p, a)) then
