@@ -6,15 +6,29 @@ FortAD differentiates a bounded modern-Fortran call slice automatically. A
 direct call to a procedure defined in the same source is accepted when
 FortFront proves an exact formal/actual type, kind, and rank match and a
 non-aliased scalar or whole-array storage mapping. Positional and keyword
-actuals, omitted optional dummies, scalar values, and assumed-shape whole
+actuals, omitted optional dummies, scalar values, side-effect-free scalar
+arithmetic actuals for scalar `INTENT(IN)` dummies, and assumed-shape whole
 arrays use that mapping. The callee is then inlined before differentiation.
 
 The boundary refuses ambiguous or unresolved calls, procedure callbacks,
 active global mutable state, pointer or allocatable storage, repeated actual
 aliases, incomplete facts, mismatches, and writable formals bound to
-expressions or sections. Refusals name the call line and reason. The
-independent numerical and refusal oracle is
-[`test_procedure_call_boundary_oracle.f90`](../../test/test_procedure_call_boundary_oracle.f90).
+expressions or sections. It also refuses side-effecting calls and computed
+array actuals at a read-only boundary because the inliner does not replay
+those storage mappings. Refusals name the call line and reason. The original
+boundary oracle is [`test_procedure_call_boundary_oracle.f90`](../../test/test_procedure_call_boundary_oracle.f90);
+the scalar computed-actual JVP/VJP and refusal oracle is
+[`test_procedure_call_readonly_actual_oracle.f90`](../../test/test_procedure_call_readonly_actual_oracle.f90).
+
+### Scalar computed actuals
+
+For a scalar `INTENT(IN)` dummy, a caller may pass an intrinsic arithmetic
+expression such as `x + shift`. FortAD substitutes that expression as a value,
+not as a writable storage name, so both JVP and VJP retain the derivatives of
+all active leaves in the caller expression. The bounded path admits constants,
+variables, unary arithmetic, and binary arithmetic only. User procedure calls,
+array-valued expressions, aliases, ownership-bearing entities, and ambiguous
+actual/formal mappings remain refusals.
 
 FortAD keeps an optional dummy optional in generated code.  That makes both
 forms of a call valid:
