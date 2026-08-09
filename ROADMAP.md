@@ -104,7 +104,7 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current feature pins are FortAD `ce48189`, FortFront `c48c3e8b`, and
+The current feature pins are FortAD `1326386`, FortFront `c48c3e8b`, and
 fortad-bench `25526ca`. The next49 evidence shard intentionally retains its
 historical probe pins (`2636206` and `6c27ca86`) so its result remains
 reproducible; current main heads are recorded here separately. FortAD has
