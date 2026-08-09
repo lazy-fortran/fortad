@@ -1705,6 +1705,17 @@ of selected child ends the fixed-path derivative contract.
         central differences, and the adjoint identity. Strided, vector,
         noncontiguous, computed-base, aliasing, and rank-greater-than-two
         sections remain named refusals.
+      - [x] **P7.3e bounded constant vector subscripts.** FortAD now accepts a
+        direct `x(idx)` read when `idx` is a literal, unique, positive
+        `INTEGER, PARAMETER` vector and `x` has one explicit literal extent.
+        The parameter initializer is preserved in generated JVP and VJP
+        procedures; reverse array temporaries use the proven seed shape and
+        scatter back through the same indices. Dynamic, duplicate,
+        out-of-range, vector-plus-range, computed-base, and aliasing forms
+        remain named refusals. The independent
+        [`test_constant_vector_subscript_oracle.f90`](test/test_constant_vector_subscript_oracle.f90)
+        checks compiled JVP/VJP values, finite differences, and the adjoint
+        identity.
 - [x] **P7.3b global-state refusal.** Commit `cc3b722` consumes FortFront's
       active-global reference contract and refuses reachable mutable module,
       `SAVE`, and `COMMON` state before lowering, naming the state, kind, and

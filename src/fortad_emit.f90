@@ -762,6 +762,7 @@ contains
         character(len=:), allocatable :: line
 
         line = d%type_name
+        if (d%is_parameter) line = line//", parameter"
         if (d%is_value) line = line//", value"
         if (d%is_optional) line = line//", optional"
         select case (d%intent)
@@ -782,6 +783,9 @@ contains
             end if
         end if
         line = line//" :: "//d%name
+        if (d%is_parameter .and. allocated(d%initializer)) then
+            line = line//" = "//d%initializer
+        end if
     end function emit_decl_line
 
     subroutine write_stmt(b, p, s)

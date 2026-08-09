@@ -2460,6 +2460,20 @@ contains
             ignored = adjoint%add_decl(d)
         end do
 
+        ! Compile-time parameters are passive locals, so activity analysis
+        ! does not select them as adjoint declarations.  They can still be
+        ! referenced by an active primal expression (for example a vector
+        ! subscript), and their initializer must remain available verbatim.
+        do i = 1, primal%n_decls
+            if (.not. primal%decls(i)%is_parameter) cycle
+            if (is_dummy(primal, primal%decls(i)%name)) cycle
+            call copy_decl(d, primal%decls(i))
+            d%intent = FAD_INTENT_NONE
+            d%is_result = .false.
+            d%is_optional = .false.
+            ignored = adjoint%add_decl(d)
+        end do
+
         allocate (character(len=64) :: adjoint%params(n))
         do i = 1, n
             adjoint%params(i) = names(i)
@@ -6515,7 +6529,7 @@ contains
         integer, intent(in) :: idx
         type(ssa_map_t), intent(in) :: ssa
         character(len=:), allocatable :: base
-        integer :: i, di
+        integer :: i, di, adjoint_di, arg_idx
 
         found = 0
         if (idx <= 0) return
@@ -6530,16 +6544,52 @@ contains
                     return
                 end if
             end if
+            ! A reverse seed such as ``v_b`` is an adjoint declaration, not
+            ! a primal name.  Match its proven shape to a primal array so a
+            ! compound seed/partial product gets an array temporary.
+            adjoint_di = adjoint%decl_index(adjoint%exprs(idx)%text)
+            if (adjoint_di > 0 .and. adjoint%decls(adjoint_di)%is_array) then
+                do i = 1, primal%n_decls
+                    if (.not. primal%decls(i)%is_array) cycle
+                    if (allocated(adjoint%decls(adjoint_di)%dims) .and. &
+                        allocated(primal%decls(i)%dims)) then
+                        if (trim(adjoint%decls(adjoint_di)%dims) /= &
+                            trim(primal%decls(i)%dims)) cycle
+                    end if
+                    found = i
+                    return
+                end do
+            end if
         case (FAD_INDEX)
-            if (.not. adjoint%exprs(idx)%is_array_section) return
             call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
             di = primal%decl_index_of(base)
             if (di > 0) then
-                if (primal%decls(di)%is_array) then
+                if (adjoint%exprs(idx)%is_array_section .and. &
+                    primal%decls(di)%is_array) then
                     found = di
                     return
                 end if
             end if
+            ! A vector subscript is an array-valued FAD_INDEX without the
+            ! range marker used for sections.  Its result is still an array,
+            ! so reverse materialisation must allocate a shaped temporary
+            ! when the seed is multiplied by its partial.
+            if (.not. allocated(adjoint%exprs(idx)%args)) return
+            do i = 1, size(adjoint%exprs(idx)%args)
+                arg_idx = adjoint%exprs(idx)%args(i)
+                if (arg_idx <= 0 .or. arg_idx > adjoint%n_exprs) cycle
+                if (adjoint%exprs(arg_idx)%kind /= FAD_VAR) cycle
+                call ssa_base_of(ssa, adjoint%exprs(arg_idx)%text, base)
+                di = primal%decl_index_of(base)
+                if (di <= 0) cycle
+                if (.not. primal%decls(di)%is_array) cycle
+                call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
+                di = primal%decl_index_of(base)
+                if (di > 0 .and. primal%decls(di)%is_array) then
+                    found = di
+                    return
+                end if
+            end do
         end select
         if (.not. allocated(adjoint%exprs(idx)%args)) return
         do i = 1, size(adjoint%exprs(idx)%args)
