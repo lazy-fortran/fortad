@@ -135,13 +135,13 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files. The reproducible queue contains 1,145 rows: 1,071
+candidate files. The reproducible queue contains 1,141 rows: 1,067
 pure-Fortran and 74 mixed-language candidates. Pure-Fortran status is 63
-runnable, 134 expected refusals, 34 invalid-upstream closures, and 130 other
-bounded FortAD feature/dependency classifications: 361 of 1,432 strict
-pure-Fortran candidates are classified (25.2%), while 1,071 remain in the
-pure-Fortran queue. Across the whole corpus, 869 of 2,014 candidates are
-accounted for (43.1%). The 74 mixed-language rows remain a separate dependency
+runnable, 134 expected refusals, 34 invalid-upstream closures, and 134 other
+bounded FortAD feature/dependency classifications: 365 of 1,432 strict
+pure-Fortran candidates are classified (25.5%), while 1,067 remain in the
+pure-Fortran queue. Across the whole corpus, 873 of 2,014 candidates are
+accounted for (43.3%). The 74 mixed-language rows remain a separate dependency
 lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -325,10 +325,10 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `3711c34`
+- FortAD `be7ce88`
 - FortFront `5f8366d5`
-- FFC `78bee43`
-- fortad-bench `a436d59`
+- FFC `c598f19`
+- fortad-bench `e614f75`
 
 - FortFront `5f8366d5`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
@@ -378,7 +378,7 @@ historical evidence only:
   dispatch provenance now retains the declaring type and inherited-binding
   status for concrete targets, so downstream differentiation can distinguish
   inherited implementations without guessing from the leaf type.
-- FFC `78bee43`, including rank-three and rank-four intrinsic
+- FFC `c598f19`, including rank-three and rank-four intrinsic
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
@@ -408,9 +408,9 @@ historical evidence only:
   independent gfortran differential oracle. Ambiguous, noncontiguous, and
   unsupported whole-array I/O forms remain explicit boundaries. Runtime rank-
   two whole-array `print *` now preserves both dimensions and matches gfortran;
-  runtime rank-one through rank-three `PRODUCT` reductions now lower for
+  runtime rank-one through rank-four `PRODUCT` reductions now lower for
   automatic and assumed-shape integer, `REAL`, and `REAL(8)` arrays with an
-  independent gfortran differential oracle; rank-four and higher remain
+  independent gfortran differential oracle; rank-five and higher remain
   precise refusals.
   Runtime logical `COUNT(mask)` now lowers for rank-one and rank-two automatic
   and assumed-shape arrays plus rank-three automatic arrays with an
@@ -421,10 +421,10 @@ historical evidence only:
   assumed-shape integer, `REAL`, and `REAL(8)` arrays with an independent
   gfortran differential oracle; unsupported reduction families and ranks
   remain precise refusals.
-  Runtime rank-three `SUM` now lowers for automatic and assumed-shape default
+  Runtime rank-three and rank-four `SUM` now lower for automatic and assumed-shape default
   integer, `REAL`, and `REAL(8)` arrays with an independent gfortran
-  differential oracle; rank-four and higher, non-default integer kinds,
-  `DIM` forms remain precise refusals.
+  differential oracle; rank-five and higher, non-default integer kinds, `DIM`
+  forms, and rank-four `MAXVAL`/logical reductions remain precise refusals.
   array-valued RHS expressions for multi-retained runtime sections remain a
   named boundary until the direct-session expression contract proves them.
 - FortAD includes the automatic derived-component CLI inference slice: when
@@ -440,7 +440,7 @@ historical evidence only:
   compound component declarations now retains complete component metadata and
   compiles through the explicit reverse probe; it remains a legacy
   compatibility case, not modern runnable support.
-FortAD `3711c34` (including the bounded passed-procedure callback slice on
+FortAD `be7ce88` (including the bounded passed-procedure callback slice on
 top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12b`, `92bf9ad`, `bfe204d`, `1215d44`, `f51bb4c`, `a693014`, `4c8635a`, `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
   `e28ba4b`, `58899bf`, and `a45dbea`), including active
   concrete rank-four
@@ -472,6 +472,10 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   refused by the independent oracle.
   It now also replays a bounded rank-three concrete `REAL` allocatable
   component for literal shapes in JVP and VJP, with rank-four and higher,
+  dynamic shapes, polymorphism, aliases, pointers, `TARGET`, globals, and
+  unresolved dispatch refused by the independent oracle.
+  It now also replays a bounded rank-four concrete `REAL` allocatable
+  component for literal shapes in JVP and VJP, with rank-five and higher,
   dynamic shapes, polymorphism, aliases, pointers, `TARGET`, globals, and
   unresolved dispatch refused by the independent oracle.
   The latest NVIDIA compatibility slice also replays one concrete scalar component across
@@ -589,12 +593,12 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
 - FortAD now also supports one fixed-arm `CLASS IS` path with the same passive
   dynamic-type contract and independent numerical/refusal oracle; multiple
   arms, aliases, pointers, global state, and ownership remain refusals.
-- fortad-bench `a436d59` (on top of `ab9965e`, `da511c6`, `df6fadc`, and `56ec44b`), including the
+- fortad-bench `e614f75` (on top of `ab9965e`, `da511c6`, `df6fadc`, and `56ec44b`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
   next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26 evidence contracts. The reproducible queue
-  contains 1,145 rows: 1,071 pure-Fortran and 74 mixed-language candidates.
-  869 of 2,014 corpus candidates are accounted for, including 361 of 1,432
-  strict pure-Fortran candidates (25.2%); 1,071 pure-Fortran candidates
+  contains 1,141 rows: 1,067 pure-Fortran and 74 mixed-language candidates.
+  873 of 2,014 corpus candidates are accounted for, including 365 of 1,432
+  strict pure-Fortran candidates (25.5%); 1,067 pure-Fortran candidates
   remain in the queue. The reproducible Enzyme comparison now has
   a common size-sweep harness for N=100 through 1,000,000 with median/min/max
   timing and provenance artifacts; no performance victory is claimed until
@@ -602,7 +606,7 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
 
 The next feature order has four steps. The callback-flow, bounded
 abstract-dispatch-provenance, fixed literal polymorphic owner-array, bounded
-concrete scalar, and literal-shape rank-one/rank-two/rank-three
+concrete scalar, and literal-shape rank-one/rank-two/rank-three/rank-four
 `ALLOCATE`/`MOVE_ALLOC`/`DEALLOCATE` replay steps are complete:
 FortAD consumes the FortFront branch-merged callback target-set facts for one
 same-scope `IF/ELSE` assignment followed by a direct callback call, and
