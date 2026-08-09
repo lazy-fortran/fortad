@@ -20,7 +20,7 @@ module fortad
         reverse_status_t
     use fortad_taylor_gen, only: differentiate_taylor, taylor_spec_t, &
         taylor_status_t
-    use fortad_emit, only: emit_proc, emit_module
+    use fortad_emit, only: emit_proc, emit_proc_into, emit_module
     use fortad_dce, only: eliminate_dead_stores, fold_zero_accumulations, &
         eliminate_dead_arrays, eliminate_dead_loops
     use fortad_opt, only: optimise
@@ -182,6 +182,7 @@ contains
         type(lower_status_t) :: lstat
         type(forward_status_t) :: fstat
         type(forward_spec_t) :: spec
+        character(len=:), allocatable :: generated
         integer :: i, width
 
         call lower_source(source, primal, lstat, from)
@@ -228,7 +229,8 @@ contains
         if (given(module_name)) then
             res%code = emit_module(tangent, module_name, "fortad "//FORTAD_VERSION)
         else
-            res%code = emit_proc(tangent)
+            call emit_proc_into(tangent, generated)
+            res%code = generated
         end if
     end function fad_jvp
 

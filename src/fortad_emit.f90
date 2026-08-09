@@ -25,7 +25,8 @@ module fortad_emit
     implicit none
     private
 
-    public :: emit_proc, emit_expr, emit_decl_line, write_expr, emit_module
+    public :: emit_proc, emit_proc_into, emit_expr, emit_decl_line, write_expr, &
+        emit_module
 
     !! fortad claims no copyright in what it emits, and the banner says so
     !! where a reader of the generated file will actually see it.
@@ -226,6 +227,23 @@ contains
         end if
         text = b%str()
     end function emit_proc
+
+    subroutine emit_proc_into(p, text, nested)
+        !! Out-argument boundary for callers whose result object also carries
+        !! allocatable components.  NVHPC 26.5 can corrupt such a result when
+        !! a deferred-length function value is assigned directly into one of
+        !! its components; keeping the returned text in a standalone
+        !! allocatable avoids that nested finalization path.
+        type(fad_proc_t), intent(in) :: p
+        character(len=:), allocatable, intent(out) :: text
+        integer, intent(in), optional :: nested
+
+        if (present(nested)) then
+            text = emit_proc(p, nested)
+        else
+            text = emit_proc(p)
+        end if
+    end subroutine emit_proc_into
 
     subroutine write_buffer_decls(b, p)
         !! Declare automatic arrays for loops whose reduction body is pure.
