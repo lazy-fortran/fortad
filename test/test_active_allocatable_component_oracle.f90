@@ -44,18 +44,18 @@ program test_active_allocatable_component_oracle
         "end module whole_allocatable_component_case"//nl
 
     type(fad_result_t) :: jvp, vjp, refusal
-    character(len=32) :: independents(3)
+    character(len=32) :: independent_paths(3)
     character(len=:), allocatable :: dir, driver
     integer :: unit, stat
 
-    independents = [character(len=32) :: "box%values(1)", "box%values(2)", &
+    independent_paths = [character(len=32) :: "box%values(1)", "box%values(2)", &
         "scale"]
-    jvp = fad_jvp(source, independents, from="kernel", name="kernel_jvp")
+    jvp = fad_jvp(source, independent_paths, from="kernel", name="kernel_jvp")
     if (.not. jvp%ok) then
         print *, "FAIL active allocatable component JVP generation: ", jvp%message
         error stop 1
     end if
-    vjp = fad_vjp(source, independents, dependent="out", from="kernel", &
+    vjp = fad_vjp(source, independent_paths, dependent="out", from="kernel", &
         name="kernel_vjp")
     if (.not. vjp%ok) then
         print *, "FAIL active allocatable component VJP generation: ", vjp%message

@@ -49,16 +49,16 @@ program test_polymorphic_nested_component_oracle
         "    end function top"//nl// &
         "end module polymorphic_nested_component_case"//nl
 
-    character(len=32) :: independents(3)
+    character(len=32) :: independent_paths(3)
     type(fad_result_t) :: jvp, vjp
     character(len=:), allocatable :: dir, driver
     integer :: unit, stat
 
-    independents = [character(len=32) :: "box%payload%scale", &
+    independent_paths = [character(len=32) :: "box%payload%scale", &
         "box%payload%bias", "x"]
-    jvp = fad_jvp(source, independents, from="top", name="top_jvp")
+    jvp = fad_jvp(source, independent_paths, from="top", name="top_jvp")
     call require_ok(jvp, "JVP")
-    vjp = fad_vjp(source, independents, dependent="y", from="top", &
+    vjp = fad_vjp(source, independent_paths, dependent="y", from="top", &
         name="top_vjp")
     call require_ok(vjp, "VJP")
 
@@ -152,7 +152,7 @@ contains
 
     subroutine expect_refusal(case_source, label, needle)
         character(len=*), intent(in) :: case_source, label, needle
-        call expect_refusal_with(case_source, independents, label, needle)
+        call expect_refusal_with(case_source, independent_paths, label, needle)
     end subroutine expect_refusal
 
     subroutine expect_refusal_with(case_source, case_independents, label, needle)
@@ -199,13 +199,13 @@ contains
 
     subroutine expect_lifetime_refusal()
         type(fad_result_t) :: result
-        result = fad_jvp(lifetime_source(), independents, from="top")
+        result = fad_jvp(lifetime_source(), independent_paths, from="top")
         if (result%ok .or. .not. allocated(result%message) .or. &
             index(result%message, "ownership/lifetime") == 0) then
             print *, "FAIL ownership/lifetime JVP: ", result%message
             error stop 1
         end if
-        result = fad_vjp(lifetime_source(), independents, dependent="y", &
+        result = fad_vjp(lifetime_source(), independent_paths, dependent="y", &
             from="top")
         if (result%ok .or. .not. allocated(result%message) .or. &
             index(result%message, "nested polymorphic component") == 0 .or. &

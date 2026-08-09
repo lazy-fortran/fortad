@@ -126,6 +126,9 @@ module fortad_reverse
         !! enclosing derived object owns allocatable storage itself.
         character(len=:), allocatable :: owner_path
         character(len=:), allocatable :: previous_owner
+        !! A literal selected element such as ``owners(2)`` for an
+        !! allocatable polymorphic owner array.
+        character(len=:), allocatable :: selected_owner
         character(len=:), allocatable :: source
         character(len=:), allocatable :: source_type
         logical :: active = .false.
@@ -802,7 +805,7 @@ contains
             if (index(target, achar(37)) == 0) cycle
             if (.not. selected_component_target(primal, target)) cycle
             if (.not. expression_reads_component(primal, primal%stmts(i)%value, &
-                    target)) cycle
+                target)) cycle
             status%ok = .false.
             status%message = "reverse mode: fixed-path polymorphic component "// &
                 "read-modify-write requires an old-value snapshot; use a "// &
@@ -822,7 +825,7 @@ contains
             if (.not. allocated(primal%stmts(i)%target)) cycle
             if (trim(primal%stmts(i)%target) /= fad_base_name(target)) cycle
             if (index(trim(emit_expr(primal, primal%stmts(i)%value)), &
-                    achar(37)) > 0) found = .true.
+                achar(37)) > 0) found = .true.
             return
         end do
     end function selected_component_target
@@ -844,7 +847,7 @@ contains
         end if
         do i = 1, size(primal%exprs(idx)%args)
             if (expression_reads_component(primal, primal%exprs(idx)%args(i), &
-                    target)) then
+                target)) then
                 found = .true.
                 return
             end if
@@ -1516,19 +1519,27 @@ contains
     end subroutine check_reverse_allocation_sources
 
     logical function has_fixed_source_owner(primal, owner_di) result(supported)
-        !! The bounded reverse ownership case: one scalar polymorphic owner,
-        !! one ALLOCATE(owner,SOURCE=concrete_declared_type), and no move or
-        !! second acquisition.  The source may carry the active component.
+        !! The bounded reverse ownership case: one scalar polymorphic owner or
+        !! one one-dimensional allocatable owner array selected at one literal
+        !! element, one ALLOCATE(owner,SOURCE=concrete_declared_type), and no
+        !! move or second acquisition.  The source may carry the active
+        !! component.
         type(fad_proc_t), intent(in) :: primal
         integer, intent(in) :: owner_di
         integer :: i, target_di, source_di, allocate_at
         character(len=:), allocatable :: target, source_type, dispatch_type
-        logical :: found, dispatch_found
+        character(len=:), allocatable :: selector
+        logical :: found, dispatch_found, array_owner
 
         supported = .false.
         if (owner_di <= 0 .or. owner_di > primal%n_decls) return
         if (.not. primal%decls(owner_di)%is_polymorphic) return
-        if (primal%decls(owner_di)%is_array) return
+        array_owner = primal%decls(owner_di)%is_array
+        if (array_owner) then
+            if (.not. primal%decls(owner_di)%is_allocatable) return
+            if (.not. allocated(primal%decls(owner_di)%dims)) return
+            if (index(trim(primal%decls(owner_di)%dims), ",") > 0) return
+        end if
         if (primal%decls(owner_di)%is_associate_alias .or. &
             primal%decls(owner_di)%is_select_alias) return
         found = .false.
@@ -1537,8 +1548,13 @@ contains
             if (primal%stmts(i)%kind == FAD_ALLOCATE) then
                 if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
                 target = emit_expr(primal, primal%stmts(i)%allocation_args(1))
-                if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) cycle
-                target_di = primal%decl_index_of(target)
+                if (array_owner) then
+                    if (.not. fixed_literal_owner_shape(primal, i)) return
+                    target_di = primal%decl_index_of(fad_base_name(target))
+                else
+                    if (primal%exprs(primal%stmts(i)%allocation_args(1))%kind /= FAD_VAR) cycle
+                    target_di = primal%decl_index_of(target)
+                end if
                 if (target_di /= owner_di) cycle
                 if (found) return
                 if (primal%stmts(i)%allocation_source <= 0 .or. &
@@ -1581,14 +1597,81 @@ contains
         dispatch_found = .false.
         do i = allocate_at + 1, primal%n_stmts
             if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
-            if (.not. same_variable_name(emit_expr(primal, &
-                primal%stmts(i)%value), primal%decls(owner_di)%name)) cycle
+            selector = emit_expr(primal, primal%stmts(i)%value)
+            if (array_owner) then
+                if (.not. fixed_literal_owner_selector(selector, &
+                    primal%decls(owner_di)%name)) cycle
+            else
+                if (.not. same_variable_name(selector, &
+                    primal%decls(owner_di)%name)) cycle
+            end if
             call fixed_dispatch_type(primal, i, dispatch_type, dispatch_found)
             exit
         end do
         if (.not. dispatch_found) return
         supported = same_variable_name(source_type, type_leaf(dispatch_type))
     end function has_fixed_source_owner
+
+    logical function fixed_literal_owner_shape(primal, stmt_index) result(found)
+        !! One explicit literal extent is the only allocatable owner-array
+        !! shape retained by the current ownership replay model.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: stmt_index
+
+        found = .false.
+        if (stmt_index <= 0 .or. stmt_index > primal%n_stmts) return
+        if (.not. allocated(primal%stmts(stmt_index)%allocation_args)) return
+        if (size(primal%stmts(stmt_index)%allocation_args) >= 1) then
+            if (fixed_literal_owner_selector(emit_expr(primal, &
+                primal%stmts(stmt_index)%allocation_args(1)), &
+                fad_base_name(emit_expr(primal, &
+                primal%stmts(stmt_index)%allocation_args(1))))) then
+                found = .true.
+                return
+            end if
+        end if
+        if (size(primal%stmts(stmt_index)%allocation_args) /= 2) return
+        found = integer_literal_expr(primal, &
+            primal%stmts(stmt_index)%allocation_args(2))
+    end function fixed_literal_owner_shape
+
+    logical function fixed_literal_owner_selector(selector, owner) result(found)
+        !! Match one literal element such as ``owners(2)`` to its owner.
+        character(len=*), intent(in) :: selector, owner
+        character(len=:), allocatable :: index_text
+        integer :: open, close, i, digit
+
+        found = .false.
+        if (fad_base_name(selector) /= trim(owner)) return
+        open = index(trim(selector), "(")
+        close = index(trim(selector), ")")
+        if (open <= 1 .or. close <= open) return
+        if (len_trim(selector) /= close) return
+        index_text = trim(selector(open + 1:close - 1))
+        if (len_trim(index_text) == 0) return
+        do i = 1, len_trim(index_text)
+            digit = iachar(index_text(i:i))
+            if (digit < iachar("0") .or. digit > iachar("9")) return
+        end do
+        found = .true.
+    end function fixed_literal_owner_selector
+
+    logical function integer_literal_expr(primal, idx) result(found)
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: idx
+        integer :: i, digit
+
+        found = .false.
+        if (idx <= 0 .or. idx > primal%n_exprs) return
+        if (primal%exprs(idx)%kind /= FAD_CONST) return
+        if (.not. allocated(primal%exprs(idx)%text)) return
+        if (len_trim(primal%exprs(idx)%text) == 0) return
+        do i = 1, len_trim(primal%exprs(idx)%text)
+            digit = iachar(primal%exprs(idx)%text(i:i))
+            if (digit < iachar("0") .or. digit > iachar("9")) return
+        end do
+        found = .true.
+    end function integer_literal_expr
 
     logical function complex_reverse_path(primal, dependent, active) result(yes)
         !! Reverse adjoints are currently real-only. Refuse a complex path
@@ -2251,6 +2334,17 @@ contains
         record%owner = trim(owner)
         record%owner_path = trim(owner_text)
         record%component = component_owner
+        if (.not. component_owner) then
+            do i = 1, primal%n_stmts
+                if (primal%stmts(i)%kind /= FAD_SELECT_TYPE) cycle
+                if (fixed_literal_owner_selector(emit_expr(primal, &
+                    primal%stmts(i)%value), owner)) then
+                    record%selected_owner = emit_expr(primal, &
+                        primal%stmts(i)%value)
+                    exit
+                end if
+            end do
+        end if
         if (ps%allocation_source > 0) then
             record%source = trim(emit_expr(primal, ps%allocation_source))
             source_di = concrete_source_decl(primal, ps%allocation_source)
@@ -2308,7 +2402,7 @@ contains
         ignored = adjoint%add_stmt(s)
 
         record%active = active(di)
-        if (component_owner .and. ps%allocation_source > 0) then
+        if (ps%allocation_source > 0) then
             source_di = concrete_source_decl(primal, ps%allocation_source)
             if (source_di > 0) record%active = record%active .or. active(source_di)
         end if
@@ -2319,7 +2413,8 @@ contains
         d%is_result = .false.
         d%is_optional = .false.
         d%is_value = .false.
-        if (d%is_polymorphic .and. ps%allocation_source > 0) then
+        if (d%is_polymorphic .and. ps%allocation_source > 0 .and. &
+            .not. primal%decls(di)%is_array) then
             source_di = 0
             if (primal%exprs(ps%allocation_source)%kind == FAD_VAR) then
                 source_di = primal%decl_index_of( &
@@ -2337,12 +2432,29 @@ contains
 
         call reset_reverse_statement(s)
         s%kind = FAD_ALLOCATE
-        allocate (s%allocation_args(1))
         if (component_owner) then
+            allocate (s%allocation_args(1))
             derivative_target = shadow_component_path(trim(owner_text), suffix)
             s%allocation_args(1) = adjoint%add_expr(expr_var( &
                 derivative_target))
+        else if (indexed_owner) then
+            allocate (s%allocation_args(1 + size( &
+                primal%exprs(ps%allocation_args(1))%args)))
+            s%allocation_args(1) = adjoint%add_expr(expr_var(trim(d%name)))
+            do i = 1, size(primal%exprs(ps%allocation_args(1))%args)
+                s%allocation_args(i + 1) = copy_renamed(primal, adjoint, &
+                    primal%exprs(ps%allocation_args(1))%args(i), ssa)
+            end do
+        else if (primal%decls(di)%is_array .and. &
+                size(ps%allocation_args) > 1) then
+            allocate (s%allocation_args(size(ps%allocation_args)))
+            s%allocation_args(1) = adjoint%add_expr(expr_var(trim(d%name)))
+            do i = 2, size(ps%allocation_args)
+                s%allocation_args(i) = copy_renamed(primal, adjoint, &
+                    ps%allocation_args(i), ssa)
+            end do
         else
+            allocate (s%allocation_args(1))
             s%allocation_args(1) = adjoint%add_expr(expr_var(d%name))
         end if
         if (d%is_polymorphic) then
@@ -2358,6 +2470,8 @@ contains
         if (component_owner) then
             call emit_zero_component_shadow(primal, adjoint, active, suffix, &
                 record)
+        else if (d%is_polymorphic .and. primal%decls(di)%is_array) then
+            call emit_zero_owner_array_shadow(primal, adjoint, suffix, record)
         end if
 
         ! A polymorphic shadow cannot be assigned a scalar zero.  Its fixed
@@ -2372,6 +2486,60 @@ contains
             ignored = adjoint%add_stmt(s)
         end if
     end subroutine emit_allocation_forward
+
+    subroutine emit_zero_owner_array_shadow(primal, adjoint, suffix, record)
+        !! Reset concrete REAL leaves of a polymorphic allocatable array shadow
+        !! while its dynamic type is still available through SELECT TYPE.
+        type(fad_proc_t), intent(in) :: primal
+        type(fad_proc_t), intent(inout) :: adjoint
+        character(len=*), intent(in) :: suffix
+        type(allocation_record_t), intent(in) :: record
+        type(fad_stmt_t) :: s
+        character(len=:), allocatable :: source, target, tail, alias, component_text
+        integer :: i, ignored, n_real
+        logical :: opened
+
+        if (.not. allocated(record%source) .or. &
+            .not. allocated(record%source_type)) return
+        source = trim(record%source)
+        target = trim(record%owner)//trim(suffix)
+        alias = "fad_owner_array_shadow_b"
+        opened = .false.
+        n_real = 0
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ASSIGN) cycle
+            if (.not. primal%stmts(i)%target_is_component_path) cycle
+            if (.not. primal%stmts(i)%target_component_is_real) cycle
+            if (.not. allocated(primal%stmts(i)%target)) cycle
+            if (index(trim(primal%stmts(i)%target), source//"%") /= 1) cycle
+            component_text = trim(primal%stmts(i)%target)
+            if (.not. opened) then
+                call reset_reverse_statement(s)
+                s%kind = FAD_SELECT_TYPE
+                s%value = adjoint%add_expr(expr_var(target))
+                s%target = alias
+                ignored = adjoint%add_stmt(s)
+                call reset_reverse_statement(s)
+                s%kind = FAD_TYPE_IS
+                s%target = record%source_type
+                ignored = adjoint%add_stmt(s)
+                opened = .true.
+            end if
+            tail = component_text(len_trim(source) + 1:)
+            call reset_reverse_statement(s)
+            s%kind = FAD_ASSIGN
+            s%target = alias//tail
+            s%value = adjoint%add_expr(expr_const( &
+                "0.0"//adjoint%real_suffix))
+            ignored = adjoint%add_stmt(s)
+            n_real = n_real + 1
+        end do
+        if (opened .and. n_real > 0) then
+            call reset_reverse_statement(s)
+            s%kind = FAD_END_SELECT
+            ignored = adjoint%add_stmt(s)
+        end if
+    end subroutine emit_zero_owner_array_shadow
 
     subroutine emit_zero_component_shadow(primal, adjoint, active, suffix, &
             record)
@@ -2567,7 +2735,7 @@ contains
         character(len=:), allocatable :: source, payload, target, owner_path
         character(len=:), allocatable :: source_alias
         character(len=32) :: source_number
-        integer :: i, percent, ignored
+        integer :: i, percent, ignored, owner_di
 
         percent = index(trim(lhs), "%")
         if (percent <= 0) return
@@ -2605,7 +2773,44 @@ contains
                 s%kind = FAD_END_SELECT
                 ignored = adjoint%add_stmt(s)
             else
-                target = trim(owner_path)//trim(suffix)//payload
+                if (allocated(allocations(i)%selected_owner)) then
+                    target = shadow_component_path( &
+                        trim(allocations(i)%selected_owner), suffix)//payload
+                else
+                    target = trim(owner_path)//trim(suffix)//payload
+                end if
+                ! An element selected from a polymorphic owner array remains
+                ! polymorphic in the reverse shadow.  Keep the source copy
+                ! inside the same concrete guard; emitting OWNER_B(i)%field
+                ! after END SELECT is invalid because the declared base type
+                ! has no knowledge of the leaf component.
+                owner_di = primal%decl_index(trim(allocations(i)%owner))
+                if (allocated(allocations(i)%selected_owner) .and. &
+                    allocated(allocations(i)%source_type) .and. owner_di > 0 .and. &
+                    primal%decls(owner_di)%is_array .and. &
+                    primal%decls(owner_di)%is_polymorphic) then
+                    write (source_number, '(i0)') i
+                    source_alias = "fad_source_owner_b_"//trim(source_number)
+                    call reset_reverse_statement(s)
+                    s%kind = FAD_SELECT_TYPE
+                    s%value = adjoint%add_expr(expr_var(shadow_component_path( &
+                        trim(allocations(i)%selected_owner), suffix)))
+                    s%target = source_alias
+                    ignored = adjoint%add_stmt(s)
+                    call reset_reverse_statement(s)
+                    s%kind = FAD_TYPE_IS
+                    s%target = allocations(i)%source_type
+                    ignored = adjoint%add_stmt(s)
+                    call reset_reverse_statement(s)
+                    s%kind = FAD_ASSIGN
+                    s%target = fad_suffix_name(trim(lhs), suffix)
+                    s%value = adjoint%add_expr(expr_var(source_alias//payload))
+                    ignored = adjoint%add_stmt(s)
+                    call reset_reverse_statement(s)
+                    s%kind = FAD_END_SELECT
+                    ignored = adjoint%add_stmt(s)
+                    return
+                end if
                 call reset_reverse_statement(s)
                 s%kind = FAD_ASSIGN
                 s%target = fad_suffix_name(trim(lhs), suffix)
@@ -4477,8 +4682,8 @@ contains
             do i = 1, rec%arms(a)%n
                 if (index(trim(rec%arms(a)%lhs(i)), "%") > 0) then
                     if (is_select_alias_path(primal, rec%arms(a)%lhs(i)) .or. &
-                            is_nested_polymorphic_receiver_path(primal, &
-                            rec%arms(a)%lhs(i))) cycle
+                        is_nested_polymorphic_receiver_path(primal, &
+                        rec%arms(a)%lhs(i))) cycle
                 end if
                 if (.not. adjoint_is_live(primal, ssa, rec%arms(a)%lhs(i), &
                     active)) cycle
@@ -4549,14 +4754,14 @@ contains
                     active)) cycle
                 seed_target = trim(rec%arms(a)%lhs(i))//suffix
                 if (receiver_cotangent .and. (rec%arms(a)%kind == FAD_TYPE_IS .or. &
-                        rec%arms(a)%kind == FAD_CLASS_IS)) then
+                    rec%arms(a)%kind == FAD_CLASS_IS)) then
                     seed_target = reverse_component_target( &
                         trim(rec%arms(a)%lhs(i)), suffix, receiver_alias, &
                         cotangent_alias)
                 end if
                 seed_expr = adjoint%add_expr(expr_var(seed_target))
                 if (receiver_cotangent .and. (rec%arms(a)%kind == FAD_TYPE_IS .or. &
-                        rec%arms(a)%kind == FAD_CLASS_IS)) then
+                    rec%arms(a)%kind == FAD_CLASS_IS)) then
                     call accumulate(primal, adjoint, rec%arms(a)%rhs(i), &
                         seed_expr, ssa, suffix, active, n_tmp, status, &
                         receiver_alias, cotangent_alias)
@@ -4659,8 +4864,13 @@ contains
             end if
         else
             if (.not. primal%decls(receiver_di)%is_polymorphic) return
-            if (primal%decls(receiver_di)%is_allocatable .or. &
-                primal%decls(receiver_di)%is_associate_alias .or. &
+            if (primal%decls(receiver_di)%is_allocatable) then
+                if (.not. primal%decls(receiver_di)%is_array) return
+                if (.not. has_fixed_source_owner(primal, receiver_di)) return
+                if (.not. fixed_literal_owner_selector(selector, &
+                    primal%decls(receiver_di)%name)) return
+            end if
+            if (primal%decls(receiver_di)%is_associate_alias .or. &
                 primal%decls(receiver_di)%is_select_alias) return
         end if
         if (.not. nested_receiver .and. primal%decls(receiver_di)%is_array) then
@@ -4689,6 +4899,22 @@ contains
                     if (source_di > 0) ownership_active = active(source_di)
                     exit
                 end do
+            else if (primal%decls(receiver_di)%is_allocatable) then
+                if (primal%decls(receiver_di)%is_array) then
+                    do j = 1, primal%n_stmts
+                        if (primal%stmts(j)%kind /= FAD_ALLOCATE) cycle
+                        if (.not. allocated(primal%stmts(j)%allocation_args)) cycle
+                        if (size(primal%stmts(j)%allocation_args) < 1) cycle
+                        if (fad_base_name(emit_expr(primal, &
+                            primal%stmts(j)%allocation_args(1))) /= &
+                            primal%decls(receiver_di)%name) cycle
+                        if (.not. has_fixed_source_owner(primal, receiver_di)) cycle
+                        source_di = concrete_source_decl(primal, &
+                            primal%stmts(j)%allocation_source)
+                        if (source_di > 0) ownership_active = active(source_di)
+                        exit
+                    end do
+                end if
             end if
             if (.not. ownership_active) return
         end if
@@ -5465,8 +5691,14 @@ contains
             di = primal%decl_index(base)
             if (di > 0) then
                 if (index(trim(node_text), "%") > 0) then
-                    if (.not. component_path_is_active(primal, node_text, active, &
-                        ssa%active_paths)) return
+                    if (.not. (present(reverse_receiver_alias) .and. &
+                        present(reverse_cotangent_alias) .and. &
+                        len_trim(reverse_receiver_alias) > 0 .and. &
+                        same_component_name(fad_base_name(node_text), &
+                        reverse_receiver_alias))) then
+                        if (.not. component_path_is_active(primal, node_text, &
+                            active, ssa%active_paths)) return
+                    end if
                 else if (.not. active(di)) then
                     return
                 end if
@@ -5941,6 +6173,11 @@ contains
             yes = .true.
             return
         end if
+        if (polymorphic_owner_array_component_active(primal, canonical_text, &
+            active)) then
+            yes = .true.
+            return
+        end if
         ! An explicit independent component path must remain active even when
         ! the lowered expression has no component-path metadata of its own.
         ! Do not classify every percent expression as a component here: the
@@ -5974,6 +6211,45 @@ contains
             yes = active(di)
         end if
     end function component_path_is_active
+
+    logical function polymorphic_owner_array_component_active(primal, path, &
+            active) result(found)
+        !! A fixed SOURCE= allocation makes the concrete payload of an owner
+        !! array an active reverse path when its source is active.  The
+        !! SELECT TYPE alias is lowered separately, so recover that fact here
+        !! for carry analysis and component cotangent routing.
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: path
+        logical, intent(in) :: active(:)
+        character(len=:), allocatable :: selector, owner
+        integer :: percent, owner_di, source_di, i
+
+        found = .false.
+        percent = index(trim(path), "%")
+        if (percent <= 1) return
+        selector = trim(path(:percent - 1))
+        owner = fad_base_name(selector)
+        owner_di = primal%decl_index(owner)
+        if (owner_di <= 0) return
+        if (.not. primal%decls(owner_di)%is_allocatable .or. &
+            .not. primal%decls(owner_di)%is_polymorphic .or. &
+            .not. primal%decls(owner_di)%is_array) return
+        if (.not. fixed_literal_owner_selector(selector, owner)) return
+        do i = 1, primal%n_stmts
+            if (primal%stmts(i)%kind /= FAD_ALLOCATE) cycle
+            if (.not. allocated(primal%stmts(i)%allocation_args)) cycle
+            if (size(primal%stmts(i)%allocation_args) < 1) cycle
+            if (fad_base_name(emit_expr(primal, &
+                primal%stmts(i)%allocation_args(1))) /= owner) cycle
+            if (primal%stmts(i)%allocation_source <= 0) return
+            source_di = concrete_source_decl(primal, &
+                primal%stmts(i)%allocation_source)
+            found = source_di > 0 .and. active(source_di)
+            if (.not. found) found = reads_any(primal, &
+                primal%stmts(i)%allocation_source, active)
+            return
+        end do
+    end function polymorphic_owner_array_component_active
 
     function resolve_component_path(primal, text) result(path)
         !! Resolve a component read through a SELECT TYPE alias back to the
@@ -6040,7 +6316,7 @@ contains
         di = primal%decl_index(fad_base_name(text))
         if (di > 0) then
             if (primal%decls(di)%is_select_alias .and. &
-                    allocated(primal%decls(di)%alias_target)) then
+                allocated(primal%decls(di)%alias_target)) then
                 ! Scalar SELECT TYPE aliases need the same routed cotangent
                 ! handling as section aliases; all such paths stay in the
                 ! paired TYPE IS arm.
@@ -6056,7 +6332,7 @@ contains
             if (.not. allocated(primal%stmts(i)%target)) cycle
             if (trim(primal%stmts(i)%target) /= fad_base_name(text)) cycle
             if (index(trim(emit_expr(primal, primal%stmts(i)%value)), &
-                    achar(37)) > 0) yes = .true.
+                achar(37)) > 0) yes = .true.
             return
         end do
     end function is_select_alias_path

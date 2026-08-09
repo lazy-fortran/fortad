@@ -31,12 +31,12 @@ program test_derived_component_oracle
         "end module derived_component_case"//nl
 
     type(fad_result_t) :: jvp, vjp
-    character(len=32) :: independents(4)
+    character(len=32) :: independent_paths(4)
     character(len=32) :: bad_independent(1)
     character(len=:), allocatable :: dir, driver
     integer :: unit, stat
 
-    independents = [character(len=32) :: "state%base", "state%inner%q", &
+    independent_paths = [character(len=32) :: "state%base", "state%inner%q", &
         "state%values(1)", "a"]
     bad_independent = [character(len=32) :: "state"]
     jvp = fad_jvp(source, bad_independent, from="top")
@@ -58,12 +58,12 @@ program test_derived_component_oracle
         print *, "FAIL derived-component: vector mode was accepted"
         error stop 1
     end if
-    jvp = fad_jvp(source, independents, from="top", name="top_jvp")
+    jvp = fad_jvp(source, independent_paths, from="top", name="top_jvp")
     if (.not. jvp%ok) then
         print *, "FAIL derived-component JVP generation: ", jvp%message
         error stop 1
     end if
-    vjp = fad_vjp(source, independents, dependent="out", from="top", &
+    vjp = fad_vjp(source, independent_paths, dependent="out", from="top", &
         name="top_vjp")
     if (.not. vjp%ok) then
         print *, "FAIL derived-component VJP generation: ", vjp%message

@@ -41,7 +41,7 @@ program fortad_cli
         source_first_inference, tapenade_compat, tapenade_multi, stat)
     if (stat /= 0) then
         call usage()
-        stop 2, quiet=.true.
+        error stop 2
     end if
 
     call finalize_tapenade_output(input_path, mode, output_path, output_directory, &
@@ -49,18 +49,18 @@ program fortad_cli
     if (stat /= 0) then
         write (error_unit_or_output(), '(a)') &
             "fortad: invalid Tapenade-compatible output specification"
-        stop 2, quiet=.true.
+        error stop 2
     end if
     if (tapenade_multi .and. mode == "reverse") then
         write (error_unit_or_output(), '(a)') &
             "fortad: Tapenade -vector/-multi is supported for forward mode only"
-        stop 2, quiet=.true.
+        error stop 2
     end if
 
     call read_file(input_path, source, stat)
     if (stat /= 0) then
         write (error_unit_or_output(), '(a)') "fortad: cannot read "//input_path
-        stop 2, quiet=.true.
+        error stop 2
     end if
     if (is_fixed_form_file(input_path)) then
         call normalize_fixed_form_source_text(source)
@@ -71,7 +71,7 @@ program fortad_cli
             dep_name, from_name, with_primal, verbose, stat, inference_message)
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
-            stop 1, quiet=.true.
+            error stop 1
         end if
         stop
     end if
@@ -88,7 +88,7 @@ program fortad_cli
             root_selection=(tapenade_compat .or. len_trim(output_path) > 0))
         if (stat /= 0) then
             write (error_unit_or_output(), '(a)') "fortad: "//inference_message
-            stop 2, quiet=.true.
+            error stop 2
         end if
         if (len_trim(explicit_indep) > 0) indep_list = explicit_indep
     end if
@@ -104,7 +104,7 @@ program fortad_cli
                 write (error_unit_or_output(), '(a)') &
                     "fortad: could not infer Tapenade dependent; use --dep NAME"
             end if
-            stop 2, quiet=.true.
+            error stop 2
         end if
     end if
 
@@ -126,7 +126,7 @@ program fortad_cli
 
     if (.not. res%ok) then
         write (error_unit_or_output(), '(a)') "fortad: "//res%message
-        stop 1, quiet=.true.
+        error stop 1
     end if
 
     if (len(output_path) > 0) then

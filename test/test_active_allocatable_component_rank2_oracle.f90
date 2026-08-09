@@ -69,19 +69,19 @@ program test_active_allocatable_component_rank2_oracle
         "end module integer_allocatable_component_case"//nl
 
     type(fad_result_t) :: jvp, vjp, refused
-    character(len=32) :: independents(4)
+    character(len=32) :: independent_paths(4)
     character(len=:), allocatable :: dir, driver
     integer :: unit, stat
 
-    independents = [character(len=32) :: "box%values(1,2)", &
+    independent_paths = [character(len=32) :: "box%values(1,2)", &
         "box%values(2,1)", "box%values(2,2)", "scale"]
-    jvp = fad_jvp(source, independents, from="kernel", name="kernel_jvp")
+    jvp = fad_jvp(source, independent_paths, from="kernel", name="kernel_jvp")
     if (.not. jvp%ok) then
         print *, "FAIL rank-two allocatable component JVP generation: ", &
             jvp%message
         error stop 1
     end if
-    vjp = fad_vjp(source, independents, dependent="out", from="kernel", &
+    vjp = fad_vjp(source, independent_paths, dependent="out", from="kernel", &
         name="kernel_vjp")
     if (.not. vjp%ok) then
         print *, "FAIL rank-two allocatable component VJP generation: ", &
