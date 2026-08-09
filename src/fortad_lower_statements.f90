@@ -51,7 +51,8 @@ module fortad_lower_statements
         STORAGE_SAVE, STORAGE_COMMON, associate_selector_query_t, &
         query_associate_selectors, STORAGE_LOCAL, STORAGE_BORROWED
     use frontend_compiler_queries, only: global_reference_query_t, &
-        query_active_global_references
+        query_active_global_references, procedure_pointer_state_query_t, &
+        query_procedure_pointer_state
     use frontend_compiler_resolution, only: BINDING_DECLARATION, &
         BINDING_NAMED_CONSTANT, &
         BINDING_FUNCTION, BINDING_SUBROUTINE, BINDING_ASSOCIATE_NAME, &
@@ -141,6 +142,7 @@ contains
         type(type_bound_call_query_t) :: type_bound
         type(procedure_target_query_t) :: callback_target
         type(procedure_callback_flow_query_t) :: callback_flow
+        type(procedure_pointer_state_query_t) :: pointer_state
         type(nullify_query_t) :: nullify_info
         integer :: ignored, k
         logical :: allow_lifetime_owner
@@ -259,17 +261,21 @@ contains
             ignored = proc%add_stmt(s)
 
             type is (if_node)
-            callback_flow = callback_flow_for_if(arena, idx)
-            if (callback_flow%found) then
-                call lower_callback_flow_branch(arena, n, callback_flow, proc, &
-                    status)
-                return
-            end if
-            if (callback_flow%is_refused) then
-                status%ok = .false.
-                status%message = callback_flow_refusal(callback_flow, &
-                    node_line(arena, idx))
-                return
+            pointer_state = query_procedure_pointer_state(arena, &
+                n%condition_index)
+            if (.not. pointer_state%found) then
+                callback_flow = callback_flow_for_if(arena, idx)
+                if (callback_flow%found) then
+                    call lower_callback_flow_branch(arena, n, callback_flow, &
+                        proc, status)
+                    return
+                end if
+                if (callback_flow%is_refused) then
+                    status%ok = .false.
+                    status%message = callback_flow_refusal(callback_flow, &
+                        node_line(arena, idx))
+                    return
+                end if
             end if
             if (allocated(n%elseif_blocks)) then
                 if (size(n%elseif_blocks) > 0) then
@@ -282,7 +288,12 @@ contains
             end if
             s%kind = FAD_IF
             s%line = n%line
-            s%value = lower_expr(arena, n%condition_index, proc, status)
+            if (pointer_state%found) then
+                call lower_procedure_pointer_associated_guard(arena, &
+                    n%condition_index, pointer_state, proc, s%value, status)
+            else
+                s%value = lower_expr(arena, n%condition_index, proc, status)
+            end if
             if (.not. status%ok) return
             ignored = proc%add_stmt(s)
             call lower_body(arena, n%then_body_indices, proc, status, &
@@ -422,6 +433,106 @@ contains
             status%message = "unsupported statement at line "//itoa(node_line(arena, idx))
         end select
     end subroutine lower_stmt
+
+    subroutine lower_procedure_pointer_associated_guard(arena, condition_index, &
+            state, proc, value, status)
+        !! Lower the one accepted procedure-pointer guard shape.
+        !!
+        !! FortFront proves the pointer state; FortAD additionally requires a
+        !! same-file scalar REAL(8) function target and rejects target-side
+        !! mutable state or ownership changes before inlining the call.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: condition_index
+        type(procedure_pointer_state_query_t), intent(in) :: state
+        type(fad_proc_t), intent(inout) :: proc
+        integer, intent(out) :: value
+        type(lower_status_t), intent(inout) :: status
+        type(procedure_target_query_t) :: target
+        character(len=:), allocatable :: reason
+
+        value = 0
+        if (.not. state%is_associated_test) then
+            call refuse_procedure_pointer_state(node_line(arena, &
+                condition_index), "the observation is not ASSOCIATED", status)
+            return
+        end if
+        if (state%is_refused .or. state%is_unresolved .or. &
+            .not. state%state_known) then
+            call refuse_procedure_pointer_state(node_line(arena, &
+                condition_index), "pointer state is not statically proved", status, &
+                state)
+            return
+        end if
+        if (.not. state%is_associated) then
+            call refuse_procedure_pointer_state(node_line(arena, &
+                condition_index), "the guard is statically false", status, state)
+            return
+        end if
+        if (state%assignment_node_index <= 0) then
+            call refuse_procedure_pointer_state(node_line(arena, &
+                condition_index), "require one direct local procedure-pointer assignment", &
+                status, state)
+            return
+        end if
+
+        target = query_procedure_target(arena, state%assignment_node_index)
+        if (.not. target%found .or. .not. target%is_resolved) then
+            call refuse_procedure_pointer_state(node_line(arena, &
+                condition_index), "procedure-pointer target is unresolved", status, state)
+            return
+        end if
+        if (target%target_procedure_index <= 0) then
+            call refuse_procedure_pointer_state(node_line(arena, &
+                condition_index), "target must be a same-file procedure", status, state)
+            return
+        end if
+        if (.not. passed_callback_signature_supported(target%signature)) then
+            call refuse_procedure_pointer_state(node_line(arena, &
+                condition_index), "target must be a scalar REAL(8) function "// &
+                "with one REAL(8), INTENT(IN) argument", status, state)
+            return
+        end if
+        call callback_target_state(arena, target%target_procedure_index, reason)
+        if (len_trim(reason) > 0) then
+            call refuse_procedure_pointer_state(node_line(arena, &
+                condition_index), trim(reason), status, state)
+            return
+        end if
+        value = proc%add_expr(expr_const(".true."))
+    end subroutine lower_procedure_pointer_associated_guard
+
+    subroutine refuse_procedure_pointer_state(line, fallback, status, state)
+        integer, intent(in) :: line
+        character(len=*), intent(in) :: fallback
+        type(lower_status_t), intent(inout) :: status
+        type(procedure_pointer_state_query_t), intent(in), optional :: state
+        character(len=:), allocatable :: reason
+
+        reason = fallback
+        if (present(state)) then
+            if (state%has_invalid_arity) then
+                reason = "ASSOCIATED guard requires exactly one argument"
+            else if (state%has_non_identifier_pointer) then
+                reason = "ASSOCIATED guard requires a simple pointer name"
+            else if (state%has_non_procedure_pointer) then
+                reason = "ASSOCIATED guard requires a procedure pointer"
+            else if (state%has_global_mutable_state) then
+                reason = "procedure pointer refers to global mutable state"
+            else if (state%has_reassignment) then
+                reason = "procedure pointer is reassigned"
+            else if (state%has_control_flow_boundary .or. &
+                    state%has_flow_sensitive_state) then
+                reason = "procedure-pointer state depends on control flow"
+            else if (state%has_null_assignment) then
+                reason = "NULL() procedure-pointer targets are not differentiated"
+            else if (state%has_unresolved_target) then
+                reason = "procedure-pointer target is unresolved"
+            end if
+        end if
+        status%ok = .false.
+        status%message = "unsupported procedure-pointer ASSOCIATED guard at line "// &
+            itoa(line)//": "//trim(reason)
+    end subroutine refuse_procedure_pointer_state
 
     subroutine lower_callback_flow_branch(arena, node, flow, proc, status)
         !! Lower the proven callback-selection branch to a passive integer tag.
@@ -2353,6 +2464,7 @@ contains
         character(len=:), allocatable :: call_name
         character(len=:), allocatable :: callback_name
         type(procedure_reassignment_call_query_t) :: reassignment
+        type(procedure_pointer_state_query_t) :: pointer_state
 
         out = 0
         if (idx <= 0 .or. idx > arena%size) then
@@ -2368,6 +2480,14 @@ contains
 
         call validate_component_reference(arena, idx, status, allow_lifetime_owner)
         if (.not. status%ok) return
+
+        pointer_state = query_procedure_pointer_state(arena, idx)
+        if (pointer_state%found) then
+            status%ok = .false.
+            status%message = "unsupported procedure-pointer ASSOCIATED expression at line "// &
+                itoa(node_line(arena, idx))//": use it only as a proved unary IF guard"
+            return
+        end if
 
         if (is_section_node(arena, idx)) then
             out = lower_array_section(arena, idx, proc, status)

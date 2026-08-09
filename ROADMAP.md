@@ -102,6 +102,23 @@ storage, array-bound, `SELECT TYPE`, and `SELECT RANK` facts for low-level
 transformers. This keeps upstream work about facts and FortAD work about
 differentiation, rather than adding product semantics to the parser.
 
+## Current handoff (2026-08-09)
+
+The current main pins are FortAD `ad7e425`, FortFront `d35a5528`, and
+fortad-bench `72ee483`. FortAD has bounded `SPREAD` JVP and direct array-valued
+reverse-transpose support, and now consumes FortFront's bounded
+procedure-pointer `ASSOCIATED` state facts for a fixed same-scope callback
+guard. The new independent oracle checks compiled JVP/VJP values, finite
+differences, the adjoint identity, and named refusals. Active global mutable
+state, uncontrolled aliasing, unresolved dispatch, and changing callback
+ownership remain intentional product refusals.
+
+The bench currently records 937 of 2,014 total candidates and 429 of 1,432
+pure-Fortran Tapenade candidates (30.0%); 1,077 total candidates remain in the
+queue, including 1,003 pure-Fortran cases. Its latest shard is `next47`, which
+records pointer/TARGET storage-identity boundaries with independent behavioral
+and refusal oracles.
+
 ## Repository responsibilities
 
 FortAD owns differentiation semantics. Its IR and lowering passes must carry
