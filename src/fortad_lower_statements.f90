@@ -2574,7 +2574,7 @@ contains
                 if (is_component_base(arena, n%base_expr_index)) then
                     type_bound = query_type_bound_call(arena, idx)
                     if (is_type_bound_reference(arena, n%base_expr_index, proc) .or. &
-                            type_bound%found .or. type_bound%is_unresolved) then
+                            type_bound%found) then
                         out = lower_type_bound_call(arena, idx, n, proc, status)
                         if (.not. status%ok) return
                     else if (size(n%arg_indices) == 0) then
