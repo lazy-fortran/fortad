@@ -20,6 +20,8 @@ module fortad_lower_statements
         procedure_call_target_query_t, query_procedure_call_target, &
         procedure_target_query_t, query_procedure_target, &
         type_bound_call_query_t, query_type_bound_call, &
+        select_type_component_dispatch_query_t, &
+        query_select_type_component_dispatch, &
         procedure_callback_flow_query_t, query_procedure_callback_flow, &
         get_source_line, TREAL
     use ast_nodes_control, only: associate_node
@@ -4622,9 +4624,10 @@ contains
         integer, allocatable :: actual_indices(:), args(:)
         character(len=64), allocatable :: arg_names(:)
         integer :: receiver, receiver_decl, receiver_index, i, matches, separator
-        integer :: type_matches
+        integer :: type_matches, arm_index
         logical :: named_pass, found_subroutine, indexed_receiver
         type(type_bound_call_query_t) :: dispatch
+        type(select_type_component_dispatch_query_t) :: component_dispatch
 
         select type (node => arena%entries(idx)%node)
             type is (subroutine_call_node)
@@ -4640,6 +4643,29 @@ contains
                 actual_indices = node%arg_indices
             else
                 allocate (actual_indices(0))
+            end if
+
+            ! An explicit CALL through a component of a narrowed SELECT TYPE
+            ! selector has no ordinary type-bound receiver node.  Ask
+            ! FortFront for the complete source-backed path and use its
+            ! static implementation/PASS facts before the legacy concrete
+            ! receiver path can misread `typed%leaf%run` as binding `leaf%run`
+            ! on `container_t`.
+            if (allocated(node%name) .and. &
+                    has_nested_component_receiver(node%name)) then
+                arm_index = select_type_arm_for_call(arena, idx)
+                if (arm_index > 0) then
+                    component_dispatch = query_select_type_component_dispatch( &
+                        arena, arm_index, idx)
+                    if (.not. component_dispatch%is_resolved) then
+                        call refuse_component_dispatch_call(status, node%name, &
+                            component_dispatch)
+                        return
+                    end if
+                    call lower_select_type_component_subroutine(arena, &
+                        actual_indices, proc, s, component_dispatch, status)
+                    return
+                end if
             end if
         class default
             call refuse_type_bound(status, "<unknown>", &
@@ -4813,6 +4839,145 @@ contains
         s%call_args = args
         s%call_arg_names = arg_names
     end subroutine lower_type_bound_subroutine
+
+    subroutine lower_select_type_component_subroutine(arena, actual_indices, &
+            proc, s, dispatch, status)
+        !! Lower the fixed direct component path proved by FortFront.
+        !!
+        !! The receiver is deliberately kept as the query's source-backed
+        !! text (for example ``typed%leaf``).  This preserves the narrowed
+        !! component identity while the ordinary inliner and derivative
+        !! passes consume the concrete implementation as a normal call.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: actual_indices(:)
+        type(fad_proc_t), intent(inout) :: proc
+        type(fad_stmt_t), intent(inout) :: s
+        type(select_type_component_dispatch_query_t), intent(in) :: dispatch
+        type(lower_status_t), intent(inout) :: status
+        type(program_unit_query_t) :: unit
+        integer, allocatable :: args(:)
+        character(len=64), allocatable :: arg_names(:)
+        character(len=:), allocatable :: implementation, pass_name
+        integer :: receiver, i
+        logical :: found_subroutine, named_pass
+
+        implementation = trim(dispatch%implementation)
+        call find_subroutine_unit(arena, implementation, unit, found_subroutine)
+        if (.not. found_subroutine) then
+            call refuse_type_bound(status, dispatch%binding_name, &
+                "the component implementation is not a same-file subroutine")
+            return
+        end if
+        if (len_trim(dispatch%receiver_name) == 0) then
+            call refuse_type_bound(status, dispatch%binding_name, &
+                "the component receiver is unresolved")
+            return
+        end if
+
+        receiver = proc%add_expr(expr_var(trim(dispatch%receiver_name)))
+        named_pass = dispatch%pass_arg .and. &
+            allocated(dispatch%implementation_pass_name)
+        if (named_pass) named_pass = len_trim( &
+            dispatch%implementation_pass_name) > 0
+        if (.not. named_pass .and. dispatch%pass_arg .and. &
+                allocated(dispatch%pass_name)) then
+            pass_name = trim(dispatch%pass_name)
+            named_pass = len_trim(pass_name) > 0
+        else if (named_pass) then
+            pass_name = trim(dispatch%implementation_pass_name)
+        end if
+
+        if (dispatch%pass_arg) then
+            if (named_pass) then
+                call lower_named_pass_arguments(arena, actual_indices, &
+                    dispatch%binding_name, proc, unit, pass_name, receiver, &
+                    args, arg_names, status)
+                if (.not. status%ok) return
+            else
+                allocate (args(size(actual_indices) + 1))
+                allocate (arg_names(size(actual_indices) + 1))
+                args(1) = receiver
+                arg_names(1) = ""
+                do i = 1, size(actual_indices)
+                    args(i + 1) = lower_actual(arena, actual_indices(i), proc, &
+                        arg_names(i + 1), status)
+                    if (.not. status%ok) return
+                end do
+            end if
+        else
+            allocate (args(size(actual_indices)))
+            allocate (arg_names(size(actual_indices)))
+            do i = 1, size(actual_indices)
+                args(i) = lower_actual(arena, actual_indices(i), proc, &
+                    arg_names(i), status)
+                if (.not. status%ok) return
+            end do
+        end if
+
+        s%kind = FAD_CALL_STMT
+        s%target = implementation
+        s%call_args = args
+        s%call_arg_names = arg_names
+    end subroutine lower_select_type_component_subroutine
+
+    subroutine refuse_component_dispatch_call(status, call_name, dispatch)
+        type(lower_status_t), intent(inout) :: status
+        character(len=*), intent(in) :: call_name
+        type(select_type_component_dispatch_query_t), intent(in) :: dispatch
+        character(len=:), allocatable :: reason
+
+        reason = "component dispatch facts are unresolved"
+        if (allocated(dispatch%refusal_reason)) then
+            if (len_trim(dispatch%refusal_reason) > 0) then
+                reason = trim(dispatch%refusal_reason)
+            end if
+        end if
+        call refuse_type_bound(status, call_name, reason)
+    end subroutine refuse_component_dispatch_call
+
+    integer function select_type_arm_for_call(arena, call_index) result(arm_index)
+        !! Return the nearest SELECT TYPE arm containing CALL_INDEX.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: call_index
+        type(control_statement_query_t) :: control
+        integer :: current, select_index, arm_position
+
+        arm_index = 0
+        current = call_index
+        do while (current > 0)
+            if (.not. arena%has_node_at(current)) return
+            do select_index = 1, arena%size
+                if (.not. arena%has_node_at(select_index)) cycle
+                if (trim(arena%entries(select_index)%node_type) /= &
+                    "select_type") cycle
+                control = query_control_statement(arena, select_index)
+                if (.not. control%found .or. .not. allocated(control%type_arms)) cycle
+                do arm_position = 1, size(control%type_arms)
+                    if (control%type_arms(arm_position)%arm_node_index == current) then
+                        arm_index = current
+                        return
+                    end if
+                end do
+            end do
+            current = arena%entries(current)%parent_index
+        end do
+    end function select_type_arm_for_call
+
+    logical function has_nested_component_receiver(name) result(found)
+        character(len=*), intent(in) :: name
+        integer :: offset, relative, separators
+
+        separators = 0
+        offset = 1
+        do while (offset <= len_trim(name))
+            relative = index(name(offset:), "%")
+            if (relative <= 0) exit
+            separators = separators + 1
+            offset = offset + relative
+            offset = offset + 1
+        end do
+        found = separators >= 2
+    end function has_nested_component_receiver
 
     subroutine lower_named_pass_arguments(arena, actual_indices, call_name, &
             proc, unit, pass_name, &

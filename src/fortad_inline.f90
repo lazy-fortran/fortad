@@ -444,10 +444,30 @@ contains
                                 indexed_read_only = .true.
                             end if
                         end if
+                    else if (target%exprs(actuals(formal_actual(i)))%kind == &
+                            FAD_VAR .and. index(trim(target%exprs( &
+                            actuals(formal_actual(i)))%text), "%") > 0) then
+                        ! A fixed component receiver is represented as one
+                        ! textual FAD_VAR (for example `typed%leaf`).  It is
+                        ! a caller expression, not a declaration name.  An
+                        ! intent(IN) dummy can bind to it directly; a
+                        ! writable dummy keeps the caller-owned path as its
+                        ! renamed spelling for the inlined body.
+                        dummy_decl = callee%decl_index(callee%params(i))
+                        if (dummy_decl > 0) then
+                            if (callee%decls(dummy_decl)%intent == FAD_INTENT_IN) then
+                                indexed_read_only = .true.
+                            else
+                                binds(n_binds)%renamed = trim(target%exprs( &
+                                    actuals(formal_actual(i)))%text)
+                            end if
+                        end if
                     end if
                     if (indexed_read_only) then
                         binds(n_binds)%expr = actuals(formal_actual(i))
                         binds(n_binds)%renamed = ""
+                    else if (len_trim(binds(n_binds)%renamed) > 0) then
+                        binds(n_binds)%expr = 0
                     else if (target%exprs(actuals(formal_actual(i)))%kind /= FAD_VAR) then
                         status%ok = .false.
                         status%message = "inlining "//trim(callee%name)// &
@@ -550,6 +570,7 @@ contains
             do k = 1, n_binds
                 if (.not. same_name(binds(k)%name, callee%decls(i)%name)) cycle
                 if (binds(k)%expr /= 0) exit
+                if (index(trim(binds(k)%renamed), "%") > 0) exit
                 d = callee%decls(i)
                 d%name = binds(k)%renamed
                 d%intent = FAD_INTENT_NONE
