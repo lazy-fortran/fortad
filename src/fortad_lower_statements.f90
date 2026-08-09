@@ -26,6 +26,10 @@ module fortad_lower_statements
         type_bound_call_query_t, query_type_bound_call, &
         select_type_component_dispatch_query_t, &
         query_select_type_component_dispatch, &
+        select_type_dispatch_query_t, query_select_type_dispatch, &
+        select_type_generic_dispatch_query_t, &
+        select_type_generic_candidate_query_t, &
+        query_select_type_generic_dispatch, &
         procedure_callback_flow_query_t, query_procedure_callback_flow, &
         get_source_line, TREAL
     use ast_nodes_control, only: associate_node
@@ -1072,7 +1076,8 @@ contains
         else if (flow%has_ambiguous_target) then
             message = message//"ambiguous targets are not supported"
         else if (flow%has_incompatible_signature) then
-            message = message//"target signatures are incompatible"
+            message = message//"target signatures are incompatible; callback targets "// &
+                "require scalar REAL(8) functions"
         else if (flow%has_branch_call) then
             message = message//"calls inside callback arms are not supported"
         else
@@ -1528,11 +1533,11 @@ contains
         end if
         select type (selector => arena%entries(arm%selector_node_index)%node)
             type is (identifier_node)
-            class default
-                call refuse_select_rank(idx, arena, &
-                    "selector aliases and expressions are not differentiated", &
-                    status)
-                return
+        class default
+            call refuse_select_rank(idx, arena, &
+                "selector aliases and expressions are not differentiated", &
+                status)
+            return
         end select
         if (.not. arm%has_rank .or. arm%selected_rank /= 1) then
             if (arm%is_assumed_size) then
@@ -1590,7 +1595,7 @@ contains
             return
         end if
         if (arm%selector_bounds_node_indices(1) /= &
-                declaration%dimension_indices(1)) then
+            declaration%dimension_indices(1)) then
             call refuse_select_rank(idx, arena, &
                 "selector bounds identity does not match its declaration", status)
             return
@@ -2628,7 +2633,7 @@ contains
                 if (is_component_base(arena, n%base_expr_index)) then
                     type_bound = query_type_bound_call(arena, idx)
                     if (is_type_bound_reference(arena, n%base_expr_index, proc) .or. &
-                            type_bound%found) then
+                        type_bound%found) then
                         out = lower_type_bound_call(arena, idx, n, proc, status)
                         if (.not. status%ok) return
                     else if (size(n%arg_indices) == 0) then
@@ -4399,6 +4404,8 @@ contains
         logical :: found_type, found_function, indexed_receiver
         logical :: named_pass
         type(type_bound_call_query_t) :: dispatch
+        integer :: generic_arm
+        type(select_type_generic_dispatch_query_t) :: generic_dispatch
 
         out = 0
         access = query_component_access(arena, node%base_expr_index)
@@ -4407,8 +4414,22 @@ contains
                 "the receiver is not a component access")
             return
         end if
+        dispatch = query_type_bound_call(arena, call_index)
+        if (dispatch%is_generic) then
+            generic_arm = select_type_arm_for_call(arena, call_index)
+            if (generic_arm > 0) then
+                generic_dispatch = query_select_type_generic_dispatch(arena, &
+                    generic_arm, call_index)
+                if (generic_dispatch%is_generic_binding .or. &
+                    generic_dispatch%found) then
+                    call lower_select_type_generic_function_call(arena, &
+                        call_index, node, proc, generic_arm, status, out)
+                    return
+                end if
+            end if
+        end if
         if (trim(arena%entries(access%base_node_index)%node_type) == &
-                "component_access") then
+            "component_access") then
             dispatch = query_type_bound_call(arena, call_index)
             if (dispatch%found .or. dispatch%is_unresolved) then
                 call refuse_type_bound(status, node%name, &
@@ -4623,6 +4644,215 @@ contains
         end if
         out = proc%add_expr_call(impl, args, arg_names)
     end function lower_type_bound_call
+
+    recursive subroutine lower_select_type_generic_function_call(arena, &
+            call_index, node, proc, arm_index, status, result_expr)
+        !! Consume FortFront's SELECT TYPE generic/PASS facts for one exact
+        !! scalar REAL(8) function.  The selector is already narrowed by the
+        !! source arm; no dynamic type is perturbed or guessed here.
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: call_index, arm_index
+        type(call_or_subscript_node), intent(in) :: node
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+        integer, intent(out) :: result_expr
+        type(select_type_dispatch_query_t) :: dispatch
+        type(select_type_generic_dispatch_query_t) :: generic
+        type(select_type_generic_candidate_query_t) :: candidate
+        type(program_unit_query_t) :: unit
+        integer :: i, selected, matches, actual_index, receiver
+        integer, allocatable :: args(:)
+        character(len=64), allocatable :: arg_names(:)
+        character(len=:), allocatable :: implementation, reason
+        logical :: found_function
+
+        result_expr = 0
+        dispatch = query_select_type_dispatch(arena, arm_index, call_index)
+        if (.not. dispatch%found .or. dispatch%is_class_default .or. &
+            dispatch%is_dynamic_receiver .or. dispatch%is_ownership_changing) then
+            call refuse_select_type_generic(arena, status, call_index, &
+                dispatch%refusal_reason)
+            return
+        end if
+        if (dispatch%is_deferred_binding) then
+            call refuse_select_type_generic(arena, status, call_index, &
+                "abstract/deferred generic binding has no callable implementation")
+            return
+        end if
+        if (.not. dispatch%is_generic_binding) then
+            call refuse_select_type_generic(arena, status, call_index, &
+                "FortFront did not prove a type-bound generic binding")
+            return
+        end if
+
+        generic = query_select_type_generic_dispatch(arena, arm_index, call_index)
+        if (generic%is_pointer_boundary .or. generic%is_allocatable_boundary .or. &
+            generic%is_dynamic_receiver .or. generic%is_array_receiver) then
+            call refuse_select_type_generic(arena, status, call_index, &
+                generic%refusal_reason)
+            return
+        end if
+        if (.not. allocated(node%arg_indices) .or. size(node%arg_indices) /= 1) then
+            call refuse_select_type_generic(arena, status, call_index, &
+                "exactly one scalar REAL(8) actual is required")
+            return
+        end if
+        actual_index = generic_actual_value_index(arena, node%arg_indices(1))
+        if (.not. scalar_real8_actual(arena, actual_index, proc)) then
+            call refuse_select_type_generic(arena, status, call_index, &
+                "generic actual must be scalar REAL(8) with no conversion")
+            return
+        end if
+
+        selected = 0
+        matches = 0
+        if (allocated(generic%candidates)) then
+            do i = 1, size(generic%candidates)
+                if (.not. scalar_real_generic_candidate(generic%candidates(i))) cycle
+                matches = matches + 1
+                selected = i
+            end do
+        end if
+        if (matches /= 1) then
+            if (matches > 1) then
+                reason = "more than one scalar REAL(8) generic specific matches"
+            else if (allocated(generic%refusal_reason) .and. &
+                    len_trim(generic%refusal_reason) > 0) then
+                reason = trim(generic%refusal_reason)//"; candidates="// &
+                    itoa(generic_candidate_count(generic))
+            else
+                reason = "no exact scalar REAL(8) generic specific matches"
+            end if
+            call refuse_select_type_generic(arena, status, call_index, reason)
+            return
+        end if
+
+        candidate = generic%candidates(selected)
+        if (candidate%has_global_mutable_state) then
+            call refuse_select_type_generic(arena, status, call_index, &
+                "selected generic implementation reads active global mutable state")
+            return
+        end if
+        implementation = trim(candidate%implementation)
+        if (len_trim(implementation) == 0) implementation = &
+            trim(candidate%procedure_name)
+        call find_function_unit(arena, implementation, unit, found_function)
+        if (.not. found_function) then
+            call refuse_select_type_generic(arena, status, call_index, &
+                "selected generic implementation is not a same-file function")
+            return
+        end if
+
+        receiver = proc%add_expr(expr_var(trim(dispatch%selector_name)))
+        if (candidate%pass_arg) then
+            if (allocated(candidate%pass_name) .and. &
+                len_trim(candidate%pass_name) > 0) then
+                call lower_named_pass_arguments(arena, node%arg_indices, &
+                    trim(dispatch%binding_name), proc, unit, candidate%pass_name, &
+                    receiver, args, arg_names, status)
+            else
+                allocate (args(2), arg_names(2))
+                arg_names = ""
+                args(1) = receiver
+                args(2) = lower_actual(arena, node%arg_indices(1), proc, &
+                    arg_names(2), status)
+            end if
+        else
+            allocate (args(1), arg_names(1))
+            args(1) = lower_actual(arena, node%arg_indices(1), proc, &
+                arg_names(1), status)
+        end if
+        if (.not. status%ok) return
+        result_expr = proc%add_expr_call(implementation, args, arg_names)
+    end subroutine lower_select_type_generic_function_call
+
+    logical function scalar_real_generic_candidate(candidate) result(found)
+        type(select_type_generic_candidate_query_t), intent(in) :: candidate
+        integer :: i, nonpass
+
+        found = .false.
+        if (.not. candidate%found .or. .not. candidate%pass_metadata_resolved) return
+        if (.not. candidate%signature%found .or. .not. candidate%signature%is_function .or. &
+            .not. candidate%signature%result_category_known .or. &
+            .not. same_callback_name(candidate%signature%result_category, "real") .or. &
+            .not. candidate%signature%result_kind_known .or. &
+            candidate%signature%result_kind_value /= 8 .or. &
+            .not. candidate%signature%result_rank_known .or. &
+            candidate%signature%result_rank /= 0) return
+        nonpass = 0
+        do i = 1, candidate%signature%dummy_count
+            if (candidate%pass_arg .and. i == candidate%pass_position) cycle
+            nonpass = nonpass + 1
+            if (.not. candidate%signature%dummies(i)%type_known .or. &
+                .not. candidate%signature%dummies(i)%category_known .or. &
+                .not. same_callback_name(candidate%signature%dummies(i)%type_category, "real") .or. &
+                .not. candidate%signature%dummies(i)%kind_known .or. &
+                candidate%signature%dummies(i)%kind_value /= 8 .or. &
+                .not. candidate%signature%dummies(i)%rank_known .or. &
+                candidate%signature%dummies(i)%rank /= 0 .or. &
+                .not. candidate%signature%dummies(i)%has_intent .or. &
+                .not. same_callback_name(candidate%signature%dummies(i)%intent, "in") .or. &
+                candidate%signature%dummies(i)%is_optional .or. &
+                candidate%signature%dummies(i)%is_value) return
+        end do
+        found = nonpass == 1
+    end function scalar_real_generic_candidate
+
+    integer function generic_candidate_count(generic) result(count)
+        type(select_type_generic_dispatch_query_t), intent(in) :: generic
+        count = 0
+        if (allocated(generic%candidates)) count = size(generic%candidates)
+    end function generic_candidate_count
+
+    integer function generic_actual_value_index(arena, actual_index) result(value_index)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: actual_index
+        value_index = actual_index
+        if (actual_index <= 0 .or. actual_index > arena%size) return
+        if (.not. arena%has_node_at(actual_index)) return
+        select type (node => arena%entries(actual_index)%node)
+            type is (assignment_node)
+            value_index = node%value_index
+        class default
+        end select
+    end function generic_actual_value_index
+
+    logical function scalar_real8_actual(arena, actual_index, proc) result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: actual_index
+        type(fad_proc_t), intent(in) :: proc
+        type(resolved_type_query_t) :: resolved
+        integer :: declaration_index
+        character(len=:), allocatable :: type_name
+
+        found = .false.
+        resolved = query_resolved_type(arena, actual_index)
+        if (resolved%found) then
+            found = resolved%type_kind == TREAL .and. resolved%kind_value == 8 .and. &
+                resolved%rank == 0
+            if (found) return
+        end if
+        if (.not. arena%has_node_at(actual_index)) return
+        select type (node => arena%entries(actual_index)%node)
+            type is (identifier_node)
+            declaration_index = proc%decl_index(node%name)
+            if (declaration_index <= 0 .or. proc%decls(declaration_index)%is_array) return
+            if (.not. allocated(proc%decls(declaration_index)%type_name)) return
+            type_name = lower_ascii(trim(proc%decls(declaration_index)%type_name))
+            found = type_name == "real(8)" .or. type_name == "real(kind=8)"
+        class default
+        end select
+    end function scalar_real8_actual
+
+    subroutine refuse_select_type_generic(arena, status, call_index, reason)
+        type(ast_arena_t), intent(in) :: arena
+        type(lower_status_t), intent(inout) :: status
+        integer, intent(in) :: call_index
+        character(len=*), intent(in) :: reason
+        status%ok = .false.
+        status%message = "unsupported SELECT TYPE type-bound generic at line "// &
+            itoa(node_line(arena, call_index))//": "//trim(reason)
+    end subroutine refuse_select_type_generic
 
     subroutine lower_polymorphic_function_dispatch(arena, node, proc, query, &
             status, result_expr, receiver_expr, receiver_alias)

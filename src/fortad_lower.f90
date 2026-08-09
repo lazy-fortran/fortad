@@ -10,7 +10,8 @@ module fortad_lower
         ast_arena_t, program_unit_query_t, query_program_unit, &
         query_declaration, declaration_query_t, binary_op_node, &
         defined_operator_query_t, query_defined_operator_into, INPUT_MODE_STANDARD
-    use fortfront, only: generic_call_query_t, query_generic_call
+    use fortfront, only: generic_call_query_t, query_generic_call, &
+        type_bound_call_query_t, query_type_bound_call
     use fortad_call_boundaries, only: has_same_file_call, &
         validate_direct_call_boundaries
     use frontend_compiler_queries, only: global_reference_query_t, &
@@ -491,14 +492,19 @@ contains
     logical function contains_generic_call(arena) result(found)
         type(ast_arena_t), intent(in) :: arena
         type(generic_call_query_t) :: query
+        type(type_bound_call_query_t) :: type_bound
         integer :: i
 
         found = .false.
         do i = 1, arena%size
             if (.not. arena%has_node_at(i)) cycle
             query = query_generic_call(arena, i)
-            if (.not. query%found) cycle
-            if (query%is_generic) then
+            if (query%found .and. query%is_generic) then
+                found = .true.
+                return
+            end if
+            type_bound = query_type_bound_call(arena, i)
+            if (type_bound%found .and. type_bound%is_generic) then
                 found = .true.
                 return
             end if
@@ -525,11 +531,11 @@ contains
                 ! unsafe operators must not enter NVHPC's analyzer just to be
                 ! refused again.
                 if (query%found .and. query%is_defined_operator .and. &
-                        .not. query%is_ambiguous .and. &
-                        .not. query%has_conversion .and. &
-                        .not. query%has_pointer_operand .and. &
-                        .not. query%has_global_mutable_state .and. &
-                        .not. query%has_invalid_arity) then
+                    .not. query%is_ambiguous .and. &
+                    .not. query%has_conversion .and. &
+                    .not. query%has_pointer_operand .and. &
+                    .not. query%has_global_mutable_state .and. &
+                    .not. query%has_invalid_arity) then
                     found = .true.
                     return
                 end if
@@ -598,8 +604,9 @@ contains
             kind = "SAVE"
         end if
         status%ok = .false.
-        status%message = "unsupported active global state '"//trim(reference%name)// &
-            "' ("//trim(kind)//") at line "//line_text(line)// &
+        status%message = "unsupported active global mutable state '"// &
+            trim(reference%name)//"' ("//trim(kind)//") at line "// &
+            line_text(line)// &
             "; global mutable state requires an explicit derivative rule"
     end subroutine refuse_global_state
 
@@ -746,7 +753,10 @@ contains
         type(inline_status_t) :: ist
         type(lower_status_t) :: one
         type(program_unit_query_t) :: unit
+        type(global_reference_query_t), allocatable :: globals(:)
+        type(declaration_query_t) :: global_decl
         integer :: round, added, i, n_others
+        integer :: j
 
         status%ok = .true.
         status%message = ""
@@ -765,6 +775,14 @@ contains
                 unit = query_program_unit(arena, i)
                 if (.not. unit%found) cycle
                 if (.not. needed(proc, others, n_others, unit%name)) cycle
+                globals = query_active_global_references(arena, i)
+                do j = 1, size(globals)
+                    global_decl = query_declaration(arena, &
+                        globals(j)%declaration_node_index)
+                    if (global_decl%is_parameter) cycle
+                    call refuse_global_state(arena, globals(j), status)
+                    return
+                end do
                 if (trim(unit%unit_kind) == "function") then
                     call lower_function(arena, unit, source, one_proc, one)
                 else
