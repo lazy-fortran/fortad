@@ -362,6 +362,7 @@ contains
         logical :: named
         integer :: i, j, n_actual, n_formal, next_formal, formal, dummy_decl
         logical :: indexed_read_only
+        logical :: read_only_formal, formal_is_array
 
         n_binds = 0
         n_actual = size(actuals)
@@ -437,13 +438,16 @@ contains
                 end if
                 if (require_plain) then
                     indexed_read_only = .false.
+                    read_only_formal = .false.
+                    formal_is_array = .false.
+                    dummy_decl = callee%decl_index(callee%params(i))
+                    if (dummy_decl > 0) then
+                        read_only_formal = callee%decls(dummy_decl)%intent == &
+                            FAD_INTENT_IN
+                        formal_is_array = callee%decls(dummy_decl)%is_array
+                    end if
                     if (target%exprs(actuals(formal_actual(i)))%kind == FAD_INDEX) then
-                        dummy_decl = callee%decl_index(callee%params(i))
-                        if (dummy_decl > 0) then
-                            if (callee%decls(dummy_decl)%intent == FAD_INTENT_IN) then
-                                indexed_read_only = .true.
-                            end if
-                        end if
+                        if (read_only_formal) indexed_read_only = .true.
                     else if (target%exprs(actuals(formal_actual(i)))%kind == &
                             FAD_VAR .and. index(trim(target%exprs( &
                             actuals(formal_actual(i)))%text), "%") > 0) then
@@ -453,19 +457,38 @@ contains
                         ! intent(IN) dummy can bind to it directly; a
                         ! writable dummy keeps the caller-owned path as its
                         ! renamed spelling for the inlined body.
-                        dummy_decl = callee%decl_index(callee%params(i))
-                        if (dummy_decl > 0) then
-                            if (callee%decls(dummy_decl)%intent == FAD_INTENT_IN) then
-                                indexed_read_only = .true.
-                            else
-                                binds(n_binds)%renamed = trim(target%exprs( &
-                                    actuals(formal_actual(i)))%text)
-                            end if
+                        if (read_only_formal) then
+                            indexed_read_only = .true.
+                        else
+                            binds(n_binds)%renamed = trim(target%exprs( &
+                                actuals(formal_actual(i)))%text)
                         end if
                     end if
                     if (indexed_read_only) then
                         binds(n_binds)%expr = actuals(formal_actual(i))
                         binds(n_binds)%renamed = ""
+                    else if (read_only_formal .and. .not. formal_is_array .and. &
+                            safe_scalar_value_actual(target, &
+                            actuals(formal_actual(i)))) then
+                        ! A computed scalar is a valid actual for INTENT(IN):
+                        ! it has no caller storage for the callee to mutate.
+                        ! Keep its expression index so differentiation sees
+                        ! every active leaf in the original caller expression.
+                        binds(n_binds)%expr = actuals(formal_actual(i))
+                        binds(n_binds)%renamed = ""
+                    else if (read_only_formal .and. &
+                            target%exprs(actuals(formal_actual(i)))%kind /= FAD_VAR) then
+                        status%ok = .false.
+                        if (formal_is_array) then
+                            status%message = "inlining "//trim(callee%name)// &
+                                " accepts only a whole-array or fixed-element "// &
+                                "storage actual for an array INTENT(IN) dummy"
+                        else
+                            status%message = "inlining "//trim(callee%name)// &
+                                " accepts only a side-effect-free scalar expression "// &
+                                "for a scalar INTENT(IN) dummy"
+                        end if
+                        return
                     else if (len_trim(binds(n_binds)%renamed) > 0) then
                         binds(n_binds)%expr = 0
                     else if (target%exprs(actuals(formal_actual(i)))%kind /= FAD_VAR) then
@@ -541,6 +564,41 @@ contains
             return
         end do
     end function optional_actual
+
+    recursive logical function safe_scalar_value_actual(p, idx) result(yes)
+        !! A bounded value actual for a scalar INTENT(IN) dummy.
+        !!
+        !! Only intrinsic arithmetic is admitted here.  A user procedure call
+        !! could have side effects and a callee may read its dummy more than
+        !! once after substitution; retaining that expression as a repeated
+        !! tree would change observable behavior.  Storage-bearing array
+        !! expressions, callbacks, and ambiguous mappings stay outside this
+        !! value-only slice and are refused at the call boundary.
+        type(fad_proc_t), intent(in) :: p
+        integer, intent(in) :: idx
+        integer :: i
+
+        yes = .false.
+        if (idx <= 0 .or. idx > p%n_exprs) return
+        select case (p%exprs(idx)%kind)
+        case (FAD_CONST, FAD_VAR)
+            yes = .true.
+        case (FAD_BINOP)
+            if (.not. allocated(p%exprs(idx)%args)) return
+            if (size(p%exprs(idx)%args) /= 2) return
+            do i = 1, size(p%exprs(idx)%args)
+                if (.not. safe_scalar_value_actual(p, p%exprs(idx)%args(i))) &
+                    return
+            end do
+            yes = .true.
+        case (FAD_UNOP)
+            if (.not. allocated(p%exprs(idx)%args)) return
+            if (size(p%exprs(idx)%args) /= 1) return
+            yes = safe_scalar_value_actual(p, p%exprs(idx)%args(1))
+        case default
+            return
+        end select
+    end function safe_scalar_value_actual
 
     logical function bound(binds, n_binds, name) result(yes)
         type(binding_t), intent(in) :: binds(:)
