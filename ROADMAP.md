@@ -152,13 +152,13 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files. The reproducible queue contains 1,097 rows: 1,023
+candidate files. The reproducible queue contains 1,093 rows: 1,019
 pure-Fortran and 74 mixed-language candidates. Pure-Fortran status is 63
 runnable, 134 expected refusals, 34 invalid-upstream closures, and 178 other
-bounded FortAD feature/dependency classifications: 409 of 1,432 strict
-pure-Fortran candidates are classified (28.6%), while 1,023 remain in the
-pure-Fortran queue. Across the whole corpus, 917 of 2,014 candidates are
-accounted for (45.5%). The 74 mixed-language rows remain a separate dependency
+bounded FortAD feature/dependency classifications: 413 of 1,432 strict
+pure-Fortran candidates are classified (28.8%), while 1,019 remain in the
+pure-Fortran queue. Across the whole corpus, 921 of 2,014 candidates are
+accounted for (45.8%). The 74 mixed-language rows remain a separate dependency
 lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -342,10 +342,10 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `717daec`
+- FortAD `b360b28`
 - FortFront `edcb532b`
 - FFC `2f6cc37`
-- fortad-bench `0e6e1f0`
+- fortad-bench `76c599f`
 - fo `ba35fe4`
 
 - FortFront `edcb532b`, including abstract/deferred hierarchy, concrete-only
@@ -653,12 +653,12 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   mapping. JVP/VJP generated-source, numerical, and refusal oracles pass;
   unresolved, generic, alias, pointer, allocatable, array, global, and
   ownership-changing paths remain precise refusals.
-- fortad-bench `0e6e1f0` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
+- fortad-bench `76c599f` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
-  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34/next35/next36/next37/next38/next39/next40/next41/next42 evidence contracts. The reproducible queue
-  contains 1,097 rows: 1,023 pure-Fortran and 74 mixed-language candidates.
-  917 of 2,014 corpus candidates are accounted for, including 409 of 1,432
-  strict pure-Fortran candidates (28.6%); 1,023 pure-Fortran candidates
+  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34/next35/next36/next37/next38/next39/next40/next41/next42/next43 evidence contracts. The reproducible queue
+  contains 1,093 rows: 1,019 pure-Fortran and 74 mixed-language candidates.
+  921 of 2,014 corpus candidates are accounted for, including 413 of 1,432
+  strict pure-Fortran candidates (28.8%); 1,019 pure-Fortran candidates
   remain in the queue. The reproducible Enzyme comparison now has
   a common size-sweep harness for N=100 through 1,000,000 with median/min/max
   timing and provenance artifacts. The latest sweep contains 125 measured rows
@@ -704,6 +704,10 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   `set04/v012`; all four have fresh automatic-fetch provenance, 12/12 passing
   Tapenade probes, exact hashes, independent JVP/VJP oracles, and explicit
   derived-interface or active-I/O boundaries.
+  The `next43` shard adds `set04/v018`, `set04/v043`, `set07/v496`, and
+  `set10/lh238`; all four have fresh automatic-fetch provenance, 12/12 passing
+  Tapenade probes, exact hashes, independent JVP/VJP oracles, and explicit
+  generated-interface, active-I/O, or program-unit boundaries.
 
 The next feature order has four open steps. The callback-flow, bounded
 abstract-dispatch-provenance, fixed literal polymorphic owner-array, bounded
@@ -883,7 +887,7 @@ The current FortFront `main` handoff is `edcb532b`, which includes the
       polymorphic allocatable derived object. Its focused GNU and NVHPC replay
       oracles pass and report dynamic-type, compatibility, ownership, alias,
       global-state, and control-flow facts.
-- FortAD `717daec` now consumes FortFront's exact same-file unary and binary
+- FortAD `b360b28` now consumes FortFront's exact same-file unary and binary
       defined-operator facts through the NVHPC-safe out-argument query path.
       The selected procedure is lowered as an ordinary same-file call and
       inlined; independent GNU JVP/VJP numerical and refusal oracles pass.
@@ -894,8 +898,10 @@ The current FortFront `main` handoff is `edcb532b`, which includes the
       bodies remain explicit refusals. It now also replays one fixed scalar
       polymorphic allocatable component through concrete `SOURCE=`,
       `MOVE_ALLOC`, and `SELECT TYPE` facts, with independent GNU numerical
-      and refusal oracles. NVHPC still exposes a target-level
-      failure in the full FortAD oracle lane and remains open.
+      and refusal oracles. The bounded polymorphic component MOVE_ALLOC oracle
+      now passes with the real JVP and VJP under GNU and NVHPC 26.5. The full
+      NVHPC execution lane still has unrelated target-level crashes and remains
+      open.
 - [ ] FortFront `main` is green on Windows. The latest procedure-name
       observation is run
       [31144062538](https://github.com/lazy-fortran/fortfront/actions/runs/31144062538),
@@ -931,7 +937,7 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `717daec`. Its GNU behavioral
+The implementation snapshot is FortAD code at `b360b28`. Its GNU behavioral
 gate is green (410 build targets, 409 derivative targets, 96/96 tests).
 `fo lint` still has four short-circuit hazards and 108 array-temporary
 warnings. Feature scope is recorded in the Phase 7 and 8
