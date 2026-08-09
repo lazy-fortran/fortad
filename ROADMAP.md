@@ -140,13 +140,13 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files. The reproducible queue contains 1,129 rows: 1,055
+candidate files. The reproducible queue contains 1,125 rows: 1,051
 pure-Fortran and 74 mixed-language candidates. Pure-Fortran status is 63
-runnable, 134 expected refusals, 34 invalid-upstream closures, and 146 other
-bounded FortAD feature/dependency classifications: 377 of 1,432 strict
-pure-Fortran candidates are classified (26.3%), while 1,055 remain in the
-pure-Fortran queue. Across the whole corpus, 885 of 2,014 candidates are
-accounted for (43.9%). The 74 mixed-language rows remain a separate dependency
+runnable, 134 expected refusals, 34 invalid-upstream closures, and 150 other
+bounded FortAD feature/dependency classifications: 381 of 1,432 strict
+pure-Fortran candidates are classified (26.6%), while 1,051 remain in the
+pure-Fortran queue. Across the whole corpus, 889 of 2,014 candidates are
+accounted for (44.1%). The 74 mixed-language rows remain a separate dependency
 lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -333,7 +333,7 @@ historical evidence only:
 - FortAD `f9d2ecb`
 - FortFront `ae75547c`
 - FFC `2f6cc37`
-- fortad-bench `7ecdba6`
+- fortad-bench `606857d`
 
 - FortFront `ae75547c`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
@@ -626,12 +626,12 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   mapping. JVP/VJP generated-source, numerical, and refusal oracles pass;
   unresolved, generic, alias, pointer, allocatable, array, global, and
   ownership-changing paths remain precise refusals.
-- fortad-bench `7ecdba6` (on top of `fc4e3dd`, `9c2a694`, `e3db0e7`, and `bd97975`), including the
+- fortad-bench `606857d` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
   next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34 evidence contracts. The reproducible queue
-  contains 1,129 rows: 1,055 pure-Fortran and 74 mixed-language candidates.
-  885 of 2,014 corpus candidates are accounted for, including 377 of 1,432
-  strict pure-Fortran candidates (26.3%); 1,055 pure-Fortran candidates
+  contains 1,125 rows: 1,051 pure-Fortran and 74 mixed-language candidates.
+  889 of 2,014 corpus candidates are accounted for, including 381 of 1,432
+  strict pure-Fortran candidates (26.6%); 1,051 pure-Fortran candidates
   remain in the queue. The reproducible Enzyme comparison now has
   a common size-sweep harness for N=100 through 1,000,000 with median/min/max
   timing and provenance artifacts. The latest sweep contains 115 measured rows
@@ -647,6 +647,10 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   The `next34` shard adds `examples/big01/v235`, `set04/lh127`, `set04/lh134`,
   and `set04/lh146`; all have fresh Tapenade three-mode probes and independent
   refusal oracles for global mutable state or allocatable lifetime.
+  The `next35` shard adds `set04/v046`, `set06/v367`, `set06/v383`, and
+  `set11/lh050`; all 12 Tapenade probes pass and the cases remain explicit
+  FortAD boundaries for invalid generated interfaces, global state, unsupported
+  active logical expressions, or complex dependent inference.
 
 The next feature order has four steps. The callback-flow, bounded
 abstract-dispatch-provenance, fixed literal polymorphic owner-array, bounded
