@@ -83,7 +83,7 @@ program test_select_type_component_dispatch_oracle
     call expect_refusal(pointer_source(), "pointer component", "pointer")
     call expect_refusal(allocatable_source(), "allocatable component", &
         "ownership")
-    call expect_refusal(array_source(), "array component", "component receiver")
+    call expect_refusal(array_source(), "array component", "array")
     call expect_refusal(alias_source(), "selector alias", "alias")
     call expect_refusal(nested_source(), "nested call", "single direct")
     call expect_refusal(missing_source(), "unresolved binding", "unresolved")
