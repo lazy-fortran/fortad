@@ -6206,7 +6206,17 @@ contains
         if (idx <= 0) return
         if (idx > adjoint%n_exprs) return
         select case (adjoint%exprs(idx)%kind)
-        case (FAD_VAR, FAD_INDEX)
+        case (FAD_VAR)
+            call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
+            di = primal%decl_index_of(base)
+            if (di > 0) then
+                if (primal%decls(di)%is_array) then
+                    found = di
+                    return
+                end if
+            end if
+        case (FAD_INDEX)
+            if (.not. adjoint%exprs(idx)%is_array_section) return
             call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
             di = primal%decl_index_of(base)
             if (di > 0) then
@@ -6272,6 +6282,7 @@ contains
         out = 0
         if (idx <= 0 .or. idx > src%n_exprs) return
         e%kind = src%exprs(idx)%kind
+        e%is_array_section = src%exprs(idx)%is_array_section
         if (e%kind == FAD_VAR .or. e%kind == FAD_INDEX) then
             call component_snapshot_lookup(ssa, emit_expr(src, idx), name)
             if (len_trim(name) > 0) then
