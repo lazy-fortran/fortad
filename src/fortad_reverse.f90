@@ -1246,8 +1246,23 @@ contains
                 .not. is_concrete_allocatable_component_path(primal, target)) then
                 status%ok = .false.
                 status%message = "reverse mode: move_alloc component owners require "// &
-                    "concrete scalar REAL allocatable components"
+                    "concrete rank-one or scalar REAL allocatable components"
                 return
+            end if
+            if (allocatable_component_rank(primal, source) /= &
+                allocatable_component_rank(primal, target)) then
+                status%ok = .false.
+                status%message = "reverse mode: move_alloc component owners require "// &
+                    "matching component ranks"
+                return
+            end if
+            if (allocatable_component_rank(primal, source) == 1) then
+                if (.not. fixed_literal_component_shape(primal, allocate_at)) then
+                    status%ok = .false.
+                    status%message = "reverse mode: rank-one component MOVE_ALLOC "// &
+                        "requires one literal allocation shape"
+                    return
+                end if
             end if
             source_di = primal%decl_index(fad_base_name(source))
             target_di = primal%decl_index(fad_base_name(target))
@@ -1387,7 +1402,7 @@ contains
 
     logical function is_concrete_allocatable_component_path(primal, text) &
             result(found)
-        !! The concrete component lifetime slice is scalar REAL only.
+        !! The concrete component lifetime slice is scalar or rank-one REAL.
         type(fad_proc_t), intent(in) :: primal
         character(len=*), intent(in) :: text
         integer :: i
@@ -1403,10 +1418,38 @@ contains
                 .not. primal%exprs(i)%component_is_pointer .and. &
                 .not. primal%exprs(i)%component_is_target .and. &
                 .not. primal%exprs(i)%component_is_global .and. &
-                primal%exprs(i)%component_rank == 0
+                (primal%exprs(i)%component_rank == 0 .or. &
+                primal%exprs(i)%component_rank == 1)
             return
         end do
     end function is_concrete_allocatable_component_path
+
+    integer function allocatable_component_rank(primal, text) result(rank)
+        type(fad_proc_t), intent(in) :: primal
+        character(len=*), intent(in) :: text
+        integer :: i
+
+        rank = -1
+        do i = 1, primal%n_exprs
+            if (.not. primal%exprs(i)%is_component_path) cycle
+            if (.not. same_component_name(emit_expr(primal, i), text)) cycle
+            rank = component_path_rank(primal%exprs(i), emit_expr(primal, i))
+            return
+        end do
+    end function allocatable_component_rank
+
+    logical function fixed_literal_component_shape(primal, stmt_index) result(found)
+        !! A rank-one component lifetime has one statically known extent.
+        type(fad_proc_t), intent(in) :: primal
+        integer, intent(in) :: stmt_index
+
+        found = .false.
+        if (stmt_index <= 0 .or. stmt_index > primal%n_stmts) return
+        if (.not. allocated(primal%stmts(stmt_index)%allocation_args)) return
+        if (size(primal%stmts(stmt_index)%allocation_args) /= 2) return
+        found = integer_literal_expr(primal, &
+            primal%stmts(stmt_index)%allocation_args(2))
+    end function fixed_literal_component_shape
 
     logical function array_element_component(text) result(found)
         character(len=*), intent(in) :: text
@@ -2585,6 +2628,10 @@ contains
         else if (ps%allocation_source > 0) then
             s%allocation_source = copy_renamed(primal, adjoint, &
                 ps%allocation_source, ssa)
+        else if (component_owner .and. allocatable_component_rank(primal, &
+                owner_text) == 1) then
+            s%allocation_mold = copy_renamed(primal, adjoint, &
+                ps%allocation_args(1), ssa)
         else if (.not. component_owner) then
             s%allocation_mold = adjoint%add_expr(expr_var(trim(owner)))
         end if

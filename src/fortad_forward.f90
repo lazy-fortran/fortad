@@ -1407,12 +1407,21 @@ contains
         type(fad_stmt_t) :: s
         integer :: i, di, ignored, target_expr, dexpr
         character(len=:), allocatable :: target_text
+        integer :: component_rank
         logical :: target_active, source_active
 
         target_text = emit_expr(primal, ps%allocation_args(1))
         di = primal%decl_index_of(target_text)
+        component_rank = -1
         if (index(trim(target_text), "%") > 0) then
             target_active = component_path_is_active(primal, target_text, active)
+            do i = 1, primal%n_exprs
+                if (.not. primal%exprs(i)%is_component_path) cycle
+                if (same_component_name(emit_expr(primal, i), target_text)) then
+                    component_rank = primal%exprs(i)%component_rank
+                    exit
+                end if
+            end do
         else
             target_active = .false.
             if (di > 0) target_active = decl_active(primal, di, active)
@@ -1442,12 +1451,14 @@ contains
         end if
         if (target_active) then
             ignored = tangent%add_stmt(s)
-            if (s%allocation_source == 0) then
+            if (s%allocation_source == 0 .and. component_rank /= 1) then
                 s%kind = FAD_ASSIGN
                 s%target = tangent_name(target_text, suffix, vector)
                 s%value = tangent%add_expr(expr_const( &
                     "0.0"//tangent%real_suffix))
                 ignored = tangent%add_stmt(s)
+            else if (s%allocation_source == 0 .and. component_rank == 1) then
+                s%allocation_mold = tangent%add_expr(expr_var(target_text))
             end if
         end if
 
@@ -1981,7 +1992,8 @@ contains
                 .not. primal%exprs(i)%component_is_polymorphic .and. &
                 .not. primal%exprs(i)%component_is_pointer .and. &
                 .not. primal%exprs(i)%component_is_target .and. &
-                primal%exprs(i)%component_rank == 0
+                (primal%exprs(i)%component_rank == 0 .or. &
+                primal%exprs(i)%component_rank == 1)
             return
         end do
     end function concrete_allocatable_component_path

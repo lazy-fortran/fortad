@@ -136,6 +136,7 @@ contains
         type(procedure_callback_flow_query_t) :: callback_flow
         type(nullify_query_t) :: nullify_info
         integer :: ignored, k
+        logical :: allow_lifetime_owner
 
         status%ok = .true.
         if (idx <= 0 .or. idx > arena%size) return
@@ -320,8 +321,14 @@ contains
                 call lower_type_bound_subroutine(arena, idx, proc, s, status)
                 if (.not. status%ok) return
             else
+                allow_lifetime_owner = .false.
+                if (same_name(n%name, "move_alloc")) then
+                    if (allocated(n%arg_indices)) then
+                        allow_lifetime_owner = size(n%arg_indices) == 2
+                    end if
+                end if
                 call lower_call_arguments_into(arena, n%arg_indices, proc, s, &
-                    status)
+                    status, allow_lifetime_owner)
                 if (.not. status%ok) return
             end if
             if (same_name(n%name, "move_alloc") .and. &
@@ -1607,7 +1614,8 @@ contains
             return
         end if
         allocate (s%allocation_args(1))
-        s%allocation_args(1) = lower_expr(arena, node%var_indices(1), proc, status)
+        s%allocation_args(1) = lower_expr_with_context(arena, &
+            node%var_indices(1), proc, status, .true.)
         if (.not. status%ok) return
         if (.not. allocation_object_declared(proc, s%allocation_args(1))) then
             block
@@ -1685,7 +1693,8 @@ contains
             return
         end if
         allocate (s%allocation_args(1))
-        s%allocation_args(1) = lower_expr(arena, node%var_indices(1), proc, status)
+        s%allocation_args(1) = lower_expr_with_context(arena, &
+            node%var_indices(1), proc, status, .true.)
         if (.not. status%ok) return
         if (.not. allocation_object_declared(proc, s%allocation_args(1))) then
             block
@@ -2131,7 +2140,7 @@ contains
         ! A scalar whole allocatable component target uses ordinary Fortran
         ! assignment for the descriptor transition. Array-valued operations
         ! remain refused by the component validator.
-        call validate_component_reference(arena, idx, status)
+        call validate_component_reference(arena, idx, status, .false.)
         if (.not. status%ok) return
 
         if (idx <= 0 .or. idx > arena%size) then
@@ -2232,11 +2241,22 @@ contains
     end function render_index
 
     recursive integer function lower_expr(arena, idx, proc, status) result(out)
+        type(ast_arena_t), intent(in) :: arena
+        integer, intent(in) :: idx
+        type(fad_proc_t), intent(inout) :: proc
+        type(lower_status_t), intent(inout) :: status
+
+        out = lower_expr_with_context(arena, idx, proc, status, .false.)
+    end function lower_expr
+
+    recursive integer function lower_expr_with_context(arena, idx, proc, status, &
+            allow_lifetime_owner) result(out)
         !! Lower an expression, returning its index in the IR expression arena.
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: idx
         type(fad_proc_t), intent(inout) :: proc
         type(lower_status_t), intent(inout) :: status
+        logical, intent(in) :: allow_lifetime_owner
         integer, allocatable :: args(:)
         character(len=64), allocatable :: arg_names(:)
         type(fad_expr_t) :: e
@@ -2256,7 +2276,7 @@ contains
             return
         end if
 
-        call validate_component_reference(arena, idx, status)
+        call validate_component_reference(arena, idx, status, allow_lifetime_owner)
         if (.not. status%ok) return
 
         if (is_section_node(arena, idx)) then
@@ -2356,7 +2376,7 @@ contains
             status%message = "unsupported expression at line "// &
                 itoa(node_line(arena, idx))
         end select
-    end function lower_expr
+    end function lower_expr_with_context
 
     subroutine annotate_passed_procedure_expression(arena, idx, expr, status)
         !! Attach one proven passed-procedure target to a function call.  The
@@ -2850,7 +2870,8 @@ contains
         end do
     end subroutine lower_call_arguments
 
-    subroutine lower_call_arguments_into(arena, arg_indices, proc, stmt, status)
+    subroutine lower_call_arguments_into(arena, arg_indices, proc, stmt, status, &
+            allow_lifetime_owner)
         !! Lower ordinary call actuals directly into the statement record.
         !! Avoiding an allocatable-array assignment here works around an
         !! nvfortran descriptor bug in the regular call lowering path.
@@ -2859,6 +2880,7 @@ contains
         type(fad_proc_t), intent(inout) :: proc
         type(fad_stmt_t), intent(inout) :: stmt
         type(lower_status_t), intent(inout) :: status
+        logical, intent(in) :: allow_lifetime_owner
         integer :: i
         character(len=64) :: keyword
 
@@ -2869,13 +2891,14 @@ contains
         stmt%call_arg_names = ""
         do i = 1, size(arg_indices)
             stmt%call_args(i) = lower_actual(arena, arg_indices(i), proc, &
-                keyword, status)
+                keyword, status, allow_lifetime_owner)
             if (.not. status%ok) return
             if (len_trim(keyword) > 0) stmt%call_arg_names(i) = keyword
         end do
     end subroutine lower_call_arguments_into
 
-    recursive integer function lower_actual(arena, idx, proc, keyword, status) &
+    recursive integer function lower_actual(arena, idx, proc, keyword, status, &
+            allow_lifetime_owner) &
             result(out)
         !! Extract a keyword's formal name, then lower its value expression.
         type(ast_arena_t), intent(in) :: arena
@@ -2883,10 +2906,16 @@ contains
         type(fad_proc_t), intent(inout) :: proc
         character(len=*), intent(out) :: keyword
         type(lower_status_t), intent(inout) :: status
+        logical, intent(in), optional :: allow_lifetime_owner
         integer :: value_idx
+        logical :: permit_lifetime_owner
 
         out = 0
         keyword = ""
+        permit_lifetime_owner = .false.
+        if (present(allow_lifetime_owner)) then
+            permit_lifetime_owner = allow_lifetime_owner
+        end if
         value_idx = idx
         if (idx > 0) then
             if (idx <= arena%size) then
@@ -2917,7 +2946,8 @@ contains
                 end if
             end if
         end if
-        out = lower_expr(arena, value_idx, proc, status)
+        out = lower_expr_with_context(arena, value_idx, proc, status, &
+            permit_lifetime_owner)
     end function lower_actual
 
     subroutine resolve_callback_call(arena, idx, fallback, actual_count, &
@@ -5156,14 +5186,17 @@ contains
         text = base//tail
     end function component_reference_text
 
-    subroutine validate_component_reference(arena, idx, status)
+    subroutine validate_component_reference(arena, idx, status, &
+            allow_lifetime_owner)
         !! Validate a component designator using FortFront's resolved path and
         !! storage facts.  The bounded allocatable-component slice accepts only
-        !! one scalar REAL component element of a concrete, non-aliased object;
-        !! one fixed owner index is allowed for its descriptor transition.
+        !! scalar or rank-one REAL component accesses of a concrete,
+        !! non-aliased object; one fixed owner index is allowed for a scalar
+        !! descriptor transition.
         type(ast_arena_t), intent(in) :: arena
         integer, intent(in) :: idx
         type(lower_status_t), intent(inout) :: status
+        logical, intent(in) :: allow_lifetime_owner
         type(component_path_query_t) :: path
         type(storage_query_t) :: storage, base_storage
         type(declaration_query_t) :: component_declaration
@@ -5259,11 +5292,17 @@ contains
                 "allocatable component rank greater than four is not supported", status)
             return
         end if
+        if (allow_lifetime_owner .and. component_rank > 1) then
+            call refuse_component(arena, idx, &
+                "component lifetime requires a scalar or rank-one concrete REAL "// &
+                "allocatable component", status)
+            return
+        end if
         if (component_rank == 0) then
             call validate_scalar_component_owner_index(arena, path, status)
             if (.not. status%ok) return
         end if
-        if (whole .and. component_rank > 0) then
+        if (whole .and. component_rank > 0 .and. .not. allow_lifetime_owner) then
             call refuse_component(arena, idx, &
                 "whole allocatable component assignment/read is not supported; use one element", &
                 status)
