@@ -104,15 +104,17 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current feature pins are FortAD `1326386`, FortFront `8da49474`, and
-fortad-bench `ea12ed8`; current `main` includes these feature commits plus
-documentation-only refreshes. The next49 evidence shard intentionally retains its
-historical probe pins (`2636206` and `6c27ca86`), and next50 retains
-(`65280f5` and `c48c3e8b`), so those results remain reproducible; current main
-heads are recorded here separately. FortAD has bounded `SPREAD` JVP and direct
-array-valued reverse-transpose support, and now consumes FortFront's bounded
-procedure-pointer `ASSOCIATED` state facts for a fixed same-scope callback
-guard. The new independent oracle checks compiled JVP/VJP values, finite
+The current feature pins are FortAD `8c764ff`, FortFront `a0e109d5`, and
+fortad-bench `33dff02`. The next49 evidence shard intentionally retains its
+historical probe pins (`2636206` and `6c27ca86`), next50 retains
+(`65280f5` and `c48c3e8b`), and next51 retains (`be82f5d` and `72bc7578`),
+so those results remain reproducible; current main heads are recorded here
+separately. FortAD has bounded `SPREAD` JVP and direct array-valued
+reverse-transpose support, and consumes FortFront's bounded procedure-pointer
+`ASSOCIATED` state facts for a fixed same-scope callback guard. It now also
+consumes exact formal/actual interface facts for a fixed same-file scalar
+`REAL(8)` callback or procedure pointer, preserving elemental JVP/VJP call
+shape. The independent oracles check compiled JVP/VJP values, finite
 differences, the adjoint identity, and named refusals. Active global mutable
 state, uncontrolled aliasing, unresolved dispatch, and changing callback
 ownership remain intentional product refusals.
@@ -125,7 +127,7 @@ checks central differences and the adjoint identity. Optional arrays,
 components, ownership-bearing arguments, active global mutable state, and
 unsafe aliasing remain outside the slice and retain source-local refusals.
 
-FortFront `c48c3e8b` exposes assumed-rank selector bounds identity and reports
+FortFront `a0e109d5` exposes assumed-rank selector bounds identity and reports
 unknown source rank explicitly. FortAD now consumes those facts for one direct
 `real(8)` `RANK (1)` arm: it cross-checks the source `(..)` bounds node before
 using the rank-one IR contract, and emits both JVP and VJP code. The independent
@@ -134,14 +136,15 @@ identity, and named dispatch, descriptor, alias, global-state, and unresolved
 fact refusals. Other runtime ranks, aliases, computed selectors, descriptor
 ownership, and mutable global state remain source-local refusals.
 
-FortFront `8da49474` also exposes formal procedure-interface signatures and
-explicit compatible, incompatible, and unresolved actual/formal states. FortAD
-now consumes those facts for one fixed same-file scalar `REAL(8)` function
-actual, or one same-file procedure pointer with one unconditional assignment,
-passed to a scalar procedure dummy. JVP and VJP inline the proven concrete
-target. Incompatible, unresolved, generic, ambiguous, aliased, ownership-
-changing, and active-global callback paths remain named refusals. The
-independent compiled oracle is
+FortFront `a0e109d5` also exposes formal procedure-interface signatures and
+explicit compatible, incompatible, and unresolved actual/formal states, plus
+per-specific `SELECT TYPE` generic/PASS metadata and concrete abstract/deferred
+binding provenance. FortAD consumes the interface facts for one fixed same-file
+scalar `REAL(8)` function actual, or one same-file procedure pointer with one
+unconditional assignment, passed to a scalar procedure dummy. JVP and VJP
+inline the proven concrete target. Incompatible, unresolved, generic,
+ambiguous, aliased, ownership-changing, and active-global callback paths remain
+named refusals. The independent compiled oracle is
 `test/test_passed_procedure_callback_oracle.f90`; it checks hand values,
 central finite differences, the adjoint identity, and refusal messages.
 
@@ -162,11 +165,14 @@ facts and refused when ownership or dynamic type is not tracked; the
 independent nested-component oracle verifies that no derivative source is
 emitted for that boundary.
 
-The bench currently records 1,037 of 2,014 total candidates (51.5%) and 529
-of 1,432 pure-Fortran Tapenade candidates (36.9%); 977 total candidates remain
-in the queue, including 903 pure-Fortran cases. Its latest shard is `next50`,
-which records 48 modern-feature procedure roots with independent source-map
-and refusal oracles.
+The bench currently records 1,085 of 2,014 total candidates (53.9%) and 577
+of 1,432 pure-Fortran Tapenade candidates (40.3%). The remaining queue is 929
+rows: 855 pure-Fortran and 74 mixed-language cases. Its latest shard is
+`next51`, which records 48 modern-feature procedure roots with four generated
+products, 44 explicit phase-specific refusals, and independent source-map or
+refusal oracles. The pure-Fortran breakdown is 64 runnable, 134 measured
+expected refusals, 34 invalid-upstream closures, 307 additional FortAD feature
+boundaries, and 38 other bounded evidence closures.
 
 ## Repository responsibilities
 
