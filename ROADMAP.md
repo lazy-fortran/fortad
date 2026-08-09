@@ -104,7 +104,7 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current main pins are FortAD `abcec99`, FortFront `6c27ca86`, and
+The current main pins are FortAD `cc8987e`, FortFront `6c27ca86`, and
 fortad-bench `73f395c`. FortAD has bounded `SPREAD` JVP and direct array-valued
 reverse-transpose support, and now consumes FortFront's bounded
 procedure-pointer `ASSOCIATED` state facts for a fixed same-scope callback
