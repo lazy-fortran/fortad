@@ -133,10 +133,10 @@ FortFront query test, a FortAD transformation oracle, and an application case.
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
 candidate files: 63 runnable pure-Fortran cases, 133 expected refusals, 34
 invalid-upstream closures, 99 other bounded FortAD feature/dependency
-classifications, and 508 non-Fortran or source-absent cases. Thus 337 of
-1,432 strict pure-Fortran candidates are classified (23.5%), while 1,095
-remain in the pure-Fortran queue. Across the whole corpus, 845 of 2,014
-candidates are accounted for (41.9%). The 74 mixed-language rows remain a
+classifications, and 508 non-Fortran or source-absent cases. Thus 341 of
+1,432 strict pure-Fortran candidates are classified (23.8%), while 1,091
+remain in the pure-Fortran queue. Across the whole corpus, 849 of 2,014
+candidates are accounted for (42.2%). The 74 mixed-language rows remain a
 separate dependency lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -317,7 +317,7 @@ remains open below.
 
 The 2026-08-09 integration wave is recorded at these repository heads:
 
-- FortFront `cd01fe6d`, including abstract/deferred hierarchy, concrete-only
+- FortFront `4a34853c`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
@@ -345,8 +345,9 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   ambiguous, deferred, dynamic, pointer, and allocatable calls remain refused.
   One bounded passed-procedure pointer actual now resolves to its assigned
   target identity and complete signature; reassignment, `NULL()`, unresolved,
-  generic, and procedure-dummy cases remain refusals.
-- FFC `cc276a2`, including rank-three and rank-four intrinsic
+  generic, and procedure-dummy cases remain refusals. Callback assignment
+  facts distinguish missing assignment from explicit reassignment.
+- FFC `1658536`, including rank-three and rank-four intrinsic
   allocatable-component lowering, the rank-four owner slice, the typed
   real(8) procedure-pointer result slice, and rank-one through rank-four
   assumed-rank `SELECT RANK` descriptor slices with independent gfortran
@@ -394,7 +395,8 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   compound component declarations now retains complete component metadata and
   compiles through the explicit reverse probe; it remains a legacy
   compatibility case, not modern runnable support.
-  FortAD `22e9627` (on top of `2e7446e`, `51bea55`, `f94e35c`, `caff12b`, `92bf9ad`, `bfe204d`, `1215d44`, `f51bb4c`, `a693014`, `4c8635a`, `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
+FortAD `8d76ec7` (including the bounded passed-procedure callback slice on
+top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12b`, `92bf9ad`, `bfe204d`, `1215d44`, `f51bb4c`, `a693014`, `4c8635a`, `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
   `e28ba4b`, `58899bf`, and `a45dbea`), including active
   concrete rank-four
   allocatable-component JVP/VJP, bounded concrete scalar `ASSOCIATE`, bounded
@@ -421,7 +423,7 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   exact actual/formal storage facts; aliases, callbacks, globals, pointers,
   allocatables, mismatches, and ambiguous mappings are refused. Function
   expression calls retain the existing keyword/optional forwarding path. The
-  full `fo` gate is green: 410 build targets, 409 derivative targets, 85/85
+  full `fo` gate is green: 410 build targets, 409 derivative targets, 86/86
   tests, and lint.
   A fixed-source scalar `class(*)` component assignment inside one proven
   `TYPE IS` or `CLASS IS` arm now differentiates through concrete shadows in
@@ -434,6 +436,10 @@ The 2026-08-09 integration wave is recorded at these repository heads:
   The CLI now infers the procedure root from a derivative output name when the
   output stem is unique, preserving explicit `--root`/`--head` forms and
   passing an independent compiled CLI oracle.
+  P8.6 differentiates one fixed same-scope callback through FortFront's exact
+  assigned target/signature facts, with JVP/VJP, finite-difference, and adjoint
+  checks. Reassignment, missing assignment, `NULL()`, generic, ambiguous,
+  dynamic, alias, and active-global callback paths remain refusals.
   Reverse mode also replays one scalar local or dummy `class(*)`, allocatable
   owner acquired from a declared concrete `SOURCE=` object, with one concrete
   `SELECT TYPE` arm and final deallocation. Ambiguous dispatch, polymorphic or
