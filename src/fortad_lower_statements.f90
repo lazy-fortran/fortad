@@ -14,7 +14,7 @@ module fortad_lower_statements
         binding_hierarchy_query_t, query_type_binding_hierarchy, &
         generic_call_query_t, query_generic_call, resolved_type_query_t, &
         query_resolved_type, &
-        defined_operator_query_t, query_defined_operator, &
+        defined_operator_query_t, query_defined_operator_into, &
         call_arguments_query_t, query_call_arguments, &
         procedure_actual_argument_query_t, query_procedure_actual_argument, &
         procedure_signature_query_t, procedure_dummy_query_t, &
@@ -2434,7 +2434,7 @@ contains
         integer :: i
 
         out = 0
-        query = query_defined_operator(arena, idx)
+        call query_defined_operator_into(arena, idx, query)
         if (.not. query%found .or. .not. query%is_resolved) then
             status%ok = .false.
             status%message = defined_operator_refusal(query, node%line)
