@@ -23,6 +23,24 @@ program test_allocatable_component_move_oracle
         "        deallocate(moved%payload)"//nl// &
         "    end function component_move"//nl// &
         "end module component_move_case"//nl
+    character(len=*), parameter :: array_source = &
+        "module component_array_move_case"//nl// &
+        "    type :: box_array_t"//nl// &
+        "        real(8), allocatable :: payload(:)"//nl// &
+        "    end type box_array_t"//nl// &
+        "contains"//nl// &
+        "    function component_array_move(x) result(out)"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        type(box_array_t) :: box, moved"//nl// &
+        "        real(8) :: out"//nl// &
+        "        allocate(box%payload(2))"//nl// &
+        "        box%payload(1) = 3.0d0*x"//nl// &
+        "        box%payload(2) = x*x"//nl// &
+        "        call move_alloc(box%payload, moved%payload)"//nl// &
+        "        out = moved%payload(1) + 2.0d0*moved%payload(2) + x"//nl// &
+        "        deallocate(moved%payload)"//nl// &
+        "    end function component_array_move"//nl// &
+        "end module component_array_move_case"//nl
     character(len=*), parameter :: polymorphic_source = &
         "module polymorphic_component_move_case"//nl// &
         "    type :: box_t"//nl// &
@@ -43,14 +61,14 @@ program test_allocatable_component_move_oracle
     character(len=*), parameter :: indexed_source = &
         "module indexed_component_move_case"//nl// &
         "    type :: box_t"//nl// &
-        "        real(8), allocatable :: payload(:)"//nl// &
+        "        real(8), allocatable :: payload(:,:)"//nl// &
         "    end type box_t"//nl// &
         "contains"//nl// &
         "    function indexed_move(x) result(out)"//nl// &
         "        real(8), intent(in) :: x"//nl// &
         "        type(box_t) :: box, moved"//nl// &
         "        real(8) :: out"//nl// &
-        "        allocate(box%payload(2))"//nl// &
+        "        allocate(box%payload(2,2))"//nl// &
         "        box%payload = x"//nl// &
         "        call move_alloc(box%payload, moved%payload)"//nl// &
         "        out = sum(moved%payload)"//nl// &
@@ -74,8 +92,26 @@ program test_allocatable_component_move_oracle
         "        deallocate(moved%payload)"//nl// &
         "    end function target_move"//nl// &
         "end module target_component_move_case"//nl
+    character(len=*), parameter :: dynamic_source = &
+        "module dynamic_component_move_case"//nl// &
+        "    type :: box_t"//nl// &
+        "        real(8), allocatable :: payload(:)"//nl// &
+        "    end type box_t"//nl// &
+        "contains"//nl// &
+        "    function dynamic_move(x, n) result(out)"//nl// &
+        "        real(8), intent(in) :: x"//nl// &
+        "        integer, intent(in) :: n"//nl// &
+        "        type(box_t) :: box, moved"//nl// &
+        "        real(8) :: out"//nl// &
+        "        allocate(box%payload(n))"//nl// &
+        "        box%payload(1) = x"//nl// &
+        "        call move_alloc(box%payload, moved%payload)"//nl// &
+        "        out = moved%payload(1)"//nl// &
+        "        deallocate(moved%payload)"//nl// &
+        "    end function dynamic_move"//nl// &
+        "end module dynamic_component_move_case"//nl
 
-    type(fad_result_t) :: jvp, vjp, refused
+    type(fad_result_t) :: jvp, vjp, array_jvp, array_vjp, refused
     character(len=:), allocatable :: dir, derivatives, driver
     integer :: unit, stat
 
@@ -85,6 +121,12 @@ program test_allocatable_component_move_oracle
     vjp = fad_vjp(source, [character(len=1) :: "x"], dependent="out", &
         from="component_move", name="component_move_vjp")
     call require_ok(vjp, "component MOVE_ALLOC VJP")
+    array_jvp = fad_jvp(array_source, [character(len=1) :: "x"], &
+        from="component_array_move", name="component_array_move_jvp")
+    call require_ok(array_jvp, "rank-one component MOVE_ALLOC JVP")
+    array_vjp = fad_vjp(array_source, [character(len=1) :: "x"], dependent="out", &
+        from="component_array_move", name="component_array_move_vjp")
+    call require_ok(array_vjp, "rank-one component MOVE_ALLOC VJP")
 
     refused = fad_vjp(polymorphic_source, [character(len=1) :: "x"], &
         dependent="out", from="polymorphic_move")
@@ -93,24 +135,31 @@ program test_allocatable_component_move_oracle
     refused = fad_vjp(indexed_source, [character(len=1) :: "x"], &
         dependent="out", from="indexed_move")
     call require_refusal(refused, "array component lifetime", &
-        "non-allocatable target")
+        "scalar or rank-one")
     refused = fad_vjp(target_source, [character(len=1) :: "x"], &
         dependent="out", from="target_move")
     call require_refusal(refused, "TARGET component lifetime", "TARGET alias")
+    refused = fad_vjp(dynamic_source, [character(len=1) :: "x"], dependent="out", &
+        from="dynamic_move")
+    call require_refusal(refused, "dynamic component shape", "literal allocation shape")
 
     dir = "build/oracle/allocatable_component_move"
     call execute_command_line("mkdir -p "//dir, exitstat=stat)
     if (stat /= 0) error stop "could not create component MOVE_ALLOC oracle directory"
-    call write_file(dir//"/primal.f90", source)
+    call write_file(dir//"/primal.f90", source//array_source)
     derivatives = "module component_move_derivatives"//nl// &
         "    use component_move_case, only: box_t"//nl// &
-        "contains"//nl//jvp%code//nl//vjp%code// &
+        "    use component_array_move_case, only: box_array_t"//nl// &
+        "contains"//nl//jvp%code//nl//vjp%code//nl// &
+        array_jvp%code//nl//array_vjp%code// &
         "end module component_move_derivatives"//nl
     call write_file(dir//"/derivatives.f90", derivatives)
     driver = "program driver"//nl// &
         "    use component_move_case, only: component_move"//nl// &
+        "    use component_array_move_case, only: component_array_move"//nl// &
         "    use component_move_derivatives, only: component_move_jvp, "// &
-        "component_move_vjp"//nl// &
+        "component_move_vjp, component_array_move_jvp, "// &
+        "component_array_move_vjp"//nl// &
         "    implicit none"//nl// &
         "    real(8) :: x, xd, out, outd, outb, xb, h, fp, fm, fd"//nl// &
         "    x = 1.25d0"//nl// &
@@ -127,6 +176,18 @@ program test_allocatable_component_move_oracle
         "    call component_move_vjp(x, out, outb, xb)"//nl// &
         "    if (abs(xb - 4.0d0*outb) > 1.0d-12) error stop 4"//nl// &
         "    if (abs(xb*xd - outb*outd) > 1.0d-12) error stop 5"//nl// &
+        "    call component_array_move_jvp(x, xd, out, outd)"//nl// &
+        "    if (abs(out - 8.125d0) > 1.0d-12) error stop 6"//nl// &
+        "    if (abs(outd + 6.3d0) > 1.0d-12) error stop 7"//nl// &
+        "    h = 1.0d-6"//nl// &
+        "    fp = component_array_move(x + h*xd)"//nl// &
+        "    fm = component_array_move(x - h*xd)"//nl// &
+        "    fd = (fp - fm)/(2.0d0*h)"//nl// &
+        "    if (abs(outd - fd) > 1.0d-7) error stop 8"//nl// &
+        "    outb = -1.3d0"//nl// &
+        "    call component_array_move_vjp(x, out, outb, xb)"//nl// &
+        "    if (abs(xb + 11.7d0) > 1.0d-12) error stop 9"//nl// &
+        "    if (abs(xb*xd - outb*outd) > 1.0d-12) error stop 10"//nl// &
         "    print *, 'allocatable component MOVE_ALLOC oracle pass'"//nl// &
         "end program driver"//nl
     call write_file(dir//"/driver.f90", driver)

@@ -58,12 +58,13 @@ Repeated or path-dependent automatic reallocation, mixing automatic and
 explicit lifetime operations, array-valued component assignment/read,
 polymorphic components or owners, pointer/target aliases, and active
 module-owned state remain refused. The one explicit component-lifetime
-exception is a concrete scalar `REAL` allocatable component: one `ALLOCATE`,
-one direct active store/read path, one `MOVE_ALLOC` to a distinct concrete
-scalar component, and one matching final `DEALLOCATE` are replayed with paired
-enclosing-object shadows. This does not extend to array components, dynamic
-indices, `SOURCE=`/`MOLD=`, polymorphic components, or changing ownership
-paths.
+exception covers a concrete scalar or one-dimensional `REAL` allocatable
+component: one `ALLOCATE` (with a literal extent for the array case), direct
+active element stores/reads, one `MOVE_ALLOC` to a distinct concrete
+component, and one matching final `DEALLOCATE` are replayed with paired
+enclosing-object shadows. This does not extend to higher-rank components,
+dynamic shapes or indices, `SOURCE=`/`MOLD=`, polymorphic components, or
+changing ownership paths.
 A `MOVE_ALLOC` outside the one-owner, straight-line,
 matching-final-deallocation shape is also refused. Those cases require storage
 identity, dynamic ownership, or a per-path allocation-state tape; emitting a
@@ -92,9 +93,10 @@ derivative component descriptors, and checks the adjoint dot-product identity.
 
 The concrete component `MOVE_ALLOC` oracle is
 [`test_allocatable_component_move_oracle.f90`](../../test/test_allocatable_component_move_oracle.f90).
-It compiles and runs generated JVP/VJP code, checks hand and central
-finite-difference derivatives plus the VJP dot-product identity, and verifies
-refusals for polymorphic, array-valued, and `TARGET` component lifetimes.
+It compiles and runs generated scalar and rank-one JVP/VJP code, checks hand
+and central finite-difference derivatives plus the VJP dot-product identity,
+and verifies refusals for polymorphic, higher-rank, dynamic-shape, and
+`TARGET` component lifetimes.
 
 A fixed one-dimensional literal element of a concrete derived array is also
 accepted for that scalar component transition, for example
