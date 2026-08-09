@@ -1504,6 +1504,36 @@ contains
                 status)
             return
         end if
+        if (.not. arm%selector_is_assumed_rank .or. &
+            .not. arm%selector_storage%is_assumed_rank) then
+            call refuse_select_rank(idx, arena, &
+                "selector is not proven to be an assumed-rank dummy", status)
+            return
+        end if
+        if (.not. arm%selector_bounds_identity_known .or. &
+            .not. allocated(arm%selector_bounds_node_indices)) then
+            call refuse_select_rank(idx, arena, &
+                "selector bounds identity is unresolved", status)
+            return
+        end if
+        if (arm%selector_node_index <= 0) then
+            call refuse_select_rank(idx, arena, &
+                "selector source identity is unresolved", status)
+            return
+        end if
+        if (.not. arena%has_node_at(arm%selector_node_index)) then
+            call refuse_select_rank(idx, arena, &
+                "selector source identity is unresolved", status)
+            return
+        end if
+        select type (selector => arena%entries(arm%selector_node_index)%node)
+            type is (identifier_node)
+            class default
+                call refuse_select_rank(idx, arena, &
+                    "selector aliases and expressions are not differentiated", &
+                    status)
+                return
+        end select
         if (.not. arm%has_rank .or. arm%selected_rank /= 1) then
             if (arm%is_assumed_size) then
                 call refuse_select_rank(idx, arena, &
@@ -1554,6 +1584,30 @@ contains
                 "selector must have one assumed-rank dimension", status)
             return
         end if
+        if (size(arm%selector_bounds_node_indices) /= 1) then
+            call refuse_select_rank(idx, arena, &
+                "selector bounds identity does not match its declaration", status)
+            return
+        end if
+        if (arm%selector_bounds_node_indices(1) /= &
+                declaration%dimension_indices(1)) then
+            call refuse_select_rank(idx, arena, &
+                "selector bounds identity does not match its declaration", status)
+            return
+        end if
+        block
+            type(array_bounds_query_t) :: bounds
+            bounds = query_array_bounds(arena, &
+                arm%selector_bounds_node_indices(1))
+            if (.not. bounds%found .or. .not. bounds%is_assumed_rank .or. &
+                bounds%lower_bound_node_index /= 0 .or. &
+                bounds%upper_bound_node_index /= 0 .or. &
+                bounds%stride_node_index /= 0) then
+                call refuse_select_rank(idx, arena, &
+                    "selector bounds are not a source-backed (..) marker", status)
+                return
+            end if
+        end block
         if (.not. ((trim(declaration%type_name) == "real" .and. &
             declaration%kind_value == 8) .or. &
             lower_ascii(trim(declaration%type_name)) == "real(8)")) then

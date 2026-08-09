@@ -123,10 +123,14 @@ checks central differences and the adjoint identity. Optional arrays,
 components, ownership-bearing arguments, active global mutable state, and
 unsafe aliasing remain outside the slice and retain source-local refusals.
 
-FortFront `c48c3e8b` now exposes assumed-rank selector bounds identity and
-reports unknown source rank explicitly. FortAD has not yet differentiated an
-assumed-rank path; consuming those facts is the next upstream-to-transformer
-integration slice.
+FortFront `c48c3e8b` exposes assumed-rank selector bounds identity and reports
+unknown source rank explicitly. FortAD now consumes those facts for one direct
+`real(8)` `RANK (1)` arm: it cross-checks the source `(..)` bounds node before
+using the rank-one IR contract, and emits both JVP and VJP code. The independent
+compiled oracle checks hand values, central finite differences, the adjoint
+identity, and named dispatch, descriptor, alias, global-state, and unresolved
+fact refusals. Other runtime ranks, aliases, computed selectors, descriptor
+ownership, and mutable global state remain source-local refusals.
 
 FortAD also consumes the FortFront type-bound dispatch target set for direct
 abstract/deferred function calls only when it contains exactly one concrete
@@ -1958,13 +1962,15 @@ of selected child ends the fixed-path derivative contract.
             independent gfortran oracle preserves the rank-one path and
             refuses default, assumed-size, scalar, dynamic, pointer, alias,
             and unsupported-rank paths.
-      - [x] **P7.7e rank-one assumed-rank differentiation.** FortAD `9f01f7c`
-            consumes one resolved REAL(8) `RANK (1)` arm and emits compiled
+      - [x] **P7.7e rank-one assumed-rank differentiation.** FortAD's bounded
+            slice consumes FortFront's source-backed assumed-rank bounds
+            identity for one direct REAL(8) `RANK (1)` arm and emits compiled
             JVP and VJP code. The independent oracle checks a hand derivative,
             central differences, and the adjoint identity. Default, assumed-
-            size, pointer, allocatable, global, unresolved, and multiple-arm
-            paths are named refusals. Generated code currently uses FortAD's
-            rank-one assumed-shape IR contract.
+            size, pointer, allocatable, global, unresolved, alias, and
+            multiple-arm paths are named refusals. Generated code uses
+            FortAD's rank-one assumed-shape IR contract; no dynamic descriptor
+            shadow is emitted.
       - [x] **P7.7f rank-three assumed-rank lowering.** FFC `fd3b5e8` extends
             the canonical whole-array REAL descriptor slice to one `RANK (3)`
             arm with three runtime extents and column-major indexing. The

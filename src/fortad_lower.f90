@@ -300,6 +300,16 @@ contains
             return
         end if
 
+        ! Do not silently drop a SELECT RANK header that the frontend did not
+        ! represent. Selector-associate syntax must be a named boundary until
+        ! FortFront exposes its source identity.
+        if (index(lower_text(source), "select rank (") > 0 .and. &
+            .not. contains_select_rank_node(res%arena)) then
+            status%ok = .false.
+            status%message = "unsupported SELECT RANK: FortFront did not expose the source construct"
+            return
+        end if
+
         ! Lower the procedure asked for, then only those it calls.
         !
         ! Lowering everything in the file would drag in whatever else lives
@@ -463,6 +473,20 @@ contains
         status%ok = .true.
         status%message = ""
     end subroutine lower_source
+
+    logical function contains_select_rank_node(arena) result(found)
+        type(ast_arena_t), intent(in) :: arena
+        integer :: i
+
+        found = .false.
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            if (trim(arena%entries(i)%node_type) == "select_rank") then
+                found = .true.
+                return
+            end if
+        end do
+    end function contains_select_rank_node
 
     logical function contains_generic_call(arena) result(found)
         type(ast_arena_t), intent(in) :: arena

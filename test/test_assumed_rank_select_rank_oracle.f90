@@ -57,8 +57,15 @@ program test_assumed_rank_select_rank_oracle
         "multiple arms")
     refused = fad_jvp(unresolved_source(), [character(len=6) :: "values"])
     call require_refusal(refused, "SELECT RANK", "unresolved selector")
+    refused = fad_jvp(alias_source(), [character(len=6) :: "values"])
+    call require_refusal(refused, "FortFront did not expose", &
+        "selector-associate syntax")
     refused = fad_jvp(global_source(), [character(len=6) :: "values"])
     call require_refusal(refused, "global mutable", "global mutable state")
+    refused = fad_vjp(default_source(), [character(len=6) :: "values"], &
+        dependent="y")
+    call require_refusal(refused, "exactly one explicit RANK (1) arm", &
+        "VJP rank default")
 
     print '(a)', "test_assumed_rank_select_rank_oracle: all cases passed"
 
@@ -119,6 +126,13 @@ contains
         text = replace(positive_source(), "select rank (values)", &
             "select rank (missing_values)")
     end function unresolved_source
+
+    function alias_source() result(text)
+        character(len=:), allocatable :: text
+        text = replace(positive_source(), "select rank (values)", &
+            "select rank (selected => values)")
+        text = replace(text, "values(1)", "selected(1)")
+    end function alias_source
 
     function global_source() result(text)
         character(len=:), allocatable :: text
