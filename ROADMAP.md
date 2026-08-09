@@ -326,7 +326,7 @@ These are the authoritative current pins; older commit names below are
 historical evidence only:
 
 - FortAD `be7ce88`
-- FortFront `5f8366d5`
+- FortFront `3f1adfbe`
 - FFC `c598f19`
 - fortad-bench `e614f75`
 
@@ -362,6 +362,9 @@ historical evidence only:
   Its owned-array binding query now distinguishes abstract/deferred declared
   bindings from concrete direct and inherited implementations, refusing generic,
   unresolved, and ownership-changing paths.
+  Its owned-array generic-dispatch query now resolves exact generic/PASS
+  targets, with ambiguous, deferred, unresolved, global, alias, and
+  control-flow paths refused.
   Its call-boundary query now exposes formal intent, type/kind/rank, storage,
   actual-to-formal mappings, and explicit alias, callback, global-state,
   unknown-type, and mismatch refusals for downstream differentiation.
@@ -621,7 +624,7 @@ numerical/application rules. Active global mutable state, uncontrolled
 aliases, active I/O, and opaque calls without rules remain product refusals
 rather than compatibility work.
 
-FortFront source `main` is currently `5f8366d5`. This handoff includes the
+FortFront source `main` is currently `3f1adfbe`. This handoff includes the
 ownership/storage and abstract-dispatch metadata contract from `e4d9e169`,
 including declared `class(T)` versus `class(*)` ownership facts,
 along with allocation-event `SOURCE=`/`MOLD=` expression facts, formal-ordered
