@@ -66,6 +66,23 @@ The refusal names the first violated boundary. The independent hand,
 finite-difference, adjoint, and refusal oracle is
 [`test_passed_procedure_callback_oracle.f90`](../../test/test_passed_procedure_callback_oracle.f90).
 
+### Optional callback dummies
+
+The next bounded callback slice accepts the same fixed target when it is
+passed by keyword to an optional procedure dummy. It also accepts an omitted
+optional callback only when FortFront proves the callee has exactly one direct
+`if (present(callback))` guard, with the callback invoked only in that arm and
+no `else` or `else if`. The inliner removes the unreachable arm for the
+omitted call, so the generated JVP and VJP contain no procedure-pointer
+interface or unresolved callback name.
+
+An omitted callback used outside that guard, an `else` fallback, multiple
+guards, forwarding to another procedure, or any reassignment remains a
+refusal. The independent
+[`test_optional_passed_callback_oracle.f90`](../../test/test_optional_passed_callback_oracle.f90)
+checks both JVP/VJP paths against central differences and the adjoint identity,
+as well as global-state and ownership refusals.
+
 ## Elemental procedures
 
 When the selected same-file procedure has an `elemental` prefix, FortAD keeps
