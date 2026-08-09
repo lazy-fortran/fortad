@@ -75,6 +75,10 @@ module fortad_ir
         character(len=:), allocatable :: callback_target
         !! Index of the array subscript base for FAD_INDEX, else 0.
         integer :: rank = 0
+        !! A FAD_INDEX with range bounds denotes an array section, not an
+        !! element.  The distinction matters when reverse mode materialises a
+        !! partial into a temporary.
+        logical :: is_array_section = .false.
         !! FortFront's storage facts for a component path.  These facts are
         !! copied with the expression so derivative leaves can distinguish an
         !! active component from another component of the same derived object.
@@ -382,6 +386,7 @@ contains
 
         destination%kind = source%kind
         destination%rank = source%rank
+        destination%is_array_section = source%is_array_section
         destination%is_component_path = source%is_component_path
         destination%component_is_allocatable = source%component_is_allocatable
         destination%component_is_pointer = source%component_is_pointer
@@ -742,6 +747,7 @@ contains
             if (a%callback_target /= b%callback_target) return
         end if
         if (a%rank /= b%rank) return
+        if (a%is_array_section .neqv. b%is_array_section) return
         if (a%is_component_path .neqv. b%is_component_path) return
         if (a%component_is_allocatable .neqv. b%component_is_allocatable) return
         if (a%component_is_pointer .neqv. b%component_is_pointer) return

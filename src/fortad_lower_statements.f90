@@ -3333,6 +3333,7 @@ contains
         if (.not. status%ok) return
         e%kind = FAD_INDEX
         e%text = emit_expr(proc, base_expr)
+        e%is_array_section = .true.
         allocate (e%args(section_rank))
         do i = 1, section_rank
             if (section_bound_is_vector(arena, &

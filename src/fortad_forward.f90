@@ -1781,6 +1781,7 @@ contains
         if (idx <= 0 .or. idx > src%n_exprs) return
         e%kind = src%exprs(idx)%kind
         e%text = src%exprs(idx)%text
+        e%is_array_section = src%exprs(idx)%is_array_section
         if (allocated(src%exprs(idx)%args)) then
             allocate (args(size(src%exprs(idx)%args)))
         else
