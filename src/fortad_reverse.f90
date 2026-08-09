@@ -1660,6 +1660,10 @@ contains
                         allocated(primal%stmts(j)%allocation_args)) then
                         di = call_arg_decl_index(primal, &
                             primal%stmts(j)%allocation_args(1))
+                        if (di <= 0) then
+                            di = primal%decl_index_of(fad_base_name(emit_expr( &
+                                primal, primal%stmts(j)%allocation_args(1))))
+                        end if
                         if (di > 0 .and. reads_any(primal, &
                             primal%stmts(j)%allocation_source, varied)) then
                             if (.not. varied(di)) then
@@ -1730,6 +1734,10 @@ contains
                         ! compiler evaluation order (GNU marked `child`, NVHPC
                         ! short-circuited it), which dropped the component
                         ! shadow only under NVHPC.
+                        if (di <= 0) then
+                            di = primal%decl_index_of(fad_base_name(emit_expr( &
+                                primal, primal%stmts(j)%allocation_args(1))))
+                        end if
                         if (di > 0) then
                             if (mark_reads(primal, primal%stmts(j)%allocation_source, &
                                 useful)) changed = .true.
