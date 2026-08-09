@@ -47,21 +47,31 @@ JVP/VJP adjoint identity. The type-bound oracle
 [`test_type_bound_oracle.f90`](../../test/test_type_bound_oracle.f90) adds
 hand, finite-difference, and adjoint checks for a statically resolved
 inherited binding. The abstract oracle checks an unresolved deferred binding.
-The direct runtime oracle
+The direct runtime refusal oracle
 [`test_direct_polymorphic_oracle.f90`](../../test/test_direct_polymorphic_oracle.f90)
-checks two same-file child implementations through direct function and
-subroutine calls, hand derivatives, finite differences, and the JVP/VJP
-adjoint identity. The runtime oracle
+checks that two same-file child implementations through direct function and
+subroutine calls are refused in both modes, and that dynamic-type perturbation
+is not silently accepted. The runtime oracle
 [`test_runtime_select_type_oracle.f90`](../../test/test_runtime_select_type_oracle.f90)
 checks an abstract base with deferred `value`, linear/quadratic/cubic child
 bindings, a class-default arm, hand derivatives, finite differences, and the
 JVP/VJP adjoint identity.
 
 The direct runtime contract is deliberately narrow: the selector must be a
-simple nonallocatable `class(base_t)` dummy; FortFront must report a nonempty,
-known set of concrete same-file target types and implementations; every target
-must be a non-generic, non-ambiguous, non-deferred function or subroutine with
-compatible PASS metadata; and the dynamic type is fixed for one call. Unknown
-or empty target sets, generic/ambiguous/deferred targets, unsupported PASS-dummy
-compatibility, allocation or ownership changes, and perturbations that change
-the selected child remain named refusals. Receiver components remain passive.
+simple nonallocatable `class(base_t)` dummy; FortFront must prove exactly one
+concrete same-file target type and implementation; that target must be a
+non-generic, non-ambiguous, non-deferred function or subroutine with compatible
+PASS metadata; and the dynamic type is fixed for one call. FortAD lowers that
+single proof to one structural `SELECT TYPE` arm and inlines the selected
+implementation. Unknown or empty target sets, multiple runtime targets,
+generic/ambiguous/deferred targets, unsupported PASS-dummy compatibility,
+allocation or ownership changes, and perturbations that change the selected
+child remain named refusals. Receiver components remain passive.
+
+The application-shaped direct deferred-binding oracle is
+[`test_abstract_deferred_dispatch_oracle.f90`](../../test/test_abstract_deferred_dispatch_oracle.f90).
+It compiles a one-child affine model and checks JVP and VJP values, central
+finite differences, and the adjoint identity. It also checks both modes refuse
+the two-child affine/square target set from the
+`itpplasma/abstract_deferred_refusal` boundary and an unresolved deferred
+binding.
