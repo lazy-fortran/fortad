@@ -59,6 +59,27 @@ reverse propagation. The independent
 checks JVP and VJP hand values, a central finite difference, and the adjoint
 identity; the nested ownership oracle also exercises the nested-array VJP.
 
+The reverse emitter also supports a store to the concrete component selected
+from one literal element of a one-dimensional allocatable polymorphic owner
+array:
+
+```fortran
+allocate(owners(2), source=child)
+select type (item => owners(2))
+type is (child_t)
+    item%scale = 3.0d0*x
+    y = item%scale*x
+end select
+```
+
+The owner array and its dynamic type remain passive. FortAD pairs the selected
+element with `owners_b(2)`, snapshots its incoming component cotangent before
+propagating the store RHS, and then replays the concrete `SOURCE=` component
+back to the active source. This prevents a selected element read after the
+store from being counted again as part of the store seed. The independent
+hand/finite-difference/adjoint oracle is
+[`test_polymorphic_owner_array_component_oracle.f90`](../../test/test_polymorphic_owner_array_component_oracle.f90).
+
 This is one selected element, not an array lifetime tape. Computed or dynamic
 indices, sections, vector subscripts, rank-two or higher holder paths,
 assumed-shape or allocatable holder arrays, pointer/TARGET or other aliases,
