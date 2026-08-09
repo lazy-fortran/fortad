@@ -140,13 +140,13 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files. The reproducible queue contains 1,125 rows: 1,051
+candidate files. The reproducible queue contains 1,121 rows: 1,047
 pure-Fortran and 74 mixed-language candidates. Pure-Fortran status is 63
-runnable, 134 expected refusals, 34 invalid-upstream closures, and 150 other
-bounded FortAD feature/dependency classifications: 381 of 1,432 strict
-pure-Fortran candidates are classified (26.6%), while 1,051 remain in the
-pure-Fortran queue. Across the whole corpus, 889 of 2,014 candidates are
-accounted for (44.1%). The 74 mixed-language rows remain a separate dependency
+runnable, 134 expected refusals, 34 invalid-upstream closures, and 154 other
+bounded FortAD feature/dependency classifications: 385 of 1,432 strict
+pure-Fortran candidates are classified (26.9%), while 1,047 remain in the
+pure-Fortran queue. Across the whole corpus, 893 of 2,014 candidates are
+accounted for (44.3%). The 74 mixed-language rows remain a separate dependency
 lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -330,10 +330,10 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `f9d2ecb`
+- FortAD `a295c76`
 - FortFront `ae75547c`
 - FFC `2f6cc37`
-- fortad-bench `606857d`
+- fortad-bench `f269791`
 
 - FortFront `ae75547c`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
@@ -626,12 +626,12 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   mapping. JVP/VJP generated-source, numerical, and refusal oracles pass;
   unresolved, generic, alias, pointer, allocatable, array, global, and
   ownership-changing paths remain precise refusals.
-- fortad-bench `606857d` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
+- fortad-bench `f269791` (on top of `7ecdba6`, `fc4e3dd`, `9c2a694`, and `e3db0e7`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
-  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34 evidence contracts. The reproducible queue
-  contains 1,125 rows: 1,051 pure-Fortran and 74 mixed-language candidates.
-  889 of 2,014 corpus candidates are accounted for, including 381 of 1,432
-  strict pure-Fortran candidates (26.6%); 1,051 pure-Fortran candidates
+  next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26/next33/next34/next35/next36 evidence contracts. The reproducible queue
+  contains 1,121 rows: 1,047 pure-Fortran and 74 mixed-language candidates.
+  893 of 2,014 corpus candidates are accounted for, including 385 of 1,432
+  strict pure-Fortran candidates (26.9%); 1,047 pure-Fortran candidates
   remain in the queue. The reproducible Enzyme comparison now has
   a common size-sweep harness for N=100 through 1,000,000 with median/min/max
   timing and provenance artifacts. The latest sweep contains 115 measured rows
@@ -651,6 +651,11 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   `set11/lh050`; all 12 Tapenade probes pass and the cases remain explicit
   FortAD boundaries for invalid generated interfaces, global state, unsupported
   active logical expressions, or complex dependent inference.
+  The `next36` shard adds `set06/v311`, `set06/v357`, `set11/vmp09`, and
+  `openmp/examples/tinymgopt`; all have fresh Tapenade three-mode probes,
+  exact hashes, and independent behavioral or refusal oracles. They remain
+  explicit boundaries for invalid generated interfaces, global mutable state,
+  and active I/O before the later OpenMP directive.
 
 The next feature order has four steps. The callback-flow, bounded
 abstract-dispatch-provenance, fixed literal polymorphic owner-array, bounded
