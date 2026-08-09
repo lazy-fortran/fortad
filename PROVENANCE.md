@@ -101,3 +101,20 @@ derivative product is checked against at least one of:
 
 Agreement with Enzyme, Tapenade, or JAX is recorded as corroboration, never as
 the oracle.
+
+## Emitter code-generation timing
+
+The module-emitter copy path is measured by
+`scripts/bench_emitter_codegen.sh`. It creates a temporary, deterministic
+kernel with 2,048 indexed inputs and 4,096 scalar assignments, transforms it
+with `fortad jvp --module`, discards the generated file, and records three
+wall-clock samples. The measurement includes process startup, parsing,
+lowering, differentiation, and emission; it does not compile or run the
+generated kernel. The recorded GNU toolchain is GFortran 16.1.1 and the
+recorded `fo` version is reported by the script.
+
+On 2026-08-09, from `origin/main` at `86749dc`, the median was 71.14 s. The
+temporary-branch implementation, using one exact-size output allocation for
+module indentation, measured 69.59 s under the same protocol: 2.18% lower
+wall-clock time. This is a large-kernel source-generation result, not a claim
+about the runtime of the generated numerical kernel.
