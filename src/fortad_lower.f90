@@ -8,7 +8,8 @@ module fortad_lower
     use fortfront, only: compile_frontend_from_string, &
         compiler_frontend_options_t, compiler_frontend_result_t, &
         ast_arena_t, program_unit_query_t, query_program_unit, &
-        query_declaration, declaration_query_t, INPUT_MODE_STANDARD
+        query_declaration, declaration_query_t, binary_op_node, &
+        defined_operator_query_t, query_defined_operator, INPUT_MODE_STANDARD
     use fortfront, only: generic_call_query_t, query_generic_call
     use fortad_call_boundaries, only: has_same_file_call, &
         validate_direct_call_boundaries
@@ -208,6 +209,26 @@ contains
                 if (allocated(res%error_msg)) then
                     if (len_trim(res%error_msg) > 0) then
                         status%message = "parse failed while resolving a generic call: "// &
+                            trim(res%error_msg)
+                    end if
+                end if
+                return
+            end if
+        end if
+
+        ! Defined-operator resolution is a semantic fact too.  The parse-only
+        ! arena identifies the operator syntax, but only FortFront's semantic
+        ! pass can select one exact same-file specific without guessing an
+        ! implicit conversion or a dynamic target.
+        if (contains_defined_operator(res%arena)) then
+            opts%run_semantics = .true.
+            call compile_frontend_from_string(source, res, opts)
+            if (.not. res%parse_ok) then
+                status%ok = .false.
+                status%message = "parse failed while resolving a defined operator"
+                if (allocated(res%error_msg)) then
+                    if (len_trim(res%error_msg) > 0) then
+                        status%message = "parse failed while resolving a defined operator: "// &
                             trim(res%error_msg)
                     end if
                 end if
@@ -459,6 +480,27 @@ contains
             end if
         end do
     end function contains_generic_call
+
+    logical function contains_defined_operator(arena) result(found)
+        !! Whether semantic lowering is needed for a defined-operator query.
+        type(ast_arena_t), intent(in) :: arena
+        type(defined_operator_query_t) :: query
+        integer :: i
+
+        found = .false.
+        do i = 1, arena%size
+            if (.not. arena%has_node_at(i)) cycle
+            select type (node => arena%entries(i)%node)
+                type is (binary_op_node)
+                query = query_defined_operator(arena, i)
+                if (query%found .and. query%is_defined_operator) then
+                    found = .true.
+                    return
+                end if
+            class default
+            end select
+        end do
+    end function contains_defined_operator
 
     logical function contains_procedure_pointer_declaration(arena) result(found)
         !! Whether semantic lowering is needed for a procedure-pointer fact.
