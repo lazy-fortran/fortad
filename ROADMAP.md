@@ -104,8 +104,8 @@ differentiation, rather than adding product semantics to the parser.
 
 ## Current handoff (2026-08-09)
 
-The current main pins are FortAD `baf445e`, FortFront `6c27ca86`, and
-fortad-bench `72ee483`. FortAD has bounded `SPREAD` JVP and direct array-valued
+The current main pins are FortAD `abcec99`, FortFront `6c27ca86`, and
+fortad-bench `73f395c`. FortAD has bounded `SPREAD` JVP and direct array-valued
 reverse-transpose support, and now consumes FortFront's bounded
 procedure-pointer `ASSOCIATED` state facts for a fixed same-scope callback
 guard. The new independent oracle checks compiled JVP/VJP values, finite
@@ -122,6 +122,19 @@ perturbations remain explicit refusals. The independent compiled oracle is
 `test/test_abstract_deferred_dispatch_oracle.f90`; it mirrors the
 `itpplasma/abstract_deferred_refusal` shape, proves the one-child path, and
 keeps the affine/square two-child case refused.
+
+Intrinsic unary `.not.` is lowered as a passive logical guard rather than
+misclassified as a user-defined operator. Direct calls through nested
+polymorphic component receivers are routed through FortFront's type-bound
+facts and refused when ownership or dynamic type is not tracked; the
+independent nested-component oracle verifies that no derivative source is
+emitted for that boundary.
+
+The bench currently records 941 of 2,014 total candidates and 433 of 1,432
+pure-Fortran Tapenade candidates (30.2%); 1,073 total candidates remain in the
+queue, including 999 pure-Fortran cases. Its latest shard is `next48`, which
+records modern pointer, callback, and derived-type boundaries with independent
+behavioral and refusal oracles.
 
 The bench currently records 937 of 2,014 total candidates and 429 of 1,432
 pure-Fortran Tapenade candidates (30.0%); 1,077 total candidates remain in the
