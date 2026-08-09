@@ -135,13 +135,13 @@ source-text heuristics. Each cross-repository change carries a focused
 FortFront query test, a FortAD transformation oracle, and an application case.
 
 The current corpus snapshot is also explicit. `fortad-bench` has 2,014
-candidate files. The reproducible queue contains 1,141 rows: 1,067
+candidate files. The reproducible queue contains 1,137 rows: 1,063
 pure-Fortran and 74 mixed-language candidates. Pure-Fortran status is 63
-runnable, 134 expected refusals, 34 invalid-upstream closures, and 134 other
-bounded FortAD feature/dependency classifications: 365 of 1,432 strict
-pure-Fortran candidates are classified (25.5%), while 1,067 remain in the
-pure-Fortran queue. Across the whole corpus, 873 of 2,014 candidates are
-accounted for (43.3%). The 74 mixed-language rows remain a separate dependency
+runnable, 134 expected refusals, 34 invalid-upstream closures, and 138 other
+bounded FortAD feature/dependency classifications: 369 of 1,432 strict
+pure-Fortran candidates are classified (25.8%), while 1,063 remain in the
+pure-Fortran queue. Across the whole corpus, 877 of 2,014 candidates are
+accounted for (43.5%). The 74 mixed-language rows remain a separate dependency
 lane.
 The `next9` shard closes `set06/v290`, `set03/cm33`, `set03/lh056`, and
 `set03/cm26` as nested-procedure, module-state, and pointer-storage
@@ -325,12 +325,12 @@ The 2026-08-09 integration wave is recorded at these repository heads:
 These are the authoritative current pins; older commit names below are
 historical evidence only:
 
-- FortAD `c6dfab0`
-- FortFront `8908af33`
-- FFC `a032bab`
-- fortad-bench `bd97975`
+- FortAD `089130f`
+- FortFront `9abdf354`
+- FFC `f08a9f0`
+- fortad-bench `e3db0e7`
 
-- FortFront `8908af33`, including abstract/deferred hierarchy, concrete-only
+- FortFront `9abdf354`, including abstract/deferred hierarchy, concrete-only
   runtime dispatch targets, bounded
   `ASSOCIATE` selector storage facts, `SELECT RANK` and `SELECT TYPE` arm
   facts, concrete `SELECT TYPE` dispatch facts, resolved callback signatures,
@@ -443,7 +443,7 @@ historical evidence only:
   compound component declarations now retains complete component metadata and
   compiles through the explicit reverse probe; it remains a legacy
   compatibility case, not modern runnable support.
-FortAD `c6dfab0` (including the bounded passed-procedure callback slice on
+FortAD `089130f` (including the bounded passed-procedure callback slice on
 top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12b`, `92bf9ad`, `bfe204d`, `1215d44`, `f51bb4c`, `a693014`, `4c8635a`, `08c616d`, `7c65a88`, `1ef4a45`, `c19beea`, `bdb4044`, `c1c3d00`, `35fa6e8`, `f82cae6`, `ea727c8`, `4a4fdd1`, `88f8b7d`, `0ff5e9f`, `e8678ef`, `443c9a8`,
   `e28ba4b`, `58899bf`, and `a45dbea`), including active
   concrete rank-four
@@ -498,12 +498,16 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
   exact actual/formal storage facts; aliases, callbacks, globals, pointers,
   allocatables, mismatches, and ambiguous mappings are refused. Function
   expression calls retain the existing keyword/optional forwarding path. The
-  full GNU `fo check` gate is green: 125 modules and 90/90 tests, with
+  full GNU `fo check` gate is green: 126 modules and 91/91 tests, with
   changed-file formatting passing; repository lint still reports 293 existing
   compiler warnings.
   The emitter benchmark measures a reproducible 71.14 s to 69.59 s median
   reduction (2.18%) from exact-size single-allocation module indentation, with
   an independent compiled analytic oracle and provenance script.
+  The reverse temporary rank fix preserves scalar `z(i)` temporaries as
+  scalars while retaining array rank for true sections. The independent LSTM
+  gap oracle closes all 15 LSTM cases in the size sweep; three unrelated
+  Brusselator gaps remain.
   The NVIDIA HPC SDK 26.5 build at `fffb75b` also compiles 410 FortAD targets,
   409 derivative targets, and all 88 test programs after replacing the nonportable
   `STOP ..., QUIET=` CLI exits and NVHPC-reserved test identifiers. Its
@@ -599,19 +603,19 @@ top of `cbd9910`, `80cffc6`, `22e9627`, `2e7446e`, `51bea55`, `f94e35c`, `caff12
 - FortAD now also supports one fixed-arm `CLASS IS` path with the same passive
   dynamic-type contract and independent numerical/refusal oracle; multiple
   arms, aliases, pointers, global state, and ownership remain refusals.
-- fortad-bench `bd97975` (on top of `ab9965e`, `da511c6`, `df6fadc`, and `56ec44b`), including the
+- fortad-bench `e3db0e7` (on top of `bd97975`, `e614f75`, `a436d59`, and `2f7035a`), including the
   current queue, batch, classifier, live-hash repins, and next7/next8/next9/
   next10/next11/next12/next13/next14/next15/next16/next17/next18/next19/next20/next21/next22/next26 evidence contracts. The reproducible queue
-  contains 1,141 rows: 1,067 pure-Fortran and 74 mixed-language candidates.
-  873 of 2,014 corpus candidates are accounted for, including 365 of 1,432
-  strict pure-Fortran candidates (25.5%); 1,067 pure-Fortran candidates
+  contains 1,137 rows: 1,063 pure-Fortran and 74 mixed-language candidates.
+  877 of 2,014 corpus candidates are accounted for, including 369 of 1,432
+  strict pure-Fortran candidates (25.8%); 1,063 pure-Fortran candidates
   remain in the queue. The reproducible Enzyme comparison now has
   a common size-sweep harness for N=100 through 1,000,000 with median/min/max
   timing and provenance artifacts. The latest sweep contains 95 measured rows
   and 18 explicit gaps: Euler, RK4, and BA are complete; Bruss reaches
-  N=100,000; all LSTM sizes remain FortAD rank-error gaps and Bruss at
-  N=1,000,000 exits 139. No cross-engine performance victory is claimed until
-  those gaps are closed or explicitly scoped by a complete comparison.
+  N=100,000; the historical LSTM rank-error gaps are now fixed on FortAD
+  `089130f`; and Bruss at N=1,000,000 exits 139. The sweep must be rerun after
+  the LSTM fix before any cross-engine performance victory is claimed.
 
 The next feature order has four steps. The callback-flow, bounded
 abstract-dispatch-provenance, fixed literal polymorphic owner-array, bounded
@@ -688,8 +692,8 @@ focused callback-signature and callback-target executables pass, and the
 fallback full gate passes. External,
 generic, ambiguous, NULL, and unresolved callback targets remain unproven.
 
-The compiler-path handoff is documented in ffc docs `6dbf9b6` and uses code
-`fd3b5e8`. It
+The compiler-path handoff is documented in ffc docs `6dbf9b6`; the current
+ffc `main` pin is `f08a9f0`. It
 contains the typed ISO C pointer, TRANSFER, bounded #643 rank-1 deep-copy,
 typed integer-lowering, BLOCK/DO CONCURRENT, DO WHILE, GOTO, FORALL, WHERE,
 SELECT, complex, intrinsic-extra, and reduction-expression extractions,
@@ -760,7 +764,7 @@ FortAD gate.
       growth under GNU and nvfortran. It also preserves procedure-body
       `DIMENSION` statements and resolves dummies inherited by separate module
       procedures. The fixed-form and submodule acceptance oracles are green.
-The current FortFront `main` handoff is `55c0c5b6`, which includes the
+The current FortFront `main` handoff is `9abdf354`, which includes the
       ownership and dispatch metadata query contract from `e4d9e169` and
       declared polymorphic ownership facts, including array-element and nested
       component storage paths, plus formal-ordered actual-to-formal call
@@ -788,8 +792,10 @@ The current FortFront `main` handoff is `55c0c5b6`, which includes the
 - [ ] fortfem PR 63 is merged with green CI. All 733 local tests pass and
       `fo lint` is clean, but the GitHub jobs remain unstable.
 - [ ] The current FortAD head passes GNU/Flang/ifx/nvfortran/LFortran.
-      GNU is current: `fo` builds 409 targets, checks 408 derivative
-      targets, and runs 68 tests.
+      GNU is current: `fo` builds 410 targets, checks 409 derivative
+      targets, and runs 91 tests. The NVIDIA compatibility build compiles
+      410 FortAD targets and 409 derivative targets; its execution lane still
+      has the documented NVHPC runtime/compiler failure.
       The cheap lint rules report zero unused imports. Four pre-existing
       short-circuit hazards and 108 `-Warray-temporaries` diagnostics remain;
       `fo lint` is therefore still nonzero. The other four lanes still rely on
@@ -806,8 +812,8 @@ current arithmetic subset to the modern program semantics used by the pinned
 lazy-fortran and itpplasma applications. The priority order above governs the
 phase checklist below.
 
-The implementation snapshot is FortAD code at `02d4dd2`. Its GNU behavioral
-gate is green (409 build targets, 408 derivative targets, 68/68 tests).
+The implementation snapshot is FortAD code at `089130f`. Its GNU behavioral
+gate is green (410 build targets, 409 derivative targets, 91/91 tests).
 `fo lint` still has four short-circuit hazards and 108 array-temporary
 warnings. Feature scope is recorded in the Phase 7 and 8
 checklists below. The three previously failing nvfortran rule oracles now pass
