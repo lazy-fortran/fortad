@@ -1799,7 +1799,9 @@ contains
         else
             last = trim(dims)
         end if
-        found = last == "*"
+        found = .false.
+        if (len_trim(last) == 0) return
+        found = last(len_trim(last):len_trim(last)) == "*"
     end function assumed_size_dims
 
     subroutine check_reverse_allocation_sources(primal, active, status)

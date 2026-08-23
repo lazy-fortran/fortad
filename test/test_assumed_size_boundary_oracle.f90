@@ -19,16 +19,24 @@ contains
 
     subroutine check_refusal(failures)
         integer, intent(inout) :: failures
+
+        call check_refusal_declaration("z(*)", failures)
+        call check_refusal_declaration("z(0:*)", failures)
+    end subroutine check_refusal
+
+    subroutine check_refusal_declaration(declaration, failures)
+        character(len=*), intent(in) :: declaration
+        integer, intent(inout) :: failures
         character(len=:), allocatable :: source
         type(fad_result_t) :: jvp, vjp
 
-        source = kernel_source("z(*)")
+        source = kernel_source(declaration)
         jvp = fad_jvp(source, [character(len=1) :: "z"], from="kernel")
         call require_refusal(jvp, "forward mode", failures)
         vjp = fad_vjp(source, [character(len=1) :: "z"], dependent="y", &
             from="kernel")
         call require_refusal(vjp, "reverse mode", failures)
-    end subroutine check_refusal
+    end subroutine check_refusal_declaration
 
     subroutine require_refusal(result, prefix, failures)
         type(fad_result_t), intent(in) :: result
@@ -78,11 +86,12 @@ contains
             failures = failures + 1
             return
         end if
-        call write_file(dir//"/primal.f90", "module primal_mod"//nl// &
-            "contains"//nl//source//"end module primal_mod"//nl)
-        call write_file(dir//"/derivatives.f90", "module derivative_mod"//nl// &
+        call write_file(dir//"/primal.f90", "module assumed_size_primal_mod"//nl// &
+            "contains"//nl//source//"end module assumed_size_primal_mod"//nl)
+        call write_file(dir//"/derivatives.f90", &
+            "module assumed_size_derivative_mod"//nl// &
             "contains"//nl//jvp%code//nl//vjp%code// &
-            "end module derivative_mod"//nl)
+            "end module assumed_size_derivative_mod"//nl)
         driver = driver_source(label)
         call write_file(dir//"/driver.f90", driver)
 
@@ -123,8 +132,8 @@ contains
         character(len=:), allocatable :: text
 
         text = "program driver"//nl// &
-            "    use primal_mod, only: kernel"//nl// &
-            "    use derivative_mod, only: kernel_jvp, kernel_vjp"//nl// &
+            "    use assumed_size_primal_mod, only: kernel"//nl// &
+            "    use assumed_size_derivative_mod, only: kernel_jvp, kernel_vjp"//nl// &
             "    implicit none"//nl// &
             "    integer, parameter :: n = 3"//nl// &
             "    real(8) :: z(n), zd(n), zb(n), y, yd, yb, yp, ym, fd, h"//nl// &
