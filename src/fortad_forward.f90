@@ -333,7 +333,9 @@ contains
         else
             last = trim(dims)
         end if
-        found = last == "*"
+        found = .false.
+        if (len_trim(last) == 0) return
+        found = last(len_trim(last):len_trim(last)) == "*"
     end function assumed_size_dims
 
     subroutine refuse_active_polymorphic_dispatch(primal, active_paths, status)

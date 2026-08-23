@@ -139,8 +139,8 @@ language implementation. In particular:
 - allocatable lifetime and arbitrary storage aliasing remain open semantic
   implementation areas;
 - GPU emission is limited to the reduction shape described above;
-- assumed-size dummy arrays currently emerge as assumed-shape arrays, so do
-  not differentiate a procedure that declares an active dummy with `(*)`;
+- active assumed-size dummy arrays, including lower-bound forms such as
+  `(0:*)`, are refused because tangent and adjoint storage has no shape;
 - registered statement rules may introduce impure calls into generated code.
 
 The [open defects](ROADMAP.md#open-defects) section tracks implementation limits
