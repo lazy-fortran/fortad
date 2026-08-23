@@ -242,6 +242,8 @@ contains
 
         call seed_activity(primal, spec, dependent, active, status)
         if (.not. status%ok) return
+        call refuse_active_assumed_size(primal, active, status)
+        if (.not. status%ok) return
         call independent_component_paths(spec%independents, active_paths)
         call refuse_active_polymorphic_dispatch(primal, active_paths, status)
         if (.not. status%ok) return
@@ -1750,6 +1752,55 @@ contains
         allocate (active(max(1, primal%n_decls)))
         active = varied .and. useful
     end subroutine seed_activity
+
+    subroutine refuse_active_assumed_size(primal, active, status)
+        !! An assumed-size dummy has no descriptor, so whole-array adjoint
+        !! operations such as ``z_b = 0`` are not valid Fortran.  Refuse the
+        !! active boundary rather than emitting a procedure that cannot
+        !! compile for its source interface.
+        type(fad_proc_t), intent(in) :: primal
+        logical, intent(in) :: active(:)
+        type(reverse_status_t), intent(inout) :: status
+        integer :: i
+        character(len=:), allocatable :: dims
+
+        do i = 1, primal%n_decls
+            if (.not. active(i)) cycle
+            if (.not. primal%decls(i)%is_array) cycle
+            if (.not. allocated(primal%decls(i)%dims)) cycle
+            dims = trim(primal%decls(i)%dims)
+            if (.not. assumed_size_dims(dims)) cycle
+            status%ok = .false.
+            status%message = "reverse mode: active assumed-size dummy '"// &
+                trim(primal%decls(i)%name)//"' at line "// &
+                itoa(primal%decls(i)%line)//": assumed-size adjoint storage "// &
+                "has no shape for whole-array operations"
+            return
+        end do
+    end subroutine refuse_active_assumed_size
+
+    function itoa(n) result(text)
+        integer, intent(in) :: n
+        character(len=:), allocatable :: text
+        character(len=32) :: buffer
+
+        write (buffer, '(i0)') n
+        text = trim(buffer)
+    end function itoa
+
+    logical function assumed_size_dims(dims) result(found)
+        character(len=*), intent(in) :: dims
+        integer :: comma
+        character(len=:), allocatable :: last
+
+        comma = index(trim(dims), ",", back=.true.)
+        if (comma > 0) then
+            last = trim(dims(comma + 1:))
+        else
+            last = trim(dims)
+        end if
+        found = last == "*"
+    end function assumed_size_dims
 
     subroutine check_reverse_allocation_sources(primal, active, status)
         !! The one supported active SOURCE= copy has a fixed concrete source
