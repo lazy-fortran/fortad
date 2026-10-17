@@ -1,6 +1,7 @@
 module fortad_lower_body
     !! Lower procedure metadata and delegate bodies to a separate unit.
-    use fortfront, only: ast_arena_t, program_unit_query_t
+    use fortfront_ast, only: ast_arena_t
+    use fortfront_compiler, only: program_unit_query_t
     use fortad_ir, only: fad_proc_t, fad_decl_t
     use fortad_lower_statements, only: lower_body, inherit_module_uses
     use fortad_lower_types, only: lower_status_t

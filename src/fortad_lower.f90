@@ -5,12 +5,13 @@ module fortad_lower
     !! fortad cannot differentiate correctly is reported by name and line, never
     !! silently approximated. A named refusal is a bug report; a silent fallback
     !! is a wrong derivative.
-    use fortfront, only: compile_frontend_from_string, &
+    use fortfront_compiler, only: compile_frontend_from_string, &
         compiler_frontend_options_t, compiler_frontend_result_t, &
-        ast_arena_t, program_unit_query_t, query_program_unit, &
-        query_declaration, declaration_query_t, binary_op_node, &
-        defined_operator_query_t, query_defined_operator_into, INPUT_MODE_STANDARD
-    use fortfront, only: generic_call_query_t, query_generic_call, &
+        program_unit_query_t, query_program_unit, query_declaration, &
+        declaration_query_t, defined_operator_query_t, query_defined_operator_into, &
+        INPUT_MODE_STANDARD
+    use fortfront_ast, only: ast_arena_t, binary_op_node
+    use fortfront_compiler, only: generic_call_query_t, query_generic_call, &
         type_bound_call_query_t, query_type_bound_call
     use fortad_call_boundaries, only: has_same_file_call, &
         validate_direct_call_boundaries
@@ -589,7 +590,7 @@ contains
         !! Active mutable global state has no explicit ownership contract.
         !! Refuse it before lowering rather than treating it as an implicit
         !! constant or silently producing a derivative of the wrong function.
-        use fortfront, only: ast_arena_t
+        use fortfront_ast, only: ast_arena_t
         type(ast_arena_t), intent(in) :: arena
         type(global_reference_query_t), intent(in) :: reference
         type(lower_status_t), intent(out) :: status
