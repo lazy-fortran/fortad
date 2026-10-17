@@ -68,7 +68,8 @@ contains
             if (.not. direct_same_file_call(arena, i, callee)) cycle
             is_subroutine = trim(arena%entries(i)%node_type) == "subroutine_call"
             caller = enclosing_procedure(arena, i)
-            if (caller <= 0 .or. .not. reachable(caller)) cycle
+            if (caller <= 0) cycle
+            if (.not. reachable(caller)) cycle
             query = query_call_arguments(arena, i)
             if (.not. query%found) then
                 ! Function expressions already have an established FortAD
