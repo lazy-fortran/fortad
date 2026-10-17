@@ -1829,6 +1829,34 @@ contains
                     out = a
                     return
                 end if
+                ! Small-power expansion: `x*x`, never `x**2`.  A Fortran
+                ! compiler may lower `**` with an integer exponent to a call
+                ! or a loop, while `x*x` is one multiply, and on every target
+                ! here a real power costs more than the multiplies it
+                ! replaces.  Differentiation produces integer powers
+                ! constantly - every `b**2` denominator and every `a**(b-1)`
+                ! in a power rule - so leaving them as `**` taxes almost every
+                ! derivative.  Only positive integer exponents 2..4 expand;
+                ! `x**5` is already cheaper as a power, and a negative or
+                ! fractional exponent is a reciprocal or a root and must stay.
+                if (is_literal(p, b, 2.0_dp)) then
+                    out = p%add_expr(expr_binop("*", a, a))
+                    return
+                else if (is_literal(p, b, 3.0_dp)) then
+                    block
+                        integer :: sq
+                        sq = p%add_expr(expr_binop("*", a, a))
+                        out = p%add_expr(expr_binop("*", sq, a))
+                    end block
+                    return
+                else if (is_literal(p, b, 4.0_dp)) then
+                    block
+                        integer :: sq
+                        sq = p%add_expr(expr_binop("*", a, a))
+                        out = p%add_expr(expr_binop("*", sq, sq))
+                    end block
+                    return
+                end if
             end select
         end if
 
