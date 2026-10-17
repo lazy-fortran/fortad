@@ -6619,17 +6619,19 @@ contains
             ! a primal name.  Match its proven shape to a primal array so a
             ! compound seed/partial product gets an array temporary.
             adjoint_di = adjoint%decl_index(adjoint%exprs(idx)%text)
-            if (adjoint_di > 0 .and. adjoint%decls(adjoint_di)%is_array) then
-                do i = 1, primal%n_decls
-                    if (.not. primal%decls(i)%is_array) cycle
-                    if (allocated(adjoint%decls(adjoint_di)%dims) .and. &
-                        allocated(primal%decls(i)%dims)) then
-                        if (trim(adjoint%decls(adjoint_di)%dims) /= &
-                            trim(primal%decls(i)%dims)) cycle
-                    end if
-                    found = i
-                    return
-                end do
+            if (adjoint_di > 0) then
+                if (adjoint%decls(adjoint_di)%is_array) then
+                    do i = 1, primal%n_decls
+                        if (.not. primal%decls(i)%is_array) cycle
+                        if (allocated(adjoint%decls(adjoint_di)%dims) .and. &
+                            allocated(primal%decls(i)%dims)) then
+                            if (trim(adjoint%decls(adjoint_di)%dims) /= &
+                                trim(primal%decls(i)%dims)) cycle
+                        end if
+                        found = i
+                        return
+                    end do
+                end if
             end if
         case (FAD_INDEX)
             call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
