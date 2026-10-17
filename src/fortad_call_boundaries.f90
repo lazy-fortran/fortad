@@ -53,7 +53,8 @@ contains
                 if (.not. arena%has_node_at(i)) cycle
                 if (.not. direct_same_file_call(arena, i, callee)) cycle
                 caller = enclosing_procedure(arena, i)
-                if (caller <= 0 .or. .not. reachable(caller)) cycle
+                if (caller <= 0) cycle
+                if (.not. reachable(caller)) cycle
                 if (.not. reachable(callee)) then
                     reachable(callee) = .true.
                     changed = .true.
