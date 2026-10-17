@@ -1,8 +1,10 @@
 module fortad_call_boundaries
     !! Semantic boundary for the bounded direct same-file call slice.
-    use fortfront, only: ast_arena_t, program_unit_query_t, query_program_unit, &
-        call_arguments_query_t, query_call_arguments, call_or_subscript_node, &
-        subroutine_call_node, declaration_query_t, query_declaration
+    use fortfront_ast, only: ast_arena_t, call_or_subscript_node, &
+        subroutine_call_node
+    use fortfront_compiler, only: program_unit_query_t, query_program_unit, &
+        call_arguments_query_t, query_call_arguments, declaration_query_t, &
+        query_declaration
     use fortad_lower_types, only: lower_status_t
     implicit none
     private

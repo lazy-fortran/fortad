@@ -39,7 +39,7 @@ module fortad
     ! Re-export the compiler-facing facts needed by bounded modern-Fortran
     ! transformers.  These are FortFront queries; FortAD does not rescan the
     ! source or infer duplicate semantic metadata.
-    use fortfront, only: compiler_frontend_options_t, &
+    use fortfront_compiler, only: compiler_frontend_options_t, &
         compiler_frontend_result_t, compile_frontend_from_string, &
         INPUT_MODE_STANDARD, get_node_type_at, declaration_query_t, &
         query_declaration, array_bounds_query_t, query_array_bounds, &

@@ -1,38 +1,34 @@
 module fortad_lower_statements
     !! Lower statement and expression trees from fortfront into fortad IR.
-    use fortfront, only: ast_arena_t, module_node, assignment_node, &
+    use fortfront_ast, only: ast_arena_t, module_node, assignment_node, &
         binary_op_node, identifier_node, literal_node, array_literal_node, &
-        call_or_subscript_node, &
-        declaration_node, do_loop_node, if_node, parameter_declaration_node, &
-        subroutine_call_node, use_statement_node, comment_node, &
-        allocate_statement_node, deallocate_statement_node, &
-        pointer_assignment_node, &
-        return_node, &
-        get_select_type_info, get_type_guard_info, get_declaration_initializer, &
-        get_array_literal_elements, component_access_query_t, &
-        query_component_access, query_derived_type, query_type_binding, &
-        derived_type_query_t, type_binding_query_t, declaration_query_t, &
-        query_declaration, query_program_unit, program_unit_query_t, &
-        binding_hierarchy_query_t, query_type_binding_hierarchy, &
-        generic_call_query_t, query_generic_call, resolved_type_query_t, &
-        query_resolved_type, &
-        defined_operator_query_t, query_defined_operator_into, &
-        call_arguments_query_t, query_call_arguments, &
+        call_or_subscript_node, declaration_node, do_loop_node, if_node, &
+        parameter_declaration_node, subroutine_call_node, use_statement_node, &
+        comment_node, allocate_statement_node, deallocate_statement_node, &
+        pointer_assignment_node, return_node, get_source_line
+    use fortfront_compiler, only: get_select_type_info, get_type_guard_info, &
+        get_declaration_initializer, get_array_literal_elements, &
+        component_access_query_t, query_component_access, query_derived_type, &
+        query_type_binding, derived_type_query_t, type_binding_query_t, &
+        declaration_query_t, query_declaration, query_program_unit, &
+        program_unit_query_t, binding_hierarchy_query_t, &
+        query_type_binding_hierarchy, generic_call_query_t, query_generic_call, &
+        resolved_type_query_t, query_resolved_type, defined_operator_query_t, &
+        query_defined_operator_into, call_arguments_query_t, query_call_arguments, &
         procedure_actual_argument_query_t, query_procedure_actual_argument, &
         procedure_signature_query_t, procedure_dummy_query_t, &
-        procedure_call_target_query_t, query_procedure_call_target, &
-        procedure_reassignment_call_query_t, query_procedure_reassignment_call, &
-        procedure_target_query_t, query_procedure_target, &
         type_bound_call_query_t, query_type_bound_call, &
         select_type_component_dispatch_query_t, &
-        query_select_type_component_dispatch, &
-        select_type_dispatch_query_t, query_select_type_dispatch, &
-        select_type_generic_dispatch_query_t, &
-        select_type_generic_candidate_query_t, &
-        query_select_type_generic_dispatch, &
-        procedure_callback_flow_query_t, query_procedure_callback_flow, &
-        get_source_line, TREAL
-    use ast_nodes_control, only: associate_node
+        query_select_type_component_dispatch, select_type_dispatch_query_t, &
+        query_select_type_dispatch, select_type_generic_dispatch_query_t, &
+        select_type_generic_candidate_query_t, query_select_type_generic_dispatch, &
+        TREAL
+    use frontend_compiler_queries, only: procedure_call_target_query_t, &
+        query_procedure_call_target, procedure_reassignment_call_query_t, &
+        query_procedure_reassignment_call, procedure_target_query_t, &
+        query_procedure_target, procedure_callback_flow_query_t, &
+        query_procedure_callback_flow
+    use ast_nodes_associate, only: associate_node
     use ast_nodes_bounds, only: array_slice_node
     use ast_nodes_misc, only: import_statement_node
     use frontend_compiler_control_queries, only: control_statement_query_t, &

@@ -16,7 +16,7 @@ program fortad_cli
     use fortad_ir, only: fad_proc_t, fad_base_name, FAD_ASSIGN, FAD_CALL_STMT, &
         FAD_INDEX, FAD_INTENT_OUT, FAD_VAR
     use fortad_lower, only: lower_source, lower_status_t
-    use fortfront, only: is_fixed_form_file, normalize_fixed_form_source_text
+    use frontend_core, only: is_fixed_form_file, normalize_fixed_form_source_text
     implicit none
 
     character(len=:), allocatable :: input_path, output_path, indep_list, dep_name
