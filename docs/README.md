@@ -9,7 +9,10 @@ defaults.
 
 | Document | Contents |
 | --- | --- |
-| [Main README](../README.md) | build, current support, limits, CLI summary, and repository map |
+| [Main README](../README.md) | overview, build, and a first example |
+| [Command-line interface](cli.md) | compact forms, argument inference, Tapenade-compatible options |
+| [Supported Fortran and limits](support.md) | capability table, scope, and refusal boundaries |
+| [Performance](performance.md) | measured comparisons and where they are recorded |
 | [Product scope](design/product-scope.md) | modern Fortran target, abstraction model, and deliberate refusal boundaries |
 | [Rosenbrock example](../example/README.md) | generate, compile, and check a reverse-mode derivative |
 | [Derivative products](products.md) | first-order products, HVPs, UQ, sparse recovery, checkpointing, and Taylor mode |
@@ -35,7 +38,7 @@ independent oracle.
 | --- | --- | --- |
 | [IR decision](design/ir.md) | dedicated fortad IR below fortfront's typed AST | [`test_forward_oracle.f90`](../test/test_forward_oracle.f90) and the other generation oracles |
 | [Frontend coverage](design/coverage.md) | measured fortfront acceptance of the fortnum corpus | evidence described in the record |
-| [P0.8 decision](design/go-no-go.md) | rejected universal performance thesis and revised measurement policy | external `fortad-bench` record |
+| [Performance gate](design/go-no-go.md) | VMEC++ comparison that ruled out a general performance claim, and the revised measurement policy | external `fortad-bench` record |
 | [BLAS/LAPACK rules](design/blas-lapack-rules.md) | opt-in `dgesv` tangent and adjoint | [`test_lapack_rule_oracle.f90`](../test/test_lapack_rule_oracle.f90) |
 | [Implicit roots](design/implicit-root-rules.md) | caller-supplied products at a converged root | [`test_implicit_root_rule_oracle.f90`](../test/test_implicit_root_rule_oracle.f90) |
 | [Fixed points](design/fixed-point-rules.md) | Christianson two-phase rule boundary | [`test_fixed_point_rule_oracle.f90`](../test/test_fixed_point_rule_oracle.f90) |
@@ -63,8 +66,8 @@ independent oracle.
 ## Research record
 
 The [research dossier](dossier.md) records the hypotheses that preceded the
-P0.8 gate. It is historical analysis, not a current capability statement. The
-paper notes retain the implementation lessons extracted during Phase 0:
+performance gate. It is historical analysis, not a current capability statement.
+The paper notes summarise implementation lessons from the AD literature:
 
 - [Giering and Kaminski 1998](notes/giering-kaminski-1998-recipes.md)
 - [Hascoet, Naumann, and Pascual 2005](notes/hascoet-naumann-pascual-2005-tbr.md)
