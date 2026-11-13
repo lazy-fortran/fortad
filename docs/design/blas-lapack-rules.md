@@ -64,7 +64,7 @@ when the call is followed by other uses of the right-hand side.
 ## Evidence and decision
 
 `test/test_lapack_rule_oracle.f90` generates both modes, links the result to
-real LAPACK/BLAS on the TU Graz `acluster`, checks a complete-solve central
+LAPACK/BLAS in the recorded compiler environment, checks a complete-solve central
 finite difference for the JVP, and checks the VJP identity independently.
 
 The performance comparison is recorded in

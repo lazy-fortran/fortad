@@ -1047,7 +1047,8 @@ contains
         if (idx <= 0 .or. idx > primal%n_exprs) return
         if (primal%exprs(idx)%kind /= FAD_VAR) return
         di = primal%decl_index_of(primal%exprs(idx)%text)
-        if (di <= 0 .or. primal%decls(di)%is_polymorphic) di = 0
+        if (di <= 0) return
+        if (primal%decls(di)%is_polymorphic) di = 0
     end function concrete_source_decl
 
     logical function source_initializer_supported(primal, source_di) result(ok)
@@ -3280,6 +3281,7 @@ contains
         character(len=:), allocatable :: source_alias
         character(len=32) :: source_number
         integer :: i, percent, ignored, owner_di
+        logical :: array_owner
 
         percent = index(trim(lhs), "%")
         if (percent <= 0) return
@@ -3329,10 +3331,13 @@ contains
                 ! after END SELECT is invalid because the declared base type
                 ! has no knowledge of the leaf component.
                 owner_di = primal%decl_index(trim(allocations(i)%owner))
+                array_owner = .false.
+                if (owner_di > 0) then
+                    array_owner = primal%decls(owner_di)%is_array .and. &
+                        primal%decls(owner_di)%is_polymorphic
+                end if
                 if (allocated(allocations(i)%selected_owner) .and. &
-                    allocated(allocations(i)%source_type) .and. owner_di > 0 .and. &
-                    primal%decls(owner_di)%is_array .and. &
-                    primal%decls(owner_di)%is_polymorphic) then
+                    allocated(allocations(i)%source_type) .and. array_owner) then
                     write (source_number, '(i0)') i
                     source_alias = "fad_source_owner_b_"//trim(source_number)
                     call reset_reverse_statement(s)
@@ -4824,7 +4829,8 @@ contains
         found = .false.
         base = fad_base_name(text)
         di = primal%decl_index(base)
-        if (di <= 0 .or. .not. primal%decls(di)%is_select_alias) return
+        if (di <= 0) return
+        if (.not. primal%decls(di)%is_select_alias) return
         if (.not. allocated(primal%decls(di)%alias_target)) return
         target = trim(primal%decls(di)%alias_target)
         if (index(target, "%") <= 0) return
@@ -5002,10 +5008,13 @@ contains
                     return
                 end if
                 base_di = primal%decl_index(fad_base_name(selector))
-                if (base_di <= 0 .or. primal%decls(base_di)%is_polymorphic .or. &
-                    primal%decls(base_di)%is_allocatable .or. &
-                    primal%decls(base_di)%is_associate_alias .or. &
-                    primal%decls(base_di)%is_select_alias) then
+                if (base_di > 0) then
+                    if (primal%decls(base_di)%is_polymorphic .or. &
+                        primal%decls(base_di)%is_allocatable .or. &
+                        primal%decls(base_di)%is_associate_alias .or. &
+                        primal%decls(base_di)%is_select_alias) base_di = 0
+                end if
+                if (base_di <= 0) then
                     status%ok = .false.
                     status%message = "reverse mode: active nested polymorphic "// &
                         "component path '"//trim(selector)//"' has unresolved owner alias or ownership"
@@ -5500,9 +5509,11 @@ contains
             if (index(trim(primal%exprs(i)%text), "%") <= 0) cycle
             canonical = resolve_component_path(primal, primal%exprs(i)%text)
             di = primal%decl_index(fad_base_name(canonical))
-            if (di > 0 .and. active(di)) then
-                found = .true.
-                return
+            if (di > 0) then
+                if (active(di)) then
+                    found = .true.
+                    return
+                end if
             end if
             if (nested_polymorphic_component_active(primal, canonical, active)) then
                 found = .true.
@@ -5549,8 +5560,8 @@ contains
             if (primal%stmts(i)%allocation_source <= 0) cycle
             source_di = concrete_source_decl(primal, &
                 primal%stmts(i)%allocation_source)
-            found = (source_di > 0 .and. active(source_di)) .or. &
-                reads_any(primal, primal%stmts(i)%allocation_source, active)
+            found = reads_any(primal, primal%stmts(i)%allocation_source, active)
+            if (source_di > 0) found = found .or. active(source_di)
             return
         end do
     end function nested_polymorphic_component_active
@@ -6658,9 +6669,11 @@ contains
                 if (.not. primal%decls(di)%is_array) cycle
                 call ssa_base_of(ssa, adjoint%exprs(idx)%text, base)
                 di = primal%decl_index_of(base)
-                if (di > 0 .and. primal%decls(di)%is_array) then
-                    found = di
-                    return
+                if (di > 0) then
+                    if (primal%decls(di)%is_array) then
+                        found = di
+                        return
+                    end if
                 end if
             end do
         end select
@@ -6947,7 +6960,8 @@ contains
             if (primal%stmts(i)%allocation_source <= 0) return
             source_di = concrete_source_decl(primal, &
                 primal%stmts(i)%allocation_source)
-            found = source_di > 0 .and. active(source_di)
+            found = .false.
+            if (source_di > 0) found = active(source_di)
             if (.not. found) found = reads_any(primal, &
                 primal%stmts(i)%allocation_source, active)
             return

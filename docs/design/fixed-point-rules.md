@@ -45,7 +45,7 @@ because an opaque solver does not reveal its map or its convergence domain.
 fortnum, registers both callbacks, and links the generated JVP/VJP to an
 opaque converged primal. The driver checks a directional derivative against
 fresh complete fixed-point solves, the VJP adjoint identity, and both VJP
-components. The focused oracle passes on the TU Graz `acluster`.
+components. The focused oracle passes in the recorded compiler environment.
 
 The existing TU Graz Ryzen 9 fixed-point records provide the performance
 context. Against fresh complete re-solves, the implicit tangent is 97.8032 ns

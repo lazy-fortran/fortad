@@ -1,9 +1,14 @@
 # Documentation
 
-Start with the [Rosenbrock example](../example/README.md) for a complete CLI
+Start with the [Rosenbrock example](../example/README.md) for a complete command-line
 run. Use the [product guide](products.md) to choose a derivative object, then
 consult the [public API reference](design/public-api.md) for exact calls and
 defaults.
+
+JVP means Jacobian-vector product; VJP means vector-Jacobian product. HVP means
+Hessian-vector product, UQ means uncertainty quantification, and CLI means
+command-line interface. The internal IR is an intermediate representation;
+fortfront supplies the typed abstract syntax tree (AST).
 
 ## User guides
 
@@ -52,10 +57,11 @@ independent oracle.
 | [Source forms](design/source-forms.md) | fixed-form file normalization and legacy procedure purity | [`test_tapenade_fixed_form_oracle.f90`](../test/test_tapenade_fixed_form_oracle.f90) |
 | [Assumed-rank `SELECT RANK`](design/assumed-rank-select-rank.md) | fixed direct `RANK (1)` JVP/VJP path with descriptor, alias, and dispatch refusals | [`test_assumed_rank_select_rank_oracle.f90`](../test/test_assumed_rank_select_rank_oracle.f90) |
 
-## Planning and evidence
+## Status and evidence
 
-- [`ROADMAP.md`](../ROADMAP.md) contains the completed phase checklist, current
-  downstream-integration work, and open defects.
+- [Status and verification](status.md) distinguishes the tested interfaces
+  from experimental directions; [open issues](https://github.com/lazy-fortran/fortad/issues)
+  track remaining work.
 - [`PROVENANCE.md`](../PROVENANCE.md) records the publication behind each
   implemented algorithm.
 - [`LEGAL.md`](../LEGAL.md) controls how material from the external study corpus
@@ -65,8 +71,6 @@ independent oracle.
 
 ## Research record
 
-The [research dossier](dossier.md) records the hypotheses that preceded the
-performance gate. It is historical analysis, not a current capability statement.
 The paper notes summarise implementation lessons from the AD literature:
 
 - [Giering and Kaminski 1998](notes/giering-kaminski-1998-recipes.md)
