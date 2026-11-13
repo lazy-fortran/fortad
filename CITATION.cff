@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "Please cite the version used for your work."
+type: software
+title: "fortad: source-transformation automatic differentiation for Fortran"
+authors:
+  - family-names: Albert
+    given-names: Christopher
+repository-code: "https://github.com/lazy-fortran/fortad"
+url: "https://github.com/lazy-fortran/fortad"
+license: MIT
+abstract: >-
+  Fortran source transformation for forward and reverse derivative products,
+  Hessian-vector products, sparse derivatives and bounded Taylor propagation.

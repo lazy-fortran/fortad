@@ -363,7 +363,11 @@ contains
                 return
             end if
             di = p%decl_index(target)
-            if (di <= 0 .or. .not. scalar_safe_decl(p%decls(di))) then
+            if (di <= 0) then
+                allocate (accumulators(0), terms(0))
+                return
+            end if
+            if (.not. scalar_safe_decl(p%decls(di))) then
                 allocate (accumulators(0), terms(0))
                 return
             end if

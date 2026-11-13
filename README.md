@@ -4,12 +4,13 @@
 It reads Fortran procedures and writes ordinary Fortran source for their
 derivatives, with no runtime tape library or compiler plug-in.
 
-Status: version 0.1.0, research code under active development. It handles a
-defined subset of Fortran and refuses everything else with a named diagnostic.
+Status: version 0.1.0, research code under active development. Supported input
+and refusal boundaries are documented below.
 
 ## Features
 
-- Forward mode (JVP), reverse mode (VJP) and Hessian-vector products
+- Forward Jacobian-vector products (JVP), reverse vector-Jacobian products
+  (VJP) and Hessian-vector products
   (forward-over-reverse), as a command-line tool and as a Fortran library.
 - Scalars, arrays, loops, branches, reductions and same-file procedure calls;
   forward vector mode for several directions at once.
@@ -27,15 +28,12 @@ The full capability list and the deliberate refusal boundaries are in
 
 ## Build
 
-`fpm.toml` uses sibling path dependencies on
+`fpm.toml` pins
 [fortfront](https://github.com/lazy-fortran/fortfront) and
-[fortgen](https://github.com/lazy-fortran/fortgen). Clone all three repositories
-into the same parent directory:
+[fortgen](https://github.com/lazy-fortran/fortgen) to immutable revisions. The
+build downloads them automatically:
 
 ```console
-$ mkdir lazy-fortran && cd lazy-fortran
-$ git clone https://github.com/lazy-fortran/fortfront.git
-$ git clone https://github.com/lazy-fortran/fortgen.git
 $ git clone https://github.com/lazy-fortran/fortad.git
 $ cd fortad
 $ fo check
@@ -61,10 +59,10 @@ compile it and check the gradient against the analytic result.
 For a file with one procedure, the inputs and outputs are inferred:
 
 ```console
-$ fortad kernel.f90                 # forward mode, writes kernel_jvp.f90
-$ fortad vjp kernel.f90             # reverse mode
-$ fortad all kernel.f90             # both
-$ fortad check kernel.f90           # parse and re-emit only
+$ fo exec fortad kernel.f90         # forward mode, writes kernel_jvp.f90
+$ fo exec fortad vjp kernel.f90     # reverse mode
+$ fo exec fortad all kernel.f90     # both
+$ fo exec fortad check kernel.f90   # parse and re-emit only
 ```
 
 From Fortran:
@@ -90,7 +88,8 @@ and return the generated source in `result%code`.
   uncertainty propagation, sparse derivatives, checkpointing, Taylor mode
 - [Public API reference](docs/design/public-api.md)
 - [Performance](docs/performance.md)
-- [Roadmap and open defects](ROADMAP.md), [algorithm provenance](PROVENANCE.md)
+- [Open directions](https://github.com/lazy-fortran/fortad/issues),
+  [algorithm provenance](PROVENANCE.md)
 
 ## Related projects
 

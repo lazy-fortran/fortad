@@ -5,8 +5,8 @@ author = "krystophny"
 license = "MIT"
 
 [dependencies]
-fortfront = { path = "../fortfront" }
-fortgen = { path = "../fortgen" }
+fortfront = { git = "https://github.com/lazy-fortran/fortfront.git", rev = "a0a6e0ede1ff164e74e18b02eb6c1c4d23550817" }
+fortgen = { git = "https://github.com/lazy-fortran/fortgen.git", rev = "6212f007d5b1f7e900244acc07ba793654ed08c0" }
 
 [build]
 auto-examples = false
