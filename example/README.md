@@ -22,8 +22,9 @@ The driver is an independent behavioral check. It compares the generated VJP
 with the closed-form Rosenbrock gradient instead of comparing fortad output
 with another AD implementation.
 
-Change `--mode reverse` to `--mode forward` for a JVP. Forward mode adds an
-`x_d` input seed and an `f_d` output. Use `--mode hessian` for a
+Change the `vjp` subcommand to `jvp` for a Jacobian-vector product (JVP).
+Forward mode adds an
+`x_d` input seed and an `f_d` output. Use the `hvp` subcommand for a
 forward-over-reverse Hessian-vector product. The generated argument list is the
 source of truth for each call, so inspect
 `build/example/rosenbrock_ad.f90` before writing a caller.

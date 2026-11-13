@@ -46,14 +46,14 @@ F(x,p) = x^3 + p1*x - p2
 and links the generated JVP and VJP to an opaque twelve-step Newton primal.
 The driver compares against fresh complete root solves by central finite
 differences, checks the VJP adjoint identity, and checks both VJP components.
-The test passes on the TU Graz `acluster`.
+The test passes in the recorded compiler environment.
 
 The existing TU Graz Ryzen 9 scalar-root fixture is the Enzyme comparison:
 Enzyme differentiates the twelve Newton steps. At one root product it measures
 2.297330 ns for the analytical implicit JVP versus 115.820600 ns for Enzyme
 (50.4153x), and 14.117010 ns for the analytical implicit VJP versus
 158.803910 ns for Enzyme (11.2491x). The fortad oracle itself runs with
-gfortran on `acluster`. The separate Enzyme fixture uses Flang/LLVM 22.1.8 with
+gfortran in that environment. The separate Enzyme fixture uses Flang/LLVM 22.1.8 with
 Enzyme 22.
 
 Support covers a scalar root or a root with a fixed-shaped state through

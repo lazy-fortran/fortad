@@ -35,7 +35,7 @@ Their real actual adjoints are declared and cleared at the call boundary.
 The oracle links the generated composite kernel to independent support
 implementations and checks the complete composite output by central finite
 differences, the VJP adjoint identity, and component finite differences. It
-passes on the TU Graz `acluster`.
+passes in the recorded compiler environment.
 
 The committed TU Graz benchmark corpus supplies the performance context.
 Length-8 FFT JVP/VJP products are 177.7106/169.9557 ns. Four-direction fixed

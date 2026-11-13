@@ -466,10 +466,13 @@ contains
                     return
                 end if
                 base_di = primal%decl_index(fad_base_name(selector))
-                if (base_di <= 0 .or. primal%decls(base_di)%is_polymorphic .or. &
-                    primal%decls(base_di)%is_allocatable .or. &
-                    primal%decls(base_di)%is_associate_alias .or. &
-                    primal%decls(base_di)%is_select_alias) then
+                if (base_di > 0) then
+                    if (primal%decls(base_di)%is_polymorphic .or. &
+                        primal%decls(base_di)%is_allocatable .or. &
+                        primal%decls(base_di)%is_associate_alias .or. &
+                        primal%decls(base_di)%is_select_alias) base_di = 0
+                end if
+                if (base_di <= 0) then
                     status%ok = .false.
                     status%message = "forward mode: active nested polymorphic "// &
                         "component path '"//trim(selector)//"' has unresolved owner alias or ownership"
@@ -893,7 +896,8 @@ contains
         if (idx <= 0 .or. idx > primal%n_exprs) return
         if (primal%exprs(idx)%kind /= FAD_VAR) return
         di = primal%decl_index_of(primal%exprs(idx)%text)
-        if (di <= 0 .or. primal%decls(di)%is_polymorphic) di = 0
+        if (di <= 0) return
+        if (primal%decls(di)%is_polymorphic) di = 0
     end function fixed_source_decl
 
     logical function allocation_arg_is_owner(primal, idx, owner) result(found)
