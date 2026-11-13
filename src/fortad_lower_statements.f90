@@ -1241,8 +1241,12 @@ contains
                 "only real scalar selectors are supported in this slice", status)
             return
         end if
-        if (selector_idx <= 0 .or. selector_idx > arena%size .or. &
-            .not. arena%has_node_at(selector_idx)) then
+        if (selector_idx <= 0 .or. selector_idx > arena%size) then
+            call refuse_associate(associate_line, &
+                "selector is missing a direct identifier", status)
+            return
+        end if
+        if (.not. arena%has_node_at(selector_idx)) then
             call refuse_associate(associate_line, &
                 "selector is missing a direct identifier", status)
             return
@@ -1659,13 +1663,14 @@ contains
             name = trim(node%name)
             type is (pointer_assignment_node)
             expression = node%target_index
-            if (node%pointer_index > 0 .and. &
-                arena%has_node_at(node%pointer_index)) then
-                select type (alias => arena%entries(node%pointer_index)%node)
+            if (node%pointer_index > 0) then
+                if (arena%has_node_at(node%pointer_index)) then
+                    select type (alias => arena%entries(node%pointer_index)%node)
                     type is (identifier_node)
-                    name = trim(alias%name)
-                class default
-                end select
+                        name = trim(alias%name)
+                    class default
+                    end select
+                end if
             end if
         class default
         end select
@@ -3275,7 +3280,7 @@ contains
         end do
     end function lower_callback_text
 
-    subroutine lower_call_arguments(arena, arg_indices, proc, args, names, status)
+    recursive subroutine lower_call_arguments(arena, arg_indices, proc, args, names, status)
         !! Lower actuals while retaining the formal name of keyword actuals.
         !! FortFront represents ``f(x=1)`` as an assignment node, so lowering
         !! only its RHS would silently turn a reordered call back into a
@@ -3356,8 +3361,12 @@ contains
                         ! list an assignment node is nevertheless unambiguously
                         ! the Fortran keyword form.
                         if (n%target_index <= 0 .or. &
-                            n%target_index > arena%size .or. &
-                            .not. arena%has_node_at(n%target_index)) then
+                            n%target_index > arena%size) then
+                            status%ok = .false.
+                            status%message = "keyword actual has no formal name"
+                            return
+                        end if
+                        if (.not. arena%has_node_at(n%target_index)) then
                             status%ok = .false.
                             status%message = "keyword actual has no formal name"
                             return
@@ -4832,7 +4841,8 @@ contains
         select type (node => arena%entries(actual_index)%node)
             type is (identifier_node)
             declaration_index = proc%decl_index(node%name)
-            if (declaration_index <= 0 .or. proc%decls(declaration_index)%is_array) return
+            if (declaration_index <= 0) return
+            if (proc%decls(declaration_index)%is_array) return
             if (.not. allocated(proc%decls(declaration_index)%type_name)) return
             type_name = lower_ascii(trim(proc%decls(declaration_index)%type_name))
             found = type_name == "real(8)" .or. type_name == "real(kind=8)"

@@ -2,7 +2,7 @@
 
 ## Measurement
 
-The corpus measurement ran on 2026-08-05 on `acluster`, an AMD EPYC 7282
+The corpus measurement ran on 2026-08-05 on an AMD EPYC 7282
 machine. The corpus was the 161 Fortran source files under `fortnum/src` at
 fortnum commit `5bfdde8b8400486d33de73f22e5b4e31d7d86687`. The frontend probe
 came from fortfront commit `896fe8d5fbb0d4dc4ee9113510de5c8acef92021` and was
