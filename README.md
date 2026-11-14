@@ -1,5 +1,7 @@
 # fortad
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24223533.svg)](https://doi.org/10.5281/zenodo.24223533)
+
 `fortad` is a source-transformation automatic differentiation (AD) tool for Fortran.
 It reads Fortran procedures and writes ordinary Fortran source for their
 derivatives, with no runtime tape library or compiler plug-in.
@@ -104,3 +106,11 @@ and return the generated source in `result%code`.
 
 MIT. See [LICENSE](LICENSE). fortad claims no copyright in the derivative source it
 generates and adds no license condition to it.
+
+## Citation
+
+Cite fortad through its Zenodo record,
+[doi:10.5281/zenodo.24223533](https://doi.org/10.5281/zenodo.24223533), which
+always resolves to the latest release; release 0.2.0 is
+[doi:10.5281/zenodo.24223534](https://doi.org/10.5281/zenodo.24223534).
+`CITATION.cff` holds the full citation metadata.
