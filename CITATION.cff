@@ -11,3 +11,5 @@ license: MIT
 abstract: >-
   Fortran source transformation for forward and reverse derivative products,
   Hessian-vector products, sparse derivatives and bounded Taylor propagation.
+version: "0.2.0"
+date-released: "2026-11-14"

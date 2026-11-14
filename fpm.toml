@@ -1,5 +1,5 @@
 name = "fortad"
-version = "0.1.0"
+version = "0.2.0"
 description = "Source-transformation automatic differentiation for Fortran"
 author = "krystophny"
 license = "MIT"

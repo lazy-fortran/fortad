@@ -1,7 +1,6 @@
 # Changelog
 
-## Unreleased
-
+## 0.2.0 (2026-11-14)
 - Pin the parser and source-generation dependencies so a single checkout builds
   without sibling repositories.
 - Guard declaration lookups before indexing and allow recursive lowering of
